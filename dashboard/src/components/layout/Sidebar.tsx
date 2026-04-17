@@ -1,0 +1,55 @@
+import { NavLink } from "react-router-dom"
+import {
+  Activity as ActivityIcon,
+  Apple,
+  Compass,
+  Dumbbell,
+  Heart,
+  Home,
+  Moon,
+  PlusCircle,
+  Scale,
+} from "lucide-react"
+import { cn } from "@/lib/utils"
+
+const navItems = [
+  { to: "/", label: "Home", icon: Home, end: true },
+  { to: "/activity", label: "Attivita", icon: ActivityIcon },
+  { to: "/vitals", label: "Vitali", icon: Heart },
+  { to: "/body", label: "Corpo", icon: Scale },
+  { to: "/sleep", label: "Sonno", icon: Moon },
+  { to: "/workouts", label: "Workout", icon: Dumbbell },
+  { to: "/nutrition", label: "Nutrizione", icon: Apple },
+  { to: "/explore", label: "Esplora", icon: Compass },
+  { to: "/insert", label: "Inserisci", icon: PlusCircle },
+]
+
+export default function Sidebar() {
+  return (
+    <aside className="hidden md:flex w-64 shrink-0 border-r bg-card flex-col">
+      <div className="h-14 px-6 flex items-center border-b">
+        <h1 className="text-lg font-semibold">Ealth Dashboard</h1>
+      </div>
+      <nav className="flex-1 p-3 space-y-1">
+        {navItems.map(item => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                isActive
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              )
+            }
+          >
+            <item.icon className="h-4 w-4" />
+            {item.label}
+          </NavLink>
+        ))}
+      </nav>
+    </aside>
+  )
+}

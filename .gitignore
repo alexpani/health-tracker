@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+*.swp
+
+# Xcode
+ios/HealthTracker/HealthTracker.xcodeproj/xcuserdata/
+ios/HealthTracker/HealthTracker.xcodeproj/project.xcworkspace/xcuserdata/
+DerivedData/
+*.xcarchive
+*.ipa
+
+# Docker
+.env
+
+# PostgreSQL data (if local)
+pgdata/

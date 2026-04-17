@@ -1,0 +1,10 @@
+services:
+  dashboard:
+    build:
+      context: .
+      args:
+        VITE_API_URL: http://192.168.68.166:8000
+    container_name: ealth-dashboard
+    ports:
+      - "80:80"
+    restart: unless-stopped

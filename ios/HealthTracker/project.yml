@@ -1,0 +1,23 @@
+name: HealthTracker
+options:
+  bundleIdPrefix: com.healthtracker
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+
+targets:
+  HealthTracker:
+    type: application
+    platform: iOS
+    sources:
+      - HealthTracker
+    settings:
+      base:
+        INFOPLIST_FILE: HealthTracker/Info.plist
+        CODE_SIGN_ENTITLEMENTS: HealthTracker/HealthTracker.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.alexpani.healthtracker.app
+        SWIFT_VERSION: "5.9"
+    entitlements:
+      path: HealthTracker/HealthTracker.entitlements
+      properties:
+        com.apple.developer.healthkit: true

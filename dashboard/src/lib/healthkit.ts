@@ -1,0 +1,261 @@
+export type Category = "activity" | "vitals" | "body" | "nutrition" | "other"
+
+export interface TypeMeta {
+  label: string
+  category: Category
+  displayUnit: string
+  sourceUnit: string
+  unitMultiplier: number
+  color: string
+  formatValue?: (v: number) => string
+}
+
+// HK identifier -> metadata for display
+export const TYPE_META: Record<string, TypeMeta> = {
+  // --- Activity ---
+  HKQuantityTypeIdentifierStepCount: {
+    label: "Passi", category: "activity", displayUnit: "passi", sourceUnit: "count", unitMultiplier: 1, color: "#22c55e",
+  },
+  HKQuantityTypeIdentifierDistanceWalkingRunning: {
+    label: "Distanza camminata/corsa", category: "activity", displayUnit: "km", sourceUnit: "m", unitMultiplier: 0.001, color: "#16a34a",
+    formatValue: v => `${(v).toFixed(2)}`,
+  },
+  HKQuantityTypeIdentifierDistanceCycling: {
+    label: "Distanza in bici", category: "activity", displayUnit: "km", sourceUnit: "m", unitMultiplier: 0.001, color: "#0ea5e9",
+    formatValue: v => `${(v).toFixed(2)}`,
+  },
+  HKQuantityTypeIdentifierDistanceSwimming: {
+    label: "Distanza nuoto", category: "activity", displayUnit: "m", sourceUnit: "m", unitMultiplier: 1, color: "#06b6d4",
+  },
+  HKQuantityTypeIdentifierActiveEnergyBurned: {
+    label: "Calorie attive", category: "activity", displayUnit: "kcal", sourceUnit: "kcal", unitMultiplier: 1, color: "#f97316",
+  },
+  HKQuantityTypeIdentifierBasalEnergyBurned: {
+    label: "Calorie basali", category: "activity", displayUnit: "kcal", sourceUnit: "kcal", unitMultiplier: 1, color: "#fb923c",
+  },
+  HKQuantityTypeIdentifierFlightsClimbed: {
+    label: "Piani saliti", category: "activity", displayUnit: "piani", sourceUnit: "count", unitMultiplier: 1, color: "#a855f7",
+  },
+  HKQuantityTypeIdentifierAppleExerciseTime: {
+    label: "Tempo di movimento", category: "activity", displayUnit: "min", sourceUnit: "min", unitMultiplier: 1, color: "#84cc16",
+  },
+  HKQuantityTypeIdentifierAppleStandTime: {
+    label: "Tempo in piedi", category: "activity", displayUnit: "min", sourceUnit: "min", unitMultiplier: 1, color: "#eab308",
+  },
+  HKQuantityTypeIdentifierAppleMoveTime: {
+    label: "Tempo Move", category: "activity", displayUnit: "min", sourceUnit: "min", unitMultiplier: 1, color: "#f59e0b",
+  },
+  HKQuantityTypeIdentifierPushCount: {
+    label: "Spinte (sedia a rotelle)", category: "activity", displayUnit: "conteggio", sourceUnit: "count", unitMultiplier: 1, color: "#10b981",
+  },
+  HKQuantityTypeIdentifierSwimmingStrokeCount: {
+    label: "Bracciate nuoto", category: "activity", displayUnit: "conteggio", sourceUnit: "count", unitMultiplier: 1, color: "#14b8a6",
+  },
+
+  // --- Vitals ---
+  HKQuantityTypeIdentifierHeartRate: {
+    label: "Battito cardiaco", category: "vitals", displayUnit: "bpm", sourceUnit: "count/min", unitMultiplier: 1, color: "#ef4444",
+  },
+  HKQuantityTypeIdentifierRestingHeartRate: {
+    label: "Battito a riposo", category: "vitals", displayUnit: "bpm", sourceUnit: "count/min", unitMultiplier: 1, color: "#dc2626",
+  },
+  HKQuantityTypeIdentifierWalkingHeartRateAverage: {
+    label: "Battito in cammino", category: "vitals", displayUnit: "bpm", sourceUnit: "count/min", unitMultiplier: 1, color: "#f87171",
+  },
+  HKQuantityTypeIdentifierHeartRateVariabilitySDNN: {
+    label: "Variabilita' battito (HRV)", category: "vitals", displayUnit: "ms", sourceUnit: "ms", unitMultiplier: 1, color: "#ec4899",
+  },
+  HKQuantityTypeIdentifierOxygenSaturation: {
+    label: "Saturazione O2", category: "vitals", displayUnit: "%", sourceUnit: "%", unitMultiplier: 100, color: "#3b82f6",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierRespiratoryRate: {
+    label: "Frequenza respiratoria", category: "vitals", displayUnit: "atti/min", sourceUnit: "count/min", unitMultiplier: 1, color: "#6366f1",
+  },
+  HKQuantityTypeIdentifierBodyTemperature: {
+    label: "Temperatura corporea", category: "vitals", displayUnit: "°C", sourceUnit: "degC", unitMultiplier: 1, color: "#f43f5e",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierBloodPressureSystolic: {
+    label: "Pressione sistolica", category: "vitals", displayUnit: "mmHg", sourceUnit: "mmHg", unitMultiplier: 1, color: "#ef4444",
+  },
+  HKQuantityTypeIdentifierBloodPressureDiastolic: {
+    label: "Pressione diastolica", category: "vitals", displayUnit: "mmHg", sourceUnit: "mmHg", unitMultiplier: 1, color: "#3b82f6",
+  },
+  HKQuantityTypeIdentifierBloodGlucose: {
+    label: "Glicemia", category: "vitals", displayUnit: "mg/dL", sourceUnit: "mg/dL", unitMultiplier: 1, color: "#d946ef",
+  },
+
+  // --- Body ---
+  HKQuantityTypeIdentifierBodyMass: {
+    label: "Peso", category: "body", displayUnit: "kg", sourceUnit: "kg", unitMultiplier: 1, color: "#8b5cf6",
+    formatValue: v => `${v.toFixed(2)}`,
+  },
+  HKQuantityTypeIdentifierHeight: {
+    label: "Altezza", category: "body", displayUnit: "cm", sourceUnit: "m", unitMultiplier: 100, color: "#6366f1",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierBodyMassIndex: {
+    label: "BMI", category: "body", displayUnit: "", sourceUnit: "count", unitMultiplier: 1, color: "#a78bfa",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierBodyFatPercentage: {
+    label: "Grasso corporeo", category: "body", displayUnit: "%", sourceUnit: "%", unitMultiplier: 100, color: "#c084fc",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierLeanBodyMass: {
+    label: "Massa magra", category: "body", displayUnit: "kg", sourceUnit: "kg", unitMultiplier: 1, color: "#9333ea",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierWaistCircumference: {
+    label: "Circonferenza vita", category: "body", displayUnit: "cm", sourceUnit: "m", unitMultiplier: 100, color: "#7c3aed",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+
+  // --- Nutrition ---
+  HKQuantityTypeIdentifierDietaryEnergyConsumed: {
+    label: "Calorie ingerite", category: "nutrition", displayUnit: "kcal", sourceUnit: "kcal", unitMultiplier: 1, color: "#f97316",
+  },
+  HKQuantityTypeIdentifierDietaryCarbohydrates: {
+    label: "Carboidrati", category: "nutrition", displayUnit: "g", sourceUnit: "g", unitMultiplier: 1, color: "#eab308",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierDietaryFatTotal: {
+    label: "Grassi", category: "nutrition", displayUnit: "g", sourceUnit: "g", unitMultiplier: 1, color: "#f59e0b",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierDietaryProtein: {
+    label: "Proteine", category: "nutrition", displayUnit: "g", sourceUnit: "g", unitMultiplier: 1, color: "#dc2626",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierDietaryFiber: {
+    label: "Fibre", category: "nutrition", displayUnit: "g", sourceUnit: "g", unitMultiplier: 1, color: "#16a34a",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierDietarySugar: {
+    label: "Zuccheri", category: "nutrition", displayUnit: "g", sourceUnit: "g", unitMultiplier: 1, color: "#db2777",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierDietaryWater: {
+    label: "Acqua", category: "nutrition", displayUnit: "L", sourceUnit: "L", unitMultiplier: 1, color: "#0ea5e9",
+    formatValue: v => `${v.toFixed(2)}`,
+  },
+  HKQuantityTypeIdentifierDietaryCaffeine: {
+    label: "Caffeina", category: "nutrition", displayUnit: "mg", sourceUnit: "g", unitMultiplier: 1000, color: "#713f12",
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+
+  // --- Other ---
+  HKQuantityTypeIdentifierElectrodermalActivity: {
+    label: "Attivita elettrodermica", category: "other", displayUnit: "S", sourceUnit: "S", unitMultiplier: 1, color: "#64748b",
+    formatValue: v => `${v.toFixed(3)}`,
+  },
+  HKQuantityTypeIdentifierNumberOfTimesFallen: {
+    label: "Cadute", category: "other", displayUnit: "eventi", sourceUnit: "count", unitMultiplier: 1, color: "#dc2626",
+  },
+  HKQuantityTypeIdentifierUvExposure: {
+    label: "Esposizione UV", category: "other", displayUnit: "indice", sourceUnit: "count", unitMultiplier: 1, color: "#facc15",
+  },
+}
+
+export function getMeta(type: string): TypeMeta {
+  return (
+    TYPE_META[type] ?? {
+      label: type.replace("HKQuantityTypeIdentifier", "").replace("HKCategoryTypeIdentifier", ""),
+      category: "other",
+      displayUnit: "",
+      sourceUnit: "",
+      unitMultiplier: 1,
+      color: "#6b7280",
+    }
+  )
+}
+
+export const CATEGORIES: Record<Category, { label: string; types: string[] }> = {
+  activity: {
+    label: "Attivita",
+    types: [
+      "HKQuantityTypeIdentifierStepCount",
+      "HKQuantityTypeIdentifierDistanceWalkingRunning",
+      "HKQuantityTypeIdentifierDistanceCycling",
+      "HKQuantityTypeIdentifierDistanceSwimming",
+      "HKQuantityTypeIdentifierActiveEnergyBurned",
+      "HKQuantityTypeIdentifierBasalEnergyBurned",
+      "HKQuantityTypeIdentifierFlightsClimbed",
+      "HKQuantityTypeIdentifierAppleExerciseTime",
+      "HKQuantityTypeIdentifierAppleStandTime",
+    ],
+  },
+  vitals: {
+    label: "Vitali",
+    types: [
+      "HKQuantityTypeIdentifierHeartRate",
+      "HKQuantityTypeIdentifierRestingHeartRate",
+      "HKQuantityTypeIdentifierHeartRateVariabilitySDNN",
+      "HKQuantityTypeIdentifierOxygenSaturation",
+      "HKQuantityTypeIdentifierRespiratoryRate",
+      "HKQuantityTypeIdentifierBodyTemperature",
+      "HKQuantityTypeIdentifierBloodPressureSystolic",
+      "HKQuantityTypeIdentifierBloodPressureDiastolic",
+    ],
+  },
+  body: {
+    label: "Corpo",
+    types: [
+      "HKQuantityTypeIdentifierBodyMass",
+      "HKQuantityTypeIdentifierBodyMassIndex",
+      "HKQuantityTypeIdentifierBodyFatPercentage",
+      "HKQuantityTypeIdentifierLeanBodyMass",
+      "HKQuantityTypeIdentifierHeight",
+      "HKQuantityTypeIdentifierWaistCircumference",
+    ],
+  },
+  nutrition: {
+    label: "Nutrizione",
+    types: [
+      "HKQuantityTypeIdentifierDietaryEnergyConsumed",
+      "HKQuantityTypeIdentifierDietaryCarbohydrates",
+      "HKQuantityTypeIdentifierDietaryFatTotal",
+      "HKQuantityTypeIdentifierDietaryProtein",
+      "HKQuantityTypeIdentifierDietaryFiber",
+      "HKQuantityTypeIdentifierDietarySugar",
+      "HKQuantityTypeIdentifierDietaryWater",
+      "HKQuantityTypeIdentifierDietaryCaffeine",
+    ],
+  },
+  other: { label: "Altro", types: [] },
+}
+
+export const SLEEP_STAGES: Record<number, { label: string; color: string }> = {
+  0: { label: "A letto", color: "#94a3b8" },
+  1: { label: "Addormentato (non specificato)", color: "#64748b" },
+  2: { label: "Sveglio", color: "#f87171" },
+  3: { label: "Core", color: "#60a5fa" },
+  4: { label: "Deep", color: "#1e40af" },
+  5: { label: "REM", color: "#a78bfa" },
+}
+
+export const WORKOUT_NAMES: Record<number, string> = {
+  37: "Corsa",
+  13: "Ciclismo",
+  52: "Camminata",
+  46: "Nuoto",
+  17: "Hiking",
+  57: "Yoga",
+  20: "Strength Training",
+  16: "Cross Training",
+  21: "Ellittica",
+  35: "Rowing",
+  63: "HIIT",
+  60: "Core Training",
+  44: "Pilates",
+  14: "Danza",
+  83: "Cooldown",
+  7: "Calcio",
+  49: "Tennis",
+  5: "Basket",
+}
+
+export function workoutName(type: number): string {
+  return WORKOUT_NAMES[type] ?? `Workout (${type})`
+}
