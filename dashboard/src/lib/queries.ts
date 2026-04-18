@@ -253,7 +253,7 @@ export function useWorkouts(filters: WorkoutFilters = {}) {
         sources: filters.sources,
         distance_min: filters.distance_min,
         distance_max: filters.distance_max,
-        limit: 1000,
+        limit: 10000,  // backend maximum
       }),
     staleTime: 60_000,
   })
