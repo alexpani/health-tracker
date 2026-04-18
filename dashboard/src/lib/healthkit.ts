@@ -473,7 +473,20 @@ export function extractWorkoutMetadata(metadata?: Record<string, unknown> | null
     const match = String(m.HKAverageMETs).match(/[\d.]+/)
     if (match) result.averageMETs = parseFloat(match[0])
   }
-  if (m.HKWeatherTemperature) result.weatherTemperature = String(m.HKWeatherTemperature)
+  if (m.HKWeatherTemperature) {
+    // Apple Health stores HKWeatherTemperature as HKQuantity serialized like
+    // "71 degF" or "13.49 degC". Normalize to Celsius.
+    const raw = String(m.HKWeatherTemperature)
+    const match = raw.match(/(-?\d+(?:\.\d+)?)\s*(degC|degF|°C|°F)?/i)
+    if (match) {
+      let value = parseFloat(match[1])
+      const unit = (match[2] || "").toLowerCase()
+      if (unit.includes("f")) value = (value - 32) * 5 / 9
+      result.weatherTemperature = `${value.toFixed(1)} °C`
+    } else {
+      result.weatherTemperature = raw
+    }
+  }
   if (m.HKWeatherHumidity) result.weatherHumidity = String(m.HKWeatherHumidity)
   if (m.HKWeatherCondition) result.weatherCondition = String(m.HKWeatherCondition)
   if (m.HKWorkoutBrandName) result.brandName = String(m.HKWorkoutBrandName)
