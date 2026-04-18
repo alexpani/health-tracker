@@ -1,5 +1,20 @@
 # CLAUDE.md
 
+## Documentation Policy (read first)
+
+Whenever you introduce **substantial** changes to this project, **update both `CLAUDE.md` and `README.md` in the same change** before committing. Substantial = anything that alters:
+
+- Architecture, infrastructure, or deployment (new services, DBs, ports)
+- Data model (new tables/columns, trigger, migration)
+- Public-facing API endpoints (add/remove/change)
+- iOS app public behavior (new permissions, sync triggers, tabs, user-visible features)
+- Dashboard pages/routes
+- Configurable rules/policies relevant to users
+
+Minor refactors, bug fixes, and internal renames do **not** require doc updates.
+
+When updating, keep the files concise: prefer lists over prose, document the *what* and *why*, not line-by-line details. Always commit docs + code in the same commit.
+
 ## Project Overview
 
 Health Tracker Bridge: a bidirectional bridge between Apple Health and web applications. HealthKit is only accessible from native iOS apps, so this system syncs all health data to a backend database and exposes REST APIs for web apps to consume and write back.
