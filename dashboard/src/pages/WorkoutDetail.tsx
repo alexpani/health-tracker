@@ -13,9 +13,10 @@ import { ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { useSamples, useUpdateWorkoutNotes, useWorkoutByUuid, useWorkoutSplits } from "@/lib/queries"
-import { extractWorkoutMetadata, workoutName } from "@/lib/healthkit"
+import { useSamples, useUpdateWorkout, useWorkoutByUuid, useWorkoutSplits } from "@/lib/queries"
+import { extractWorkoutMetadata, workoutDisplayTitle, workoutName } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { AggregatedPoint, Sample } from "@/lib/types"
 
@@ -51,19 +52,33 @@ export default function WorkoutDetail() {
   const { uuid } = useParams<{ uuid: string }>()
   const { data: workout, isLoading } = useWorkoutByUuid(uuid)
   const { data: splitsData } = useWorkoutSplits(uuid)
-  const updateNotes = useUpdateWorkoutNotes()
+  const update = useUpdateWorkout()
 
+  const [titleDraft, setTitleDraft] = useState("")
   const [notesDraft, setNotesDraft] = useState("")
+  const [titleSaved, setTitleSaved] = useState(false)
   const [notesSaved, setNotesSaved] = useState(false)
 
   useEffect(() => {
+    setTitleDraft(workout?.title ?? "")
     setNotesDraft(workout?.notes ?? "")
-  }, [workout?.notes])
+  }, [workout?.title, workout?.notes])
+
+  const saveTitle = async () => {
+    if (!uuid) return
+    try {
+      await update.mutateAsync({ uuid, patch: { title: titleDraft } })
+      setTitleSaved(true)
+      setTimeout(() => setTitleSaved(false), 2500)
+    } catch (err) {
+      alert("Errore salvataggio titolo: " + (err as Error).message)
+    }
+  }
 
   const saveNotes = async () => {
     if (!uuid) return
     try {
-      await updateNotes.mutateAsync({ uuid, notes: notesDraft })
+      await update.mutateAsync({ uuid, patch: { notes: notesDraft } })
       setNotesSaved(true)
       setTimeout(() => setNotesSaved(false), 2500)
     } catch (err) {
@@ -71,6 +86,7 @@ export default function WorkoutDetail() {
     }
   }
 
+  const titleDirty = (workout?.title ?? "") !== titleDraft
   const notesDirty = (workout?.notes ?? "") !== notesDraft
 
   // Fetch time-series metrics within workout range
@@ -167,7 +183,8 @@ export default function WorkoutDetail() {
   if (isLoading) return <p className="text-muted-foreground">Caricamento...</p>
   if (!workout) return <p className="text-muted-foreground">Workout non trovato</p>
 
-  const name = workoutName(workout.activity_type, workout.metadata)
+  const typeName = workoutName(workout.activity_type, workout.metadata)
+  const heading = workoutDisplayTitle(workout)
   const distanceKm = workout.total_distance ? workout.total_distance / 1000 : null
   const meta = extractWorkoutMetadata(workout.metadata)
 
@@ -181,9 +198,10 @@ export default function WorkoutDetail() {
             <ChevronLeft className="h-4 w-4 mr-1" /> Indietro
           </Button>
         </Link>
-        <h1 className="text-3xl font-bold tracking-tight mt-2">{name}</h1>
+        <h1 className="text-3xl font-bold tracking-tight mt-2">{heading}</h1>
         <p className="text-muted-foreground">
-          {formatDateTime(workout.start_date)} — durata {formatDuration(workout.duration)}
+          {heading !== typeName && <>{typeName} · </>}
+          {formatDateTime(workout.start_date)} · durata {formatDuration(workout.duration)}
         </p>
       </div>
 
@@ -292,6 +310,33 @@ export default function WorkoutDetail() {
       )}
 
       <Card>
+        <CardHeader><CardTitle>Titolo</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          <Input
+            value={titleDraft}
+            onChange={e => setTitleDraft(e.target.value)}
+            placeholder="Titolo personalizzato del workout..."
+            maxLength={200}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={saveTitle}
+              disabled={!titleDirty || update.isPending}
+            >
+              {update.isPending ? "Salvo..." : "Salva"}
+            </Button>
+            {titleDirty && (
+              <Button size="sm" variant="ghost" onClick={() => setTitleDraft(workout.title ?? "")}>
+                Annulla
+              </Button>
+            )}
+            {titleSaved && <span className="text-xs text-green-600">Salvato</span>}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle>Note</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           <Textarea
@@ -304,9 +349,9 @@ export default function WorkoutDetail() {
             <Button
               size="sm"
               onClick={saveNotes}
-              disabled={!notesDirty || updateNotes.isPending}
+              disabled={!notesDirty || update.isPending}
             >
-              {updateNotes.isPending ? "Salvo..." : "Salva"}
+              {update.isPending ? "Salvo..." : "Salva"}
             </Button>
             {notesDirty && (
               <Button size="sm" variant="ghost" onClick={() => setNotesDraft(workout.notes ?? "")}>

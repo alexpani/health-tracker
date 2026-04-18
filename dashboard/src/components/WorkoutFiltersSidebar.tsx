@@ -70,6 +70,8 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
     value.duration_max !== undefined ? 1 : undefined,
     value.pace_min !== undefined ? 1 : undefined,
     value.pace_max !== undefined ? 1 : undefined,
+    value.title_contains,
+    value.notes_contains,
   ].filter(Boolean).length
 
   return (
@@ -159,6 +161,16 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
           </div>
         </section>
       )}
+
+      {/* Title search */}
+      <section className="space-y-2">
+        <Label className="text-xs font-medium">Ricerca nel titolo</Label>
+        <Input
+          placeholder="es. Livello 2, Tapis..."
+          value={value.title_contains ?? ""}
+          onChange={e => set("title_contains", e.target.value || undefined)}
+        />
+      </section>
 
       {/* Notes search */}
       <section className="space-y-2">

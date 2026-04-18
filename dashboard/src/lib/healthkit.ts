@@ -423,6 +423,16 @@ export function workoutName(type: number, metadata?: Record<string, unknown> | n
   return WORKOUT_NAMES[type] ?? `Workout (${type})`
 }
 
+/** Returns the custom title if present, otherwise the derived activity name. */
+export function workoutDisplayTitle(w: {
+  title: string | null
+  activity_type: number
+  metadata: Record<string, unknown> | null
+}): string {
+  const t = (w.title ?? "").trim()
+  return t || workoutName(w.activity_type, w.metadata)
+}
+
 /** Human label for a workout effective_type slug (backend-derived). */
 export function effectiveTypeLabel(slug: string, activityType?: number): string {
   switch (slug) {

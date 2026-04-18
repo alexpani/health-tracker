@@ -63,6 +63,7 @@ struct WorkoutPayload: Codable {
     let endDate: String
     let sourceName: String?
     let metadata: [String: String]?
+    let title: String?
 
     enum CodingKeys: String, CodingKey {
         case uuid
@@ -75,6 +76,7 @@ struct WorkoutPayload: Codable {
         case endDate = "end_date"
         case sourceName = "source_name"
         case metadata
+        case title
     }
 }
 
@@ -163,6 +165,7 @@ actor APIClient {
                 if let v = w.totalDistance { dict["total_distance"] = v }
                 if let v = w.sourceName { dict["source_name"] = v }
                 if let v = w.metadata { dict["metadata"] = v }
+                if let v = w.title { dict["title"] = v }
                 return dict
             }
         ]

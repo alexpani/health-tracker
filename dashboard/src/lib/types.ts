@@ -40,6 +40,7 @@ export interface WorkoutFilters {
   pace_min?: number         // seconds per km
   pace_max?: number         // seconds per km
   notes_contains?: string
+  title_contains?: string
 }
 
 export interface WorkoutDetail {
@@ -54,6 +55,7 @@ export interface WorkoutDetail {
   end_date: string
   source_name: string | null
   metadata: Record<string, unknown> | null
+  title: string | null
   notes: string | null
 }
 
@@ -156,6 +158,7 @@ export interface Workout {
   end_date: string
   source_name: string | null
   metadata: Record<string, unknown> | null
+  title: string | null
   notes: string | null
 }
 

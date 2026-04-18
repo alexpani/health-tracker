@@ -80,7 +80,7 @@ Alembic revision migrations folder is mounted as a volume so migrations persist 
 
 - `HealthSample` — quantity samples (steps, heart rate, weight, ...). Columns: id, uuid (unique), type, value, unit, start_date, end_date, source_name, source_bundle_id, device, metadata JSONB.
 - `CategorySample` — category samples (sleep, stand hour, etc.). Similar shape with integer value (enum).
-- `Workout` — workouts (activity_type, duration seconds, total_distance meters, total_energy_burned kcal, start/end, source, metadata JSONB, **user-editable `notes`** column).
+- `Workout` — workouts (activity_type, duration seconds, total_distance meters, total_energy_burned kcal, start/end, source, metadata JSONB, **user-editable `title` + `notes`** columns). `title` is auto-populated at ingest from `metadata["workout name"]` when present (used by third-party apps like Intervals Pro).
 - `PendingWrite` — web → HealthKit write queue (type, value, unit, start/end, status: pending/written/failed, hk_uuid after confirm).
 - `PendingDeletion` — web → HealthKit delete queue (hk_uuid, type, source_sample_id, status).
 - `IngestRule` — configurable filters (rule_type: `value_range` or `blocked_source`; optional type_identifier/source_name; value_min/max; active bool; hits_count, last_hit_at).
@@ -128,13 +128,13 @@ Ordered history (most recent last):
 - `GET /api/v1/workouts` query params:
   - `activity_type[]`, `effective_types[]` (slugs), `sources[]`, `years[]`
   - `start`, `end`, `distance_min/max` (meters), `duration_min/max` (seconds), `pace_min/max` (sec/km)
-  - `notes_contains` (ILIKE %x%)
+  - `notes_contains`, `title_contains` (ILIKE %x%)
   - `limit` (max 10000), `offset`
 - `GET /api/v1/workouts/facets` — for filter sidebar: `effective_types` with counts, `sources`, `years` with counts, `distance_min/max`, `duration_min/max`
 - `GET /api/v1/workouts/by-uuid/{uuid}` — single workout detail (includes notes + metadata)
 - `GET /api/v1/workouts/by-uuid/{uuid}/splits?distance_km=1.0` — per-km splits with duration, pace, avg HR
 - `DELETE /api/v1/workouts/by-uuid/{uuid}` — returns full snapshot for undo
-- `PATCH /api/v1/workouts/by-uuid/{uuid}` body `{notes:"..."}` — update editable fields (currently just notes)
+- `PATCH /api/v1/workouts/by-uuid/{uuid}` body `{title?:"...", notes?:"..."}` — update editable fields (title, notes). Empty string clears.
 
 **Effective type slugs** (see `_apply_effective_type_filter`):
 - `treadmill_run`  — activity_type=37 & HKIndoorWorkout=1
@@ -282,8 +282,8 @@ docker compose up -d --build   # → http://192.168.68.190
 - `/vitals` — HR, HRV, SpO2, blood pressure, respiratory, temperature, glucose
 - `/body` — weight, BMI, body fat, lean mass, height, waist — **custom tooltip shows all body values at same instant**; row-level delete with correlated-samples confirmation
 - `/sleep` — sleep analysis, stacked bar per night
-- `/workouts` — **main Workouts page** with **left sidebar filters** (year, activity, source, datetime, distance km, duration min, pace slider + presets, notes search), summary cards, workouts-per-period chart with click-to-drilldown, **sortable** list table (click headers to sort asc/desc) with pace and truncated **notes** columns, row-level delete with 8s undo toast
-- `/workouts/:uuid` — **Apple Fitness-style detail**: metrics (duration, distance, calories, avg pace, avg/max HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), per-km splits table, time-series charts (HR, running speed, power, cadence), **editable notes** card
+- `/workouts` — **main Workouts page** with **left sidebar filters** (year, activity, source, datetime, distance km, duration min, pace slider + presets, title search, notes search), summary cards, workouts-per-period chart with click-to-drilldown, **sortable** list table (click headers to sort asc/desc) with **title**, pace and truncated notes columns, row-level delete with 8s undo toast
+- `/workouts/:uuid` — **Apple Fitness-style detail**: page heading uses the custom title (fallback to activity name), metrics (duration, distance, calories, avg pace, avg/max HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), per-km splits table, time-series charts (HR, running speed, power, cadence), **editable title + notes** cards
 - `/nutrition` — calories, macros, water, caffeine
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - `/explore` — universal browser: pick any sample type with full filter bar + chart + raw table

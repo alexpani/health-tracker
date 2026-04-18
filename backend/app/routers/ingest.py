@@ -181,6 +181,7 @@ async def ingest_workouts(batch: WorkoutBatchIn, db: AsyncSession = Depends(get_
             "end_date": w.end_date,
             "source_name": w.source_name,
             "metadata": w.metadata,
+            "title": w.title or ((w.metadata or {}).get("workout name") if isinstance(w.metadata, dict) else None),
             "notes": w.notes,
         }
         for w in batch.workouts

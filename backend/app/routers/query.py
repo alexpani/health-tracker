@@ -255,28 +255,33 @@ async def workout_by_uuid(workout_uuid: str, db: AsyncSession = Depends(get_db))
         "end_date": row.end_date.isoformat(),
         "source_name": row.source_name,
         "metadata": row.metadata_,
+        "title": row.title,
         "notes": row.notes,
     }
 
 
 class WorkoutUpdate(BaseModel):
     notes: str | None = None
+    title: str | None = None
 
 
 @router.patch("/workouts/by-uuid/{workout_uuid}")
 async def update_workout(workout_uuid: str, body: WorkoutUpdate, db: AsyncSession = Depends(get_db)):
-    """Update editable fields of a workout (currently: notes)."""
+    """Update editable fields of a workout (title, notes). Empty string clears the field."""
     stmt = select(Workout).where(Workout.uuid == workout_uuid)
     row = (await db.execute(stmt)).scalar_one_or_none()
     if not row:
         raise HTTPException(404, "Workout not found")
-    if body.notes is not None:
-        # Empty string clears the field
-        row.notes = body.notes if body.notes else None
+    data = body.model_dump(exclude_unset=True)
+    if "notes" in data:
+        row.notes = data["notes"] if data["notes"] else None
+    if "title" in data:
+        row.title = data["title"] if data["title"] else None
     await db.commit()
     await db.refresh(row)
     return {
         "uuid": str(row.uuid),
+        "title": row.title,
         "notes": row.notes,
     }
 
@@ -435,6 +440,7 @@ async def query_workouts(
     pace_min: float | None = None,      # seconds per km (faster = lower)
     pace_max: float | None = None,      # seconds per km (slower = higher)
     notes_contains: str | None = None,  # ILIKE %value%
+    title_contains: str | None = None,  # ILIKE %value%
     limit: int = Query(1000, le=10000),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -461,8 +467,9 @@ async def query_workouts(
     if duration_max is not None:
         stmt = stmt.where(Workout.duration <= duration_max)
     if notes_contains:
-        pattern = f"%{notes_contains}%"
-        stmt = stmt.where(Workout.notes.ilike(pattern))
+        stmt = stmt.where(Workout.notes.ilike(f"%{notes_contains}%"))
+    if title_contains:
+        stmt = stmt.where(Workout.title.ilike(f"%{title_contains}%"))
     if pace_min is not None or pace_max is not None:
         # pace = duration / (distance_m / 1000) = duration * 1000 / distance
         # Filter only workouts with meaningful distance (> 100 m) to avoid div-by-zero
@@ -552,6 +559,7 @@ async def delete_workout(workout_uuid: str, db: AsyncSession = Depends(get_db)):
         "end_date": row.end_date.isoformat(),
         "source_name": row.source_name,
         "metadata": row.metadata_,
+        "title": row.title,
         "notes": row.notes,
     }
     await db.execute(sqldelete(Workout).where(Workout.id == row.id))

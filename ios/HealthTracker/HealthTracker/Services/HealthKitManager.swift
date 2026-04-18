@@ -413,7 +413,8 @@ actor HealthKitManager {
                 startDate: formatter.string(from: workout.startDate),
                 endDate: formatter.string(from: workout.endDate),
                 sourceName: workout.sourceRevision.source.name,
-                metadata: workout.metadata?.compactMapValues { "\($0)" }
+                metadata: workout.metadata?.compactMapValues { "\($0)" },
+                title: workout.metadata?["workout name"] as? String
             )
         }
     }

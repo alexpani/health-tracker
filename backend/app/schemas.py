@@ -52,6 +52,7 @@ class WorkoutIn(BaseModel):
     end_date: datetime
     source_name: str | None = None
     metadata: dict | None = None
+    title: str | None = None
     notes: str | None = None
 
 
@@ -119,6 +120,7 @@ class WorkoutOut(BaseModel):
     start_date: datetime
     end_date: datetime
     source_name: str | None
+    title: str | None = None
     notes: str | None = None
     metadata: dict | None = Field(None, validation_alias="metadata_")
 

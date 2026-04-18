@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { MetricCard } from "@/components/charts/MetricCard"
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart"
 import { useLatest, useSamples, useSyncSessions, useSyncStatus, useWorkouts } from "@/lib/queries"
-import { getMeta, workoutName } from "@/lib/healthkit"
+import { getMeta, workoutDisplayTitle } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 
 export default function Home() {
@@ -139,7 +139,7 @@ export default function Home() {
                 {workouts.data.slice(0, 5).map(w => (
                   <div key={w.uuid} className="flex justify-between items-center py-2 border-b last:border-0">
                     <div>
-                      <p className="font-medium">{workoutName(w.activity_type, w.metadata)}</p>
+                      <p className="font-medium">{workoutDisplayTitle(w)}</p>
                       <p className="text-xs text-muted-foreground">{formatDateTime(w.start_date)}</p>
                     </div>
                     <div className="text-right text-sm">

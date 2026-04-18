@@ -8,13 +8,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { WorkoutFiltersSidebar } from "@/components/WorkoutFiltersSidebar"
 import { useDeleteWorkout, useRestoreWorkout, useWorkouts } from "@/lib/queries"
-import { workoutName } from "@/lib/healthkit"
+import { workoutDisplayTitle, workoutName } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { Workout, WorkoutFilters } from "@/lib/types"
 
 type ChartAggregation = "day" | "week" | "month" | "all"
 
-type SortKey = "start_date" | "activity" | "duration" | "distance" | "pace" | "calories" | "source" | "notes"
+type SortKey = "start_date" | "title" | "activity" | "duration" | "distance" | "pace" | "calories" | "source" | "notes"
 type SortDir = "asc" | "desc"
 
 function compare<T>(a: T, b: T, dir: SortDir): number {
@@ -156,6 +156,7 @@ export default function Workouts() {
     arr.sort((a, b) => {
       switch (sortKey) {
         case "start_date": return compare(a.start_date, b.start_date, sortDir)
+        case "title":      return compare((a.title ?? "").toLowerCase(), (b.title ?? "").toLowerCase(), sortDir)
         case "activity":   return compare(workoutName(a.activity_type, a.metadata), workoutName(b.activity_type, b.metadata), sortDir)
         case "duration":   return compare(a.duration ?? -1, b.duration ?? -1, sortDir)
         case "distance":   return compare(a.total_distance ?? -1, b.total_distance ?? -1, sortDir)
@@ -367,6 +368,7 @@ export default function Workouts() {
                 <TableHeader>
                   <TableRow>
                     <TableHead><SortHeader k="start_date">Data</SortHeader></TableHead>
+                    <TableHead><SortHeader k="title">Titolo</SortHeader></TableHead>
                     <TableHead><SortHeader k="activity">Attivita</SortHeader></TableHead>
                     <TableHead className="text-right"><SortHeader k="duration" align="right">Durata</SortHeader></TableHead>
                     <TableHead className="text-right"><SortHeader k="distance" align="right">Distanza</SortHeader></TableHead>
@@ -381,6 +383,12 @@ export default function Workouts() {
                   {workouts.map(w => (
                     <TableRow key={w.uuid} className="cursor-pointer" onClick={() => navigate(`/workouts/${w.uuid}`)}>
                       <TableCell>{formatDateTime(w.start_date)}</TableCell>
+                      <TableCell
+                        className="max-w-[220px] truncate font-medium"
+                        title={w.title ?? ""}
+                      >
+                        {w.title ?? <span className="text-muted-foreground font-normal">—</span>}
+                      </TableCell>
                       <TableCell>{workoutName(w.activity_type, w.metadata)}</TableCell>
                       <TableCell className="text-right tabular-nums">
                         {w.duration ? `${Math.round(w.duration / 60)} min` : "-"}

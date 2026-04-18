@@ -259,6 +259,7 @@ export function useWorkouts(filters: WorkoutFilters = {}) {
         pace_min: filters.pace_min,
         pace_max: filters.pace_max,
         notes_contains: filters.notes_contains,
+        title_contains: filters.title_contains,
         limit: 10000,
       }),
     staleTime: 60_000,
@@ -273,13 +274,14 @@ export function useWorkoutFacets() {
   })
 }
 
-export function useUpdateWorkoutNotes() {
+export function useUpdateWorkout() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ uuid, notes }: { uuid: string; notes: string }) =>
-      apiPatch<{ uuid: string; notes: string | null }>(`/api/v1/workouts/by-uuid/${uuid}`, { notes }),
+    mutationFn: ({ uuid, patch }: { uuid: string; patch: { title?: string; notes?: string } }) =>
+      apiPatch<{ uuid: string; title: string | null; notes: string | null }>(`/api/v1/workouts/by-uuid/${uuid}`, patch),
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ["workout", vars.uuid] })
+      qc.invalidateQueries({ queryKey: ["workouts"] })
     },
   })
 }
