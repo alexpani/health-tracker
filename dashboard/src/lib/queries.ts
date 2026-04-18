@@ -249,7 +249,7 @@ export function useWorkouts(filters: WorkoutFilters = {}) {
       apiGet<Workout[]>("/api/v1/workouts", {
         start: filters.start,
         end: filters.end,
-        activity_type: filters.activity_type as any,
+        effective_types: filters.effective_types,
         sources: filters.sources,
         distance_min: filters.distance_min,
         distance_max: filters.distance_max,

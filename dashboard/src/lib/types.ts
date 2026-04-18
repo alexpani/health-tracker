@@ -10,8 +10,15 @@ export interface Sample {
   device: string | null
 }
 
+export interface EffectiveTypeFacet {
+  slug: string
+  activity_type: number
+  activity_name: string | null
+  count: number
+}
+
 export interface WorkoutFacets {
-  activity_types: { activity_type: number; activity_name: string | null }[]
+  effective_types: EffectiveTypeFacet[]
   sources: string[]
   distance_min: number | null
   distance_max: number | null
@@ -20,7 +27,7 @@ export interface WorkoutFacets {
 export interface WorkoutFilters {
   start?: string
   end?: string
-  activity_type?: number[]
+  effective_types?: string[]
   sources?: string[]
   distance_min?: number  // meters
   distance_max?: number  // meters

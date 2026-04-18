@@ -18,7 +18,7 @@ import {
   useWorkoutFacets,
   useWorkouts,
 } from "@/lib/queries"
-import { workoutName } from "@/lib/healthkit"
+import { effectiveTypeLabel, workoutName } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { TimeRange, Workout, WorkoutFilters } from "@/lib/types"
 
@@ -117,7 +117,7 @@ export default function Workouts() {
 
   // Filters
   const [range, setRange] = useState<TimeRange>("1y")
-  const [activityType, setActivityType] = useState<string>("all")
+  const [effectiveType, setEffectiveType] = useState<string>("all")
   const [chartAgg, setChartAgg] = useState<ChartAggregation>("week")
 
   // Advanced filters
@@ -137,12 +137,12 @@ export default function Workouts() {
       start: localToISO(startLocal) ?? baseDates.start,
       end: localToISO(endLocal) ?? baseDates.end,
     }
-    if (activityType !== "all") f.activity_type = [Number(activityType)]
+    if (effectiveType !== "all") f.effective_types = [effectiveType]
     if (selectedSources.length) f.sources = selectedSources
     if (distMinKm !== "") f.distance_min = parseFloat(distMinKm) * 1000
     if (distMaxKm !== "") f.distance_max = parseFloat(distMaxKm) * 1000
     return f
-  }, [range, baseDates, startLocal, endLocal, activityType, selectedSources, distMinKm, distMaxKm])
+  }, [range, baseDates, startLocal, endLocal, effectiveType, selectedSources, distMinKm, distMaxKm])
 
   const { data: workouts, isLoading } = useWorkouts(filters)
 
@@ -266,13 +266,13 @@ export default function Workouts() {
 
       <div className="flex flex-wrap gap-2">
         <TimeRangeSelector value={range} onChange={setRange} />
-        <Select value={activityType} onValueChange={setActivityType}>
-          <SelectTrigger className="w-[200px]"><SelectValue /></SelectTrigger>
+        <Select value={effectiveType} onValueChange={setEffectiveType}>
+          <SelectTrigger className="w-[240px]"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Tutti i tipi</SelectItem>
-            {facets?.activity_types.map(t => (
-              <SelectItem key={t.activity_type} value={String(t.activity_type)}>
-                {t.activity_name ?? workoutName(t.activity_type)}
+            {facets?.effective_types.map(t => (
+              <SelectItem key={t.slug} value={t.slug}>
+                {effectiveTypeLabel(t.slug, t.activity_type)} ({t.count})
               </SelectItem>
             ))}
           </SelectContent>

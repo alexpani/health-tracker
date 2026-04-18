@@ -343,9 +343,64 @@ async def workout_splits(workout_uuid: str, distance_km: float = 1.0, db: AsyncS
     return {"splits": splits, "total_distance_meters": cumulative}
 
 
+# SQL snippet that turns (activity_type, metadata) into an "effective_type" slug.
+# Mirrored in the frontend helper. Keep in sync.
+EFFECTIVE_TYPE_SQL = """
+CASE
+    WHEN workouts.activity_type = 37 AND workouts.metadata->>'HKIndoorWorkout' = '1' THEN 'treadmill_run'
+    WHEN workouts.activity_type = 52 AND workouts.metadata->>'HKIndoorWorkout' = '1' THEN 'treadmill_walk'
+    WHEN workouts.activity_type = 13 AND workouts.metadata->>'HKIndoorWorkout' = '1' THEN 'cyclette'
+    WHEN workouts.activity_type = 46 AND workouts.metadata->>'HKSwimmingLocationType' = '1' THEN 'swim_pool'
+    WHEN workouts.activity_type = 46 AND workouts.metadata->>'HKSwimmingLocationType' = '2' THEN 'swim_open_water'
+    ELSE 'type_' || workouts.activity_type::text
+END
+"""
+
+
+def _apply_effective_type_filter(stmt, effective_types: list[str]):
+    """Add WHERE clauses that match any of the given effective_type slugs."""
+    from sqlalchemy import or_, and_
+
+    conds = []
+    for et in effective_types:
+        if et == "treadmill_run":
+            conds.append(and_(Workout.activity_type == 37, text("metadata->>'HKIndoorWorkout' = '1'")))
+        elif et == "treadmill_walk":
+            conds.append(and_(Workout.activity_type == 52, text("metadata->>'HKIndoorWorkout' = '1'")))
+        elif et == "cyclette":
+            conds.append(and_(Workout.activity_type == 13, text("metadata->>'HKIndoorWorkout' = '1'")))
+        elif et == "swim_pool":
+            conds.append(and_(Workout.activity_type == 46, text("metadata->>'HKSwimmingLocationType' = '1'")))
+        elif et == "swim_open_water":
+            conds.append(and_(Workout.activity_type == 46, text("metadata->>'HKSwimmingLocationType' = '2'")))
+        elif et.startswith("type_"):
+            try:
+                t = int(et.split("_", 1)[1])
+            except ValueError:
+                continue
+            # "type_XXX" means the plain type with NO variant match
+            if t == 37 or t == 52 or t == 13:
+                conds.append(and_(
+                    Workout.activity_type == t,
+                    text("(metadata->>'HKIndoorWorkout' IS NULL OR metadata->>'HKIndoorWorkout' != '1')"),
+                ))
+            elif t == 46:
+                conds.append(and_(
+                    Workout.activity_type == t,
+                    text("metadata->>'HKSwimmingLocationType' IS NULL"),
+                ))
+            else:
+                conds.append(Workout.activity_type == t)
+
+    if conds:
+        stmt = stmt.where(or_(*conds))
+    return stmt
+
+
 @router.get("/workouts", response_model=list[WorkoutOut])
 async def query_workouts(
     activity_type: list[int] | None = Query(None),
+    effective_types: list[str] | None = Query(None),
     start: datetime | None = None,
     end: datetime | None = None,
     sources: list[str] | None = Query(None),
@@ -358,6 +413,8 @@ async def query_workouts(
     stmt = select(Workout)
     if activity_type:
         stmt = stmt.where(Workout.activity_type.in_(activity_type))
+    if effective_types:
+        stmt = _apply_effective_type_filter(stmt, effective_types)
     if start:
         stmt = stmt.where(Workout.start_date >= start)
     if end:
@@ -376,23 +433,40 @@ async def query_workouts(
 
 @router.get("/workouts/facets")
 async def workout_facets(db: AsyncSession = Depends(get_db)):
-    """Distinct activity types + sources + distance range for the workout filter UI."""
-    types_stmt = select(Workout.activity_type, Workout.activity_name).distinct()
+    """
+    Returns distinct *effective types* (including metadata-derived variants like
+    treadmill_run, swim_pool) with counts, plus sources and distance range.
+    """
+    # Effective types with counts
+    et_stmt = text(f"""
+        SELECT {EFFECTIVE_TYPE_SQL} AS effective_type,
+               MIN(activity_type) AS activity_type,
+               MIN(activity_name) AS activity_name,
+               COUNT(*) AS count
+        FROM workouts
+        GROUP BY effective_type
+        ORDER BY count DESC
+    """)
+    et_rows = (await db.execute(et_stmt)).all()
+
     sources_stmt = select(Workout.source_name).distinct()
     range_stmt = select(
         func.min(Workout.total_distance).label("min"),
         func.max(Workout.total_distance).label("max"),
     )
-
-    types = [
-        {"activity_type": r.activity_type, "activity_name": r.activity_name}
-        for r in (await db.execute(types_stmt)).all()
-    ]
     sources = [r[0] for r in (await db.execute(sources_stmt)).all() if r[0] is not None]
     rng = (await db.execute(range_stmt)).first()
 
     return {
-        "activity_types": types,
+        "effective_types": [
+            {
+                "slug": r.effective_type,
+                "activity_type": r.activity_type,
+                "activity_name": r.activity_name,
+                "count": r.count,
+            }
+            for r in et_rows
+        ],
         "sources": sorted(sources),
         "distance_min": float(rng.min) if rng and rng.min is not None else None,
         "distance_max": float(rng.max) if rng and rng.max is not None else None,

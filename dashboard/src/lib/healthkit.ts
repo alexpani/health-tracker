@@ -423,6 +423,26 @@ export function workoutName(type: number, metadata?: Record<string, unknown> | n
   return WORKOUT_NAMES[type] ?? `Workout (${type})`
 }
 
+/** Human label for a workout effective_type slug (backend-derived). */
+export function effectiveTypeLabel(slug: string, activityType?: number): string {
+  switch (slug) {
+    case "treadmill_run": return "Tapis roulant (corsa)"
+    case "treadmill_walk": return "Tapis roulant (camminata)"
+    case "cyclette": return "Cyclette"
+    case "swim_pool": return "Nuoto in piscina"
+    case "swim_open_water": return "Nuoto in acque aperte"
+  }
+  if (slug.startsWith("type_")) {
+    const t = activityType ?? parseInt(slug.slice(5))
+    if (t === 37) return "Corsa (outdoor)"
+    if (t === 52) return "Camminata (outdoor)"
+    if (t === 13) return "Ciclismo (outdoor)"
+    if (t === 46) return "Nuoto"
+    return WORKOUT_NAMES[t] ?? `Workout (${t})`
+  }
+  return slug
+}
+
 /** Extract useful extra metadata for display. */
 export interface WorkoutMetadataSummary {
   indoor?: boolean
