@@ -145,7 +145,7 @@ export default function WorkoutDetail() {
   if (isLoading) return <p className="text-muted-foreground">Caricamento...</p>
   if (!workout) return <p className="text-muted-foreground">Workout non trovato</p>
 
-  const name = workout.activity_name ?? workoutName(workout.activity_type)
+  const name = workoutName(workout.activity_type, workout.metadata)
   const distanceKm = workout.total_distance ? workout.total_distance / 1000 : null
 
   const timeAxisFmt = (iso: string) => new Date(iso).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })

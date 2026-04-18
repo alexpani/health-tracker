@@ -118,8 +118,9 @@ class WorkoutOut(BaseModel):
     start_date: datetime
     end_date: datetime
     source_name: str | None
+    metadata: dict | None = Field(None, validation_alias="metadata_")
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class TypeCount(BaseModel):

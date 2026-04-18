@@ -139,7 +139,7 @@ export default function Home() {
                 {workouts.data.slice(0, 5).map(w => (
                   <div key={w.uuid} className="flex justify-between items-center py-2 border-b last:border-0">
                     <div>
-                      <p className="font-medium">{w.activity_name ?? workoutName(w.activity_type)}</p>
+                      <p className="font-medium">{workoutName(w.activity_type, w.metadata)}</p>
                       <p className="text-xs text-muted-foreground">{formatDateTime(w.start_date)}</p>
                     </div>
                     <div className="text-right text-sm">

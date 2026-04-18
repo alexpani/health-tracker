@@ -138,6 +138,7 @@ export interface Workout {
   start_date: string
   end_date: string
   source_name: string | null
+  metadata: Record<string, unknown> | null
 }
 
 export interface TypeCount {

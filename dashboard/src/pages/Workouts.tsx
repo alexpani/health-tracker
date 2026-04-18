@@ -161,7 +161,7 @@ export default function Workouts() {
 
   const onDelete = async (w: Workout, ev: React.MouseEvent) => {
     ev.stopPropagation()
-    const displayName = w.activity_name ?? workoutName(w.activity_type)
+    const displayName = workoutName(w.activity_type, (w as any).metadata)
     const confirmMsg = `Eliminare il workout "${displayName}" del ${formatDateTime(w.start_date)}?`
     if (!confirm(confirmMsg)) return
 
@@ -219,7 +219,7 @@ export default function Workouts() {
       b.uuids.push(w.uuid)
       b.totalDuration += w.duration ?? 0
       b.totalDistance += w.total_distance ?? 0
-      if (b.count === 1) b.singleName = w.activity_name ?? workoutName(w.activity_type)
+      if (b.count === 1) b.singleName = workoutName(w.activity_type, (w as any).metadata)
       else b.singleName = undefined
     })
     return Array.from(buckets.values()).sort((a, b) => (a.key < b.key ? -1 : 1))
@@ -458,7 +458,7 @@ export default function Workouts() {
                     onClick={() => navigate(`/workouts/${w.uuid}`)}
                   >
                     <TableCell>{formatDateTime(w.start_date)}</TableCell>
-                    <TableCell>{w.activity_name ?? workoutName(w.activity_type)}</TableCell>
+                    <TableCell>{workoutName(w.activity_type, (w as any).metadata)}</TableCell>
                     <TableCell className="text-right tabular-nums">
                       {w.duration ? `${Math.round(w.duration / 60)} min` : "-"}
                     </TableCell>
