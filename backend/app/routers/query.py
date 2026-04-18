@@ -426,9 +426,14 @@ async def query_workouts(
     effective_types: list[str] | None = Query(None),
     start: datetime | None = None,
     end: datetime | None = None,
+    years: list[int] | None = Query(None),
     sources: list[str] | None = Query(None),
     distance_min: float | None = None,  # meters
     distance_max: float | None = None,  # meters
+    duration_min: float | None = None,  # seconds
+    duration_max: float | None = None,  # seconds
+    pace_min: float | None = None,      # seconds per km (faster = lower)
+    pace_max: float | None = None,      # seconds per km (slower = higher)
     limit: int = Query(1000, le=10000),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -442,12 +447,28 @@ async def query_workouts(
         stmt = stmt.where(Workout.start_date >= start)
     if end:
         stmt = stmt.where(Workout.start_date <= end)
+    if years:
+        stmt = stmt.where(func.extract("year", Workout.start_date).in_(years))
     if sources:
         stmt = stmt.where(Workout.source_name.in_(sources))
     if distance_min is not None:
         stmt = stmt.where(Workout.total_distance >= distance_min)
     if distance_max is not None:
         stmt = stmt.where(Workout.total_distance <= distance_max)
+    if duration_min is not None:
+        stmt = stmt.where(Workout.duration >= duration_min)
+    if duration_max is not None:
+        stmt = stmt.where(Workout.duration <= duration_max)
+    if pace_min is not None or pace_max is not None:
+        # pace = duration / (distance_m / 1000) = duration * 1000 / distance
+        # Filter only workouts with meaningful distance (> 100 m) to avoid div-by-zero
+        stmt = stmt.where(Workout.total_distance > 100)
+        stmt = stmt.where(Workout.duration.is_not(None))
+        pace_expr = Workout.duration * 1000.0 / Workout.total_distance
+        if pace_min is not None:
+            stmt = stmt.where(pace_expr >= pace_min)
+        if pace_max is not None:
+            stmt = stmt.where(pace_expr <= pace_max)
     stmt = stmt.order_by(Workout.start_date.desc()).offset(offset).limit(limit)
 
     result = await db.execute(stmt)
@@ -474,11 +495,19 @@ async def workout_facets(db: AsyncSession = Depends(get_db)):
 
     sources_stmt = select(Workout.source_name).distinct()
     range_stmt = select(
-        func.min(Workout.total_distance).label("min"),
-        func.max(Workout.total_distance).label("max"),
+        func.min(Workout.total_distance).label("dmin"),
+        func.max(Workout.total_distance).label("dmax"),
+        func.min(Workout.duration).label("durmin"),
+        func.max(Workout.duration).label("durmax"),
     )
+    years_stmt = select(
+        func.extract("year", Workout.start_date).label("y"),
+        func.count().label("c"),
+    ).group_by("y").order_by("y")
+
     sources = [r[0] for r in (await db.execute(sources_stmt)).all() if r[0] is not None]
     rng = (await db.execute(range_stmt)).first()
+    years = [{"year": int(r.y), "count": r.c} for r in (await db.execute(years_stmt)).all()]
 
     return {
         "effective_types": [
@@ -491,8 +520,11 @@ async def workout_facets(db: AsyncSession = Depends(get_db)):
             for r in et_rows
         ],
         "sources": sorted(sources),
-        "distance_min": float(rng.min) if rng and rng.min is not None else None,
-        "distance_max": float(rng.max) if rng and rng.max is not None else None,
+        "years": years,
+        "distance_min": float(rng.dmin) if rng and rng.dmin is not None else None,
+        "distance_max": float(rng.dmax) if rng and rng.dmax is not None else None,
+        "duration_min": float(rng.durmin) if rng and rng.durmin is not None else None,
+        "duration_max": float(rng.durmax) if rng and rng.durmax is not None else None,
     }
 
 

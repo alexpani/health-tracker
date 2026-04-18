@@ -20,17 +20,25 @@ export interface EffectiveTypeFacet {
 export interface WorkoutFacets {
   effective_types: EffectiveTypeFacet[]
   sources: string[]
+  years: { year: number; count: number }[]
   distance_min: number | null
   distance_max: number | null
+  duration_min: number | null
+  duration_max: number | null
 }
 
 export interface WorkoutFilters {
   start?: string
   end?: string
+  years?: number[]
   effective_types?: string[]
   sources?: string[]
-  distance_min?: number  // meters
-  distance_max?: number  // meters
+  distance_min?: number     // meters
+  distance_max?: number     // meters
+  duration_min?: number     // seconds
+  duration_max?: number     // seconds
+  pace_min?: number         // seconds per km
+  pace_max?: number         // seconds per km
 }
 
 export interface WorkoutDetail {
