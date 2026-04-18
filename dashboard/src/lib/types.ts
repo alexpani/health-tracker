@@ -1,4 +1,5 @@
 export interface Sample {
+  id?: number
   uuid: string
   type: string
   value: number
@@ -7,6 +8,45 @@ export interface Sample {
   end_date: string
   source_name: string | null
   device: string | null
+}
+
+export interface IngestRule {
+  id: number
+  rule_type: "value_range" | "blocked_source"
+  type_identifier: string | null
+  source_name: string | null
+  value_min: number | null
+  value_max: number | null
+  active: boolean
+  reason: string | null
+  hits_count: number
+  last_hit_at: string | null
+  created_at: string
+}
+
+export interface RulesSummary {
+  rules_active: number
+  rules_total: number
+  blacklist_size: number
+  total_hits: number
+  recent_hits_7d: number
+}
+
+export interface BlacklistEntry {
+  id: number
+  hk_uuid: string
+  reason: string | null
+  created_at: string
+}
+
+export interface CorrelatedSample {
+  id: number
+  uuid: string
+  type: string
+  value: number
+  unit: string
+  start_date: string
+  source_name: string | null
 }
 
 export interface AggregatedPoint {
@@ -90,6 +130,22 @@ export interface PendingWrite {
   created_at: string
   written_at: string | null
   hk_uuid: string | null
+}
+
+export interface SampleFacets {
+  sources: string[]
+  devices: string[]
+  value_min: number | null
+  value_max: number | null
+}
+
+export interface AdvancedFilters {
+  start?: string
+  end?: string
+  sources?: string[]
+  devices?: string[]
+  value_min?: number
+  value_max?: number
 }
 
 export interface WriteInput {

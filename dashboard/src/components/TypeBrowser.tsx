@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart"
 import { SampleTable } from "@/components/SampleTable"
+import { FilterBar } from "@/components/FilterBar"
 import {
   TimeRangeSelector,
   suggestAggregation,
@@ -11,7 +12,7 @@ import {
 import { AggregationSelector } from "@/components/controls/AggregationSelector"
 import { useSamples } from "@/lib/queries"
 import { getMeta } from "@/lib/healthkit"
-import type { Aggregation, Sample, TimeRange } from "@/lib/types"
+import type { AdvancedFilters, Aggregation, Sample, TimeRange } from "@/lib/types"
 
 interface Props {
   title: string
@@ -23,19 +24,33 @@ export function TypeBrowser({ title, subtitle, types }: Props) {
   const [activeType, setActiveType] = useState(types[0])
   const [range, setRange] = useState<TimeRange>("30d")
   const [aggregation, setAggregation] = useState<Aggregation>(suggestAggregation("30d"))
+  const [advanced, setAdvanced] = useState<AdvancedFilters>({})
 
-  // Memoize dates so new Date() isn't called every render (would cause infinite loop)
   const dates = useMemo(() => timeRangeToDates(range), [range])
+  // Advanced filter period overrides the preset range when set
+  const effectiveStart = advanced.start ?? dates.start
+  const effectiveEnd = advanced.end ?? dates.end
+
   const aggQuery = useSamples({
     type: activeType,
-    ...dates,
+    start: effectiveStart,
+    end: effectiveEnd,
     aggregation,
+    sources: advanced.sources,
+    devices: advanced.devices,
+    value_min: advanced.value_min,
+    value_max: advanced.value_max,
     limit: 2000,
   })
   const rawQuery = useSamples({
     type: activeType,
-    ...dates,
+    start: effectiveStart,
+    end: effectiveEnd,
     aggregation: "none",
+    sources: advanced.sources,
+    devices: advanced.devices,
+    value_min: advanced.value_min,
+    value_max: advanced.value_max,
     limit: 100,
   })
 
@@ -75,6 +90,7 @@ export function TypeBrowser({ title, subtitle, types }: Props) {
               <TimeRangeSelector value={range} onChange={onRangeChange} />
               <AggregationSelector value={aggregation} onChange={setAggregation} />
             </div>
+            <FilterBar type={t} value={advanced} onChange={setAdvanced} />
 
             <Card>
               <CardHeader>

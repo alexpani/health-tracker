@@ -1,7 +1,7 @@
 import uuid as uuid_mod
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Double, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Double, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -120,6 +120,44 @@ class PendingDeletion(Base):
 
     __table_args__ = (
         Index("idx_pending_deletions_status", "status"),
+    )
+
+
+class IngestRule(Base):
+    """Configurable ingest rules. Replaces hardcoded SAMPLE_FILTERS/BLOCKED_SOURCES."""
+    __tablename__ = "ingest_rules"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # 'value_range' = discard if value outside [value_min, value_max] for type_identifier
+    # 'blocked_source' = discard if source_name matches (type_identifier optional for per-type)
+    rule_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    type_identifier: Mapped[str | None] = mapped_column(String(100))
+    source_name: Mapped[str | None] = mapped_column(String(200))
+    value_min: Mapped[float | None] = mapped_column(Double)
+    value_max: Mapped[float | None] = mapped_column(Double)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    hits_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    last_hit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_ingest_rules_active_type", "active", "type_identifier"),
+    )
+
+
+class IngestBlacklist(Base):
+    """UUIDs that must never be inserted into health_samples.
+    Used to prevent re-syncing of deleted/spurious samples from Apple Health."""
+    __tablename__ = "ingest_blacklist"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    hk_uuid: Mapped[uuid_mod.UUID] = mapped_column(UUID(as_uuid=True), unique=True, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
 
 

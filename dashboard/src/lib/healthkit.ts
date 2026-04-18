@@ -1,4 +1,4 @@
-export type Category = "activity" | "vitals" | "body" | "nutrition" | "other"
+export type Category = "activity" | "vitals" | "body" | "nutrition" | "fitness" | "other"
 
 export interface TypeMeta {
   label: string
@@ -145,6 +145,70 @@ export const TYPE_META: Record<string, TypeMeta> = {
     formatValue: v => `${v.toFixed(1)}`,
   },
 
+  // --- Fitness avanzato ---
+  HKQuantityTypeIdentifierVO2Max: {
+    label: "VO2 max", category: "fitness", displayUnit: "ml/kg·min", sourceUnit: "ml/(kg*min)", unitMultiplier: 1, color: "#10b981",
+    formatValue: v => v.toFixed(1),
+  },
+  HKQuantityTypeIdentifierRunningPower: {
+    label: "Potenza corsa", category: "fitness", displayUnit: "W", sourceUnit: "W", unitMultiplier: 1, color: "#f97316",
+  },
+  HKQuantityTypeIdentifierRunningSpeed: {
+    label: "Velocita' corsa", category: "fitness", displayUnit: "km/h", sourceUnit: "m/s", unitMultiplier: 3.6, color: "#22c55e",
+    formatValue: v => v.toFixed(2),
+  },
+  HKQuantityTypeIdentifierRunningStrideLength: {
+    label: "Passo corsa", category: "fitness", displayUnit: "cm", sourceUnit: "m", unitMultiplier: 100, color: "#16a34a",
+    formatValue: v => v.toFixed(1),
+  },
+  HKQuantityTypeIdentifierRunningGroundContactTime: {
+    label: "Contatto terra corsa", category: "fitness", displayUnit: "ms", sourceUnit: "ms", unitMultiplier: 1, color: "#4ade80",
+  },
+  HKQuantityTypeIdentifierRunningVerticalOscillation: {
+    label: "Oscillazione verticale", category: "fitness", displayUnit: "cm", sourceUnit: "cm", unitMultiplier: 1, color: "#86efac",
+    formatValue: v => v.toFixed(1),
+  },
+  HKQuantityTypeIdentifierCyclingPower: {
+    label: "Potenza bici", category: "fitness", displayUnit: "W", sourceUnit: "W", unitMultiplier: 1, color: "#0ea5e9",
+  },
+  HKQuantityTypeIdentifierCyclingCadence: {
+    label: "Cadenza bici", category: "fitness", displayUnit: "rpm", sourceUnit: "count/min", unitMultiplier: 1, color: "#38bdf8",
+  },
+  HKQuantityTypeIdentifierCyclingSpeed: {
+    label: "Velocita' bici", category: "fitness", displayUnit: "km/h", sourceUnit: "m/s", unitMultiplier: 3.6, color: "#06b6d4",
+    formatValue: v => v.toFixed(2),
+  },
+  HKQuantityTypeIdentifierCyclingFunctionalThresholdPower: {
+    label: "FTP bici", category: "fitness", displayUnit: "W", sourceUnit: "W", unitMultiplier: 1, color: "#0284c7",
+  },
+  HKQuantityTypeIdentifierStairAscentSpeed: {
+    label: "Velocita' salita scale", category: "fitness", displayUnit: "m/s", sourceUnit: "m/s", unitMultiplier: 1, color: "#a855f7",
+    formatValue: v => v.toFixed(2),
+  },
+  HKQuantityTypeIdentifierStairDescentSpeed: {
+    label: "Velocita' discesa scale", category: "fitness", displayUnit: "m/s", sourceUnit: "m/s", unitMultiplier: 1, color: "#c084fc",
+    formatValue: v => v.toFixed(2),
+  },
+  HKQuantityTypeIdentifierWalkingSpeed: {
+    label: "Velocita' camminata", category: "fitness", displayUnit: "km/h", sourceUnit: "m/s", unitMultiplier: 3.6, color: "#84cc16",
+    formatValue: v => v.toFixed(2),
+  },
+  HKQuantityTypeIdentifierWalkingStepLength: {
+    label: "Passo camminata", category: "fitness", displayUnit: "cm", sourceUnit: "m", unitMultiplier: 100, color: "#65a30d",
+    formatValue: v => v.toFixed(1),
+  },
+  HKQuantityTypeIdentifierWalkingAsymmetryPercentage: {
+    label: "Asimmetria camminata", category: "fitness", displayUnit: "%", sourceUnit: "%", unitMultiplier: 100, color: "#eab308",
+    formatValue: v => v.toFixed(1),
+  },
+  HKQuantityTypeIdentifierWalkingDoubleSupportPercentage: {
+    label: "Doppio supporto camminata", category: "fitness", displayUnit: "%", sourceUnit: "%", unitMultiplier: 100, color: "#facc15",
+    formatValue: v => v.toFixed(1),
+  },
+  HKQuantityTypeIdentifierSixMinuteWalkTestDistance: {
+    label: "Test 6 min camminata", category: "fitness", displayUnit: "m", sourceUnit: "m", unitMultiplier: 1, color: "#fb923c",
+  },
+
   // --- Other ---
   HKQuantityTypeIdentifierElectrodermalActivity: {
     label: "Attivita elettrodermica", category: "other", displayUnit: "S", sourceUnit: "S", unitMultiplier: 1, color: "#64748b",
@@ -221,6 +285,28 @@ export const CATEGORIES: Record<Category, { label: string; types: string[] }> = 
       "HKQuantityTypeIdentifierDietarySugar",
       "HKQuantityTypeIdentifierDietaryWater",
       "HKQuantityTypeIdentifierDietaryCaffeine",
+    ],
+  },
+  fitness: {
+    label: "Fitness",
+    types: [
+      "HKQuantityTypeIdentifierVO2Max",
+      "HKQuantityTypeIdentifierRunningSpeed",
+      "HKQuantityTypeIdentifierRunningPower",
+      "HKQuantityTypeIdentifierRunningStrideLength",
+      "HKQuantityTypeIdentifierRunningGroundContactTime",
+      "HKQuantityTypeIdentifierRunningVerticalOscillation",
+      "HKQuantityTypeIdentifierCyclingSpeed",
+      "HKQuantityTypeIdentifierCyclingPower",
+      "HKQuantityTypeIdentifierCyclingCadence",
+      "HKQuantityTypeIdentifierCyclingFunctionalThresholdPower",
+      "HKQuantityTypeIdentifierWalkingSpeed",
+      "HKQuantityTypeIdentifierWalkingStepLength",
+      "HKQuantityTypeIdentifierWalkingAsymmetryPercentage",
+      "HKQuantityTypeIdentifierWalkingDoubleSupportPercentage",
+      "HKQuantityTypeIdentifierStairAscentSpeed",
+      "HKQuantityTypeIdentifierStairDescentSpeed",
+      "HKQuantityTypeIdentifierSixMinuteWalkTestDistance",
     ],
   },
   other: { label: "Altro", types: [] },

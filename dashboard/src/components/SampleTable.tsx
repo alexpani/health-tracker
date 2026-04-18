@@ -1,3 +1,5 @@
+import { Trash2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { getMeta } from "@/lib/healthkit"
 import { formatDateTime } from "@/lib/utils"
@@ -6,9 +8,10 @@ import type { Sample } from "@/lib/types"
 interface Props {
   type: string
   samples: Sample[]
+  onDelete?: (sample: Sample) => void
 }
 
-export function SampleTable({ type, samples }: Props) {
+export function SampleTable({ type, samples, onDelete }: Props) {
   const meta = getMeta(type)
 
   if (samples.length === 0) {
@@ -23,6 +26,7 @@ export function SampleTable({ type, samples }: Props) {
           <TableHead className="text-right">Valore</TableHead>
           <TableHead>Sorgente</TableHead>
           <TableHead className="hidden md:table-cell">Dispositivo</TableHead>
+          {onDelete && <TableHead className="w-[40px]"></TableHead>}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -39,6 +43,20 @@ export function SampleTable({ type, samples }: Props) {
               </TableCell>
               <TableCell className="text-muted-foreground">{s.source_name ?? "-"}</TableCell>
               <TableCell className="text-muted-foreground hidden md:table-cell">{s.device ?? "-"}</TableCell>
+              {onDelete && (
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={() => onDelete(s)}
+                    disabled={s.id === undefined}
+                    aria-label="Elimina"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TableCell>
+              )}
             </TableRow>
           )
         })}

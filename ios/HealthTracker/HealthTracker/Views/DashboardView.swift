@@ -3,9 +3,13 @@ import HealthKit
 
 struct DashboardView: View {
     @State private var steps: Double = 0
-    @State private var heartRate: Double = 0
     @State private var activeCalories: Double = 0
-    @State private var sleepHours: Double = 0
+    @State private var weight: Double = 0
+    @State private var weightDate: Date?
+    @State private var bodyFat: Double = 0
+    @State private var bodyFatDate: Date?
+    @State private var bmi: Double = 0
+    @State private var bmiDate: Date?
     @State private var isLoading = true
 
     private let healthStore = HKHealthStore()
@@ -18,43 +22,55 @@ struct DashboardView: View {
                     GridItem(.flexible())
                 ], spacing: 16) {
                     MetricCard(
-                        title: "Steps",
+                        title: "Peso",
+                        value: weight > 0 ? String(format: "%.1f", weight) : "--",
+                        unit: "kg",
+                        icon: "scalemass.fill",
+                        color: .purple,
+                        subtitle: weightDate.map { formatRelative($0) }
+                    )
+                    MetricCard(
+                        title: "Passi oggi",
                         value: String(format: "%.0f", steps),
                         icon: "figure.walk",
                         color: .green
                     )
                     MetricCard(
-                        title: "Heart Rate",
-                        value: heartRate > 0 ? String(format: "%.0f bpm", heartRate) : "--",
-                        icon: "heart.fill",
-                        color: .red
-                    )
-                    MetricCard(
-                        title: "Active Cal",
-                        value: String(format: "%.0f kcal", activeCalories),
+                        title: "Calorie attive",
+                        value: String(format: "%.0f", activeCalories),
+                        unit: "kcal",
                         icon: "flame.fill",
                         color: .orange
                     )
                     MetricCard(
-                        title: "Sleep",
-                        value: sleepHours > 0 ? String(format: "%.1f hrs", sleepHours) : "--",
-                        icon: "moon.fill",
-                        color: .purple
+                        title: "Massa grassa",
+                        value: bodyFat > 0 ? String(format: "%.1f", bodyFat * 100) : "--",
+                        unit: "%",
+                        icon: "drop.fill",
+                        color: .pink,
+                        subtitle: bodyFatDate.map { formatRelative($0) }
+                    )
+                    MetricCard(
+                        title: "BMI",
+                        value: bmi > 0 ? String(format: "%.1f", bmi) : "--",
+                        icon: "chart.bar.fill",
+                        color: .blue,
+                        subtitle: bmiDate.map { formatRelative($0) }
                     )
                 }
                 .padding()
             }
             .navigationTitle("Dashboard")
             .task {
-                await loadTodayData()
+                await loadData()
             }
             .refreshable {
-                await loadTodayData()
+                await loadData()
             }
         }
     }
 
-    private func loadTodayData() async {
+    private func loadData() async {
         isLoading = true
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: Date())
@@ -69,16 +85,34 @@ struct DashboardView: View {
             unit: .kilocalorie(),
             start: startOfDay
         )
-        async let heartRateResult = fetchLatestSample(
-            type: .quantityType(forIdentifier: .heartRate)!,
-            unit: HKUnit.count().unitDivided(by: .minute())
+        async let weightResult = fetchLatestSample(
+            type: .quantityType(forIdentifier: .bodyMass)!,
+            unit: .gramUnit(with: .kilo)
         )
-        async let sleepResult = fetchSleepHours(start: startOfDay)
+        async let bodyFatResult = fetchLatestSample(
+            type: .quantityType(forIdentifier: .bodyFatPercentage)!,
+            unit: .percent()
+        )
+        async let bmiResult = fetchLatestSample(
+            type: .quantityType(forIdentifier: .bodyMassIndex)!,
+            unit: .count()
+        )
 
         steps = await stepsResult
         activeCalories = await caloriesResult
-        heartRate = await heartRateResult
-        sleepHours = await sleepResult
+
+        let (w, wDate) = await weightResult
+        weight = w
+        weightDate = wDate
+
+        let (bf, bfDate) = await bodyFatResult
+        bodyFat = bf
+        bodyFatDate = bfDate
+
+        let (b, bDate) = await bmiResult
+        bmi = b
+        bmiDate = bDate
+
         isLoading = false
     }
 
@@ -97,7 +131,7 @@ struct DashboardView: View {
         }
     }
 
-    private func fetchLatestSample(type: HKQuantityType, unit: HKUnit) async -> Double {
+    private func fetchLatestSample(type: HKQuantityType, unit: HKUnit) async -> (Double, Date?) {
         await withCheckedContinuation { continuation in
             let query = HKSampleQuery(
                 sampleType: type,
@@ -105,48 +139,31 @@ struct DashboardView: View {
                 limit: 1,
                 sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)]
             ) { _, results, _ in
-                let value = (results?.first as? HKQuantitySample)?.quantity.doubleValue(for: unit) ?? 0
-                continuation.resume(returning: value)
+                if let sample = results?.first as? HKQuantitySample {
+                    continuation.resume(returning: (sample.quantity.doubleValue(for: unit), sample.startDate))
+                } else {
+                    continuation.resume(returning: (0, nil))
+                }
             }
             healthStore.execute(query)
         }
     }
 
-    private func fetchSleepHours(start: Date) async -> Double {
-        await withCheckedContinuation { continuation in
-            guard let sleepType = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) else {
-                continuation.resume(returning: 0)
-                return
-            }
-            let predicate = HKQuery.predicateForSamples(
-                withStart: Calendar.current.date(byAdding: .day, value: -1, to: start),
-                end: Date()
-            )
-            let query = HKSampleQuery(
-                sampleType: sleepType,
-                predicate: predicate,
-                limit: HKObjectQueryNoLimit,
-                sortDescriptors: nil
-            ) { _, results, _ in
-                let totalSeconds = (results as? [HKCategorySample])?.reduce(0.0) { sum, sample in
-                    // Only count asleep stages (not inBed)
-                    if sample.value != HKCategoryValueSleepAnalysis.inBed.rawValue {
-                        return sum + sample.endDate.timeIntervalSince(sample.startDate)
-                    }
-                    return sum
-                } ?? 0
-                continuation.resume(returning: totalSeconds / 3600)
-            }
-            healthStore.execute(query)
-        }
+    private func formatRelative(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        formatter.locale = Locale(identifier: "it_IT")
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
 struct MetricCard: View {
     let title: String
     let value: String
+    var unit: String? = nil
     let icon: String
     let color: Color
+    var subtitle: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -157,9 +174,21 @@ struct MetricCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text(value)
-                .font(.title2)
-                .fontWeight(.semibold)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                if let unit {
+                    Text(unit)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()

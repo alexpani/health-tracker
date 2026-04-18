@@ -1,10 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { apiGet, apiPost } from "./api"
+import { apiDelete, apiGet, apiPatch, apiPost } from "./api"
 import type {
   Aggregation,
+  BlacklistEntry,
   CategorySample,
+  CorrelatedSample,
+  IngestRule,
   LatestSampleResponse,
   PendingWrite,
+  RulesSummary,
+  SampleFacets,
   SamplesResponse,
   SyncStatus,
   TypeCount,
@@ -19,6 +24,10 @@ export interface SamplesQuery {
   aggregation?: Aggregation
   limit?: number
   offset?: number
+  sources?: string[]
+  devices?: string[]
+  value_min?: number
+  value_max?: number
 }
 
 export function useSamples(opts: SamplesQuery, enabled = true) {
@@ -36,6 +45,15 @@ export function useLatest(type: string, enabled = true) {
     queryFn: () => apiGet<LatestSampleResponse>("/api/v1/samples/latest", { type }),
     enabled,
     staleTime: 60_000,
+  })
+}
+
+export function useSampleFacets(type: string, enabled = true) {
+  return useQuery({
+    queryKey: ["sampleFacets", type],
+    queryFn: () => apiGet<SampleFacets>("/api/v1/samples/facets", { type }),
+    enabled: enabled && !!type,
+    staleTime: 5 * 60_000,
   })
 }
 
@@ -69,6 +87,100 @@ export function useCategories(type: string, start?: string, end?: string, enable
       }),
     enabled,
     staleTime: 60_000,
+  })
+}
+
+export async function fetchCorrelated(sampleId: number, types: string[], minutes = 5): Promise<CorrelatedSample[]> {
+  return apiGet<CorrelatedSample[]>(`/api/v1/samples/${sampleId}/correlated`, {
+    types,
+    minutes,
+  })
+}
+
+export function useBulkDeleteSamples() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: number[]) => apiPost<{ deleted: number }>("/api/v1/samples/bulk-delete", { ids }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["samples"] })
+      qc.invalidateQueries({ queryKey: ["sampleFacets"] })
+    },
+  })
+}
+
+// --- Rules / Settings ---
+
+export function useRules() {
+  return useQuery({
+    queryKey: ["rules"],
+    queryFn: () => apiGet<IngestRule[]>("/api/v1/rules"),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useRulesSummary() {
+  return useQuery({
+    queryKey: ["rulesSummary"],
+    queryFn: () => apiGet<RulesSummary>("/api/v1/rules/summary"),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useCreateRule() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: Partial<IngestRule>) => apiPost<IngestRule>("/api/v1/rules", input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["rules"] })
+      qc.invalidateQueries({ queryKey: ["rulesSummary"] })
+    },
+  })
+}
+
+export function useUpdateRule() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: number; patch: Partial<IngestRule> }) =>
+      apiPatch<IngestRule>(`/api/v1/rules/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["rules"] }),
+  })
+}
+
+export function useDeleteRule() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => apiDelete<{ deleted: boolean }>(`/api/v1/rules/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["rules"] })
+      qc.invalidateQueries({ queryKey: ["rulesSummary"] })
+    },
+  })
+}
+
+export function useResetRuleStats() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => apiPost<IngestRule>(`/api/v1/rules/${id}/reset-stats`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["rules"] }),
+  })
+}
+
+export function useBlacklist() {
+  return useQuery({
+    queryKey: ["blacklist"],
+    queryFn: () => apiGet<BlacklistEntry[]>("/api/v1/blacklist", { limit: 500 }),
+    refetchInterval: 60_000,
+  })
+}
+
+export function useRemoveBlacklist() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => apiDelete<{ removed: boolean }>(`/api/v1/blacklist/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["blacklist"] })
+      qc.invalidateQueries({ queryKey: ["rulesSummary"] })
+    },
   })
 }
 

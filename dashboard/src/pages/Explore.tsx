@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart"
 import { SampleTable } from "@/components/SampleTable"
+import { FilterBar } from "@/components/FilterBar"
 import {
   TimeRangeSelector,
   suggestAggregation,
@@ -12,17 +13,41 @@ import { AggregationSelector } from "@/components/controls/AggregationSelector"
 import { useSamples, useTypes } from "@/lib/queries"
 import { getMeta } from "@/lib/healthkit"
 import { formatNumber } from "@/lib/utils"
-import type { Aggregation, Sample, TimeRange } from "@/lib/types"
+import type { AdvancedFilters, Aggregation, Sample, TimeRange } from "@/lib/types"
 
 export default function Explore() {
   const types = useTypes()
   const [type, setType] = useState<string>("")
   const [range, setRange] = useState<TimeRange>("30d")
   const [aggregation, setAggregation] = useState<Aggregation>(suggestAggregation("30d"))
+  const [advanced, setAdvanced] = useState<AdvancedFilters>({})
 
   const dates = useMemo(() => timeRangeToDates(range), [range])
-  const chart = useSamples({ type, ...dates, aggregation, limit: 2000 }, !!type)
-  const raw = useSamples({ type, ...dates, aggregation: "none", limit: 100 }, !!type)
+  const effectiveStart = advanced.start ?? dates.start
+  const effectiveEnd = advanced.end ?? dates.end
+
+  const chart = useSamples({
+    type,
+    start: effectiveStart,
+    end: effectiveEnd,
+    aggregation,
+    sources: advanced.sources,
+    devices: advanced.devices,
+    value_min: advanced.value_min,
+    value_max: advanced.value_max,
+    limit: 2000,
+  }, !!type)
+  const raw = useSamples({
+    type,
+    start: effectiveStart,
+    end: effectiveEnd,
+    aggregation: "none",
+    sources: advanced.sources,
+    devices: advanced.devices,
+    value_min: advanced.value_min,
+    value_max: advanced.value_max,
+    limit: 100,
+  }, !!type)
 
   const sortedTypes = useMemo(() => {
     return [...(types.data ?? [])].sort((a, b) => b.count - a.count)
@@ -36,7 +61,7 @@ export default function Explore() {
       </div>
 
       <Card>
-        <CardContent className="p-4">
+        <CardContent className="p-4 space-y-3">
           <div className="flex flex-wrap gap-2">
             <Select value={type} onValueChange={setType}>
               <SelectTrigger className="w-[320px]">
@@ -53,6 +78,7 @@ export default function Explore() {
             <TimeRangeSelector value={range} onChange={r => { setRange(r); setAggregation(suggestAggregation(r)) }} />
             <AggregationSelector value={aggregation} onChange={setAggregation} />
           </div>
+          {type && <FilterBar type={type} value={advanced} onChange={setAdvanced} />}
         </CardContent>
       </Card>
 

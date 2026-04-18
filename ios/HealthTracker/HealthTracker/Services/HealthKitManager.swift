@@ -54,6 +54,25 @@ actor HealthKitManager {
         (.electrodermalActivity, .siemen()),
         (.numberOfTimesFallen, .count()),
         (.uvExposure, .count()),
+
+        // Fitness avanzato
+        (.vo2Max, HKUnit(from: "ml/(kg*min)")),
+        (.runningPower, .watt()),
+        (.runningSpeed, HKUnit.meter().unitDivided(by: .second())),
+        (.runningStrideLength, .meter()),
+        (.runningGroundContactTime, .secondUnit(with: .milli)),
+        (.runningVerticalOscillation, .meterUnit(with: .centi)),
+        (.cyclingPower, .watt()),
+        (.cyclingCadence, HKUnit.count().unitDivided(by: .minute())),
+        (.cyclingSpeed, HKUnit.meter().unitDivided(by: .second())),
+        (.cyclingFunctionalThresholdPower, .watt()),
+        (.stairAscentSpeed, HKUnit.meter().unitDivided(by: .second())),
+        (.stairDescentSpeed, HKUnit.meter().unitDivided(by: .second())),
+        (.walkingSpeed, HKUnit.meter().unitDivided(by: .second())),
+        (.walkingStepLength, .meter()),
+        (.walkingAsymmetryPercentage, .percent()),
+        (.walkingDoubleSupportPercentage, .percent()),
+        (.sixMinuteWalkTestDistance, .meter()),
     ]
 
     // Types the app is allowed to WRITE to Apple Health.
@@ -113,6 +132,44 @@ actor HealthKitManager {
             }
         }
         return set
+    }
+
+    /// Starts HKObserverQuery on all read types. iOS will call `onChange` whenever
+    /// new samples are added to HealthKit, even when the app is backgrounded
+    /// (requires background delivery). The callback should trigger a quick sync.
+    func startObservingNewSamples(onChange: @escaping @Sendable () async -> Void) {
+        let store = self.healthStore
+
+        let runCallback = { (completion: @escaping HKObserverQueryCompletionHandler) in
+            Task {
+                await onChange()
+                completion()
+            }
+        }
+
+        for (identifier, _) in Self.quantityTypes {
+            guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else { continue }
+            let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, _ in
+                runCallback(completion)
+            }
+            store.execute(query)
+            store.enableBackgroundDelivery(for: type, frequency: .hourly) { _, _ in }
+        }
+
+        for identifier in Self.categoryTypes {
+            guard let type = HKCategoryType.categoryType(forIdentifier: identifier) else { continue }
+            let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, _ in
+                runCallback(completion)
+            }
+            store.execute(query)
+            store.enableBackgroundDelivery(for: type, frequency: .hourly) { _, _ in }
+        }
+
+        let workoutQuery = HKObserverQuery(sampleType: .workoutType(), predicate: nil) { _, completion, _ in
+            runCallback(completion)
+        }
+        store.execute(workoutQuery)
+        store.enableBackgroundDelivery(for: .workoutType(), frequency: .hourly) { _, _ in }
     }
 
     func requestAuthorization() async throws {

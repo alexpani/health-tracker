@@ -1,13 +1,15 @@
 # Health Tracker Bridge
 
-A bidirectional bridge between **Apple Health** and **web applications**.
+A **bidirectional** bridge between **Apple Health** and **web applications**.
 
-Apple HealthKit is only accessible from native iOS apps. This project creates a bridge that:
+Apple HealthKit is only accessible from native iOS apps. This project creates a self-hosted stack that:
 
-1. **Reads** all health data from Apple Health (steps, heart rate, sleep, weight, workouts, nutrition, and 40+ more types)
+1. **Reads** all health data from Apple Health (40+ types: steps, heart rate, sleep, weight, workouts, nutrition, VO2 max, running/cycling/walking metrics, and more)
 2. **Stores** it in a PostgreSQL database via a FastAPI REST API
-3. **Visualizes** it through a React web dashboard with time-series charts
+3. **Visualizes** it through a React web dashboard with time-series charts, filters, and per-type details
 4. **Writes back** body measurements and nutrition data from web apps to Apple Health
+5. **Deletes** samples both locally and on Apple Health from the dashboard
+6. **Filters spurious data** at ingest time via DB-configurable rules + UUID blacklist (auto-populated by PG trigger on delete)
 
 ## Architecture
 
@@ -17,6 +19,7 @@ Apple HealthKit is only accessible from native iOS apps. This project creates a 
 │  (HealthKit)│ ──────► │   (Proxmox LXC)  │ ◄────── │  (Proxmox LXC)  │
 │             │ ◄────── │                  │ ──────► │                 │
 │  SwiftUI    │  write  │  REST API        │  write  │  Recharts       │
+│             │  delete │  Rules + BL      │  delete │  shadcn/ui      │
 └─────────────┘         └──────────────────┘         └─────────────────┘
 ```
 
@@ -24,73 +27,82 @@ Apple HealthKit is only accessible from native iOS apps. This project creates a 
 
 ### Backend (`backend/`)
 
-FastAPI + SQLAlchemy + PostgreSQL, deployed as Docker containers.
+FastAPI + SQLAlchemy (async) + PostgreSQL, deployed as Docker containers. Alembic for migrations.
 
-- **Ingest API**: batch POST endpoints for quantity samples, category samples, and workouts
-- **Query API**: GET endpoints with aggregation (hourly, daily, weekly, monthly), pagination, and filtering
-- **Write API**: queue data from web apps to be written to Apple Health by the iOS app
-- **Delete API**: plan and execute bulk deletions across both backend and Apple Health
-- **Deduplication**: UUID-based `ON CONFLICT DO NOTHING` — idempotent and crash-safe
-- **Validation filters**: server-side rules to reject out-of-range samples (e.g., shared scale data)
+- **Ingest API**: batch POST for quantity samples, category samples, workouts. Filtered through configurable rules + UUID blacklist.
+- **Query API**: GET with aggregation (hourly, daily, weekly, monthly), pagination, filters (sources, devices, value range). Endpoints for facets, correlated samples, latest values.
+- **Write API**: queue data from web apps; iOS polls `pending` and writes to Apple Health, confirms or fails.
+- **Delete API**: plan + confirm + fail workflow for both local DB and Apple Health deletions.
+- **Rules API**: CRUD for validation rules (value_range, blocked_source) with hit counters.
+- **Blacklist API**: list/add/remove UUIDs; `purge-and-blacklist` to delete + blacklist atomically.
+- **Trigger `trg_blacklist_on_delete`**: any DELETE on `health_samples` auto-blacklists the UUID — prevents re-ingestion on future syncs.
 
 ### iOS App (`ios/`)
 
 SwiftUI native app targeting iOS 17+.
 
-- Reads 40+ HealthKit data types (steps, heart rate, sleep stages, weight, SpO2, blood pressure, workouts, nutrition, etc.)
-- Incremental sync with `lastSyncDate` per type stored in SwiftData
-- 90-day fetch windows to manage memory on large datasets
-- Parallel HTTP uploads (4 concurrent) for throughput
-- Deferred sync for heavy types (HeartRate, HRV) to not block lighter data
-- Background sync via `BGAppRefreshTask`
-- Writes pending data from web apps to Apple Health
-- Progress tracking UI with per-type progress bars and stop button
+- **Reads** 40+ HealthKit data types
+- **Incremental sync** with `lastSyncDate` per type stored in SwiftData
+- **90-day fetch windows** for memory-safe sync of large datasets (heart rate, calories)
+- **Parallel HTTP uploads** (4 concurrent) for throughput
+- **Deferred sync** for heavy types (configurable)
+- **Real-time auto-sync** via `HKObserverQuery` + background delivery — the app syncs as soon as Apple Health records new data, even when backgrounded
+- **Auto-sync on launch + foreground** (10-min throttle)
+- **BGAppRefreshTask** fallback (hourly best case)
+- **Writes pending data** from web apps to Apple Health via `HKHealthStore.save()`
+- **Deletes samples** on Apple Health via `HKHealthStore.delete()`
+- **Progress UI**: live per-type progress bars, sample counter, stop button, date reached
+- **Persistent sync summary** (last sync log, duration, timing) across app launches
 
 ### Dashboard (`dashboard/`)
 
 React + Vite + TypeScript + Tailwind CSS + shadcn/ui + Recharts.
 
-- **Home**: today's metrics (steps, calories, heart rate, weight) + weekly charts
-- **Activity**: steps, distance, flights climbed, calories with configurable time range and aggregation
-- **Vitals**: heart rate, HRV, SpO2, blood pressure, respiratory rate, temperature
-- **Body**: weight, BMI, body fat percentage, lean body mass
-- **Sleep**: sleep analysis with stacked bar chart showing sleep stages per night
-- **Workouts**: filterable workout list with weekly frequency chart
-- **Nutrition**: calories, macros, water, caffeine
-- **Explore**: select any data type and view chart + raw data table
-- **Insert**: form to write body measurements and nutrition data back to Apple Health
+**Pages:**
+- **Home** — today's metrics + weekly charts + sync status
+- **Attivita** — steps, distance, flights, calories (tabbed, filter bar)
+- **Vitali** — HR, HRV, SpO2, BP, respiratory, temperature, glucose
+- **Corpo** — weight, BMI, body fat, lean mass, height, waist — with multi-value tooltip (all body metrics at the same instant) + row-level delete with correlated-samples confirmation
+- **Sonno** — sleep analysis, stacked bar chart with sleep stages per night
+- **Workout** — list with filters + weekly frequency chart + stats
+- **Nutrizione** — calories, macros, water, caffeine
+- **Fitness** — VO2 max, running/cycling/walking advanced metrics, stair speeds
+- **Esplora** — universal browser for any data type with filters
+- **Inserisci** — form to write body/nutrition back to Apple Health
+- **Impostazioni** — ingest rules CRUD, blacklist UUIDs, hit stats
+
+**Filters** (on all type browsers):
+- Precise date range (datetime pickers)
+- Multiple sources (Withings, iPhone, Apple Watch, ...)
+- Multiple devices
+- Value min/max
 
 ## Quick Start
 
 ### Prerequisites
-
-- macOS with Xcode 16+ and an Apple Developer account
-- Docker on a Linux host (or Proxmox LXC)
-- Physical iPhone (HealthKit requires a real device)
+- macOS + Xcode 16+ + Apple Developer account (personal team OK)
+- Docker host (Proxmox LXC, bare Linux, or macOS)
+- Physical iPhone
 
 ### 1. Backend
 
 ```bash
 cd backend
 docker compose up -d
-
-# First time: generate and apply database migration
-docker compose exec api alembic revision --autogenerate -m "initial"
 docker compose exec api alembic upgrade head
 ```
 
-API docs: `http://<backend-ip>:8000/docs`
+Open `http://<backend-ip>:8000/docs` for the Swagger UI.
 
 ### 2. iOS App
 
 1. Open `ios/HealthTracker/HealthTracker.xcodeproj` in Xcode
-2. Set your signing team and a unique bundle identifier
-3. Add HealthKit capability in Signing & Capabilities
-4. Connect your iPhone, select it as build destination
-5. `⌘+R` to build and install
-6. Grant HealthKit read/write permissions when prompted
-7. Go to Settings tab, set backend server URL
-8. Press "Sync Now" to start syncing
+2. Set signing team + a unique bundle identifier
+3. Ensure HealthKit capability is enabled (Signing & Capabilities)
+4. Connect your iPhone, select as build destination, ⌘+R
+5. Grant read/write permissions when prompted
+6. Open **Settings** tab, set server URL (e.g., `http://192.168.68.166:8000`)
+7. Press **Sync Now** (or leave it — auto-sync will fire on launch, foreground, or when Apple Health receives new data)
 
 ### 3. Dashboard
 
@@ -103,38 +115,51 @@ VITE_API_URL=http://<backend-ip>:8000 npm run dev
 
 # Production (Docker)
 docker compose up -d --build
+# → http://<dashboard-ip>
 ```
 
 ## API Examples
 
 ```bash
-# Check sync status
+# Sync status (fast, via pg_class)
 curl http://localhost:8000/api/v1/sync/status
 
-# Get daily step count for last 7 days
-curl "http://localhost:8000/api/v1/samples?type=HKQuantityTypeIdentifierStepCount&aggregation=daily&start=$(date -v-7d +%Y-%m-%dT00:00:00Z)"
+# Daily step count for last 7 days
+curl "http://localhost:8000/api/v1/samples?type=HKQuantityTypeIdentifierStepCount&aggregation=daily&start=2025-01-01T00:00:00Z"
 
-# Get latest weight
+# Latest weight
 curl "http://localhost:8000/api/v1/samples/latest?type=HKQuantityTypeIdentifierBodyMass"
 
-# Get heart rate hourly average for today
-curl "http://localhost:8000/api/v1/samples?type=HKQuantityTypeIdentifierHeartRate&aggregation=hourly&start=$(date +%Y-%m-%dT00:00:00Z)"
+# Query with filters
+curl "http://localhost:8000/api/v1/samples?type=HKQuantityTypeIdentifierBodyMass&sources=Withings&value_min=70&aggregation=weekly"
 
-# Write a weight measurement (will be synced to Apple Health)
+# Write a weight measurement (queued; iOS will sync to Apple Health)
 curl -X POST http://localhost:8000/api/v1/write \
   -H "Content-Type: application/json" \
-  -d '{"type":"HKQuantityTypeIdentifierBodyMass","value":75.5,"unit":"kg","start_date":"2025-01-01T09:00:00Z","end_date":"2025-01-01T09:00:00Z"}'
+  -d '{"type":"HKQuantityTypeIdentifierBodyMass","value":75.5,"unit":"kg","start_date":"2026-01-01T09:00:00Z","end_date":"2026-01-01T09:00:00Z"}'
 
-# List all available data types
-curl http://localhost:8000/api/v1/samples/types
+# Plan a bulk deletion
+curl -X POST http://localhost:8000/api/v1/delete/plan \
+  -H "Content-Type: application/json" \
+  -d '{"types":["HKQuantityTypeIdentifierBodyMass"],"value_max":70}'
+
+# Create a new ingest rule
+curl -X POST http://localhost:8000/api/v1/rules \
+  -H "Content-Type: application/json" \
+  -d '{"rule_type":"blocked_source","source_name":"FooScale","reason":"unreliable"}'
+
+# Purge + blacklist
+curl -X POST http://localhost:8000/api/v1/blacklist/purge-and-blacklist \
+  -H "Content-Type: application/json" \
+  -d '{"types":["HKQuantityTypeIdentifierBodyMass"],"source_name":"FooScale","reason":"cleanup"}'
 ```
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| iOS | Swift, SwiftUI, HealthKit, SwiftData, BGTaskScheduler |
-| Backend | Python, FastAPI, SQLAlchemy (async), PostgreSQL, Alembic, Docker |
+| iOS | Swift, SwiftUI, HealthKit, SwiftData, BGTaskScheduler, HKObserverQuery |
+| Backend | Python, FastAPI, SQLAlchemy (async), PostgreSQL 16, Alembic, Docker |
 | Dashboard | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, Recharts, TanStack Query |
 
 ## License

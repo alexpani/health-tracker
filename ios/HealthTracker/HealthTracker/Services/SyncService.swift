@@ -3,10 +3,25 @@ import HealthKit
 import SwiftData
 import os
 
+/// Persisted summary of the last completed sync
+struct LastSyncSummary: Codable {
+    var startedAt: Date
+    var completedAt: Date
+    var durationSeconds: Double
+    var totalSamples: Int
+    var log: [String]
+    var wasInterrupted: Bool
+}
+
 @Observable
 final class SyncService {
     var isSyncing = false
     var lastSyncDate: Date?
+    var lastSyncStartedAt: Date?
+    var lastSyncDurationSeconds: Double?
+    var lastSyncTotalSamples: Int = 0
+    var lastSyncLog: [String] = []        // preserved summary of the last completed sync
+    var lastSyncWasInterrupted: Bool = false
     var currentType: String = ""
     var progress: Double = 0
     var typeProgress: Double = 0          // progress within current type (0..1)
@@ -26,23 +41,86 @@ final class SyncService {
     private let fetchWindowDays = 90
 
     // Types to sync LAST (after everything else has finished).
-    // HeartRate e HRV sono i piu' pesanti: cosi' non bloccano peso, sonno, workout, ecc.
-    private let deferredTypes: Set<String> = [
-        HKQuantityTypeIdentifier.heartRate.rawValue,
-        HKQuantityTypeIdentifier.heartRateVariabilitySDNN.rawValue,
-    ]
+    private let deferredTypes: Set<String> = []
+
+    private let lastSyncKey = "last_sync_summary_v1"
+
+    init() {
+        loadLastSyncSummary()
+    }
 
     func setModelContainer(_ container: ModelContainer) {
         self.modelContainer = container
+    }
+
+    private func loadLastSyncSummary() {
+        guard let data = UserDefaults.standard.data(forKey: lastSyncKey) else { return }
+        guard let summary = try? JSONDecoder().decode(LastSyncSummary.self, from: data) else { return }
+        lastSyncStartedAt = summary.startedAt
+        lastSyncDate = summary.completedAt
+        lastSyncDurationSeconds = summary.durationSeconds
+        lastSyncTotalSamples = summary.totalSamples
+        lastSyncLog = summary.log
+        lastSyncWasInterrupted = summary.wasInterrupted
+    }
+
+    private func saveLastSyncSummary(startedAt: Date, interrupted: Bool) {
+        let summary = LastSyncSummary(
+            startedAt: startedAt,
+            completedAt: Date(),
+            durationSeconds: Date().timeIntervalSince(startedAt),
+            totalSamples: totalSamplesSynced,
+            log: syncLog,
+            wasInterrupted: interrupted
+        )
+        if let data = try? JSONEncoder().encode(summary) {
+            UserDefaults.standard.set(data, forKey: lastSyncKey)
+        }
     }
 
     func requestStop() {
         shouldStop = true
     }
 
+    /// Quick sync: calls performFullSync but only if not already syncing and
+    /// enough time has passed since the last sync. Intended for automatic
+    /// triggers (HKObserverQuery, app launch, scene change).
+    @MainActor
+    func performQuickSync(minInterval: TimeInterval = 120) async {
+        if isSyncing { return }
+        if let last = lastSyncDate, Date().timeIntervalSince(last) < minInterval {
+            return
+        }
+        await performFullSync()
+    }
+
+    /// Resets the sync date for body-related types so they get re-fetched from scratch.
+    @MainActor
+    func resetBodySync() async {
+        let typeIds = [
+            HKQuantityTypeIdentifier.bodyMass.rawValue,
+            HKQuantityTypeIdentifier.bodyMassIndex.rawValue,
+            HKQuantityTypeIdentifier.bodyFatPercentage.rawValue,
+            HKQuantityTypeIdentifier.leanBodyMass.rawValue,
+            HKQuantityTypeIdentifier.height.rawValue,
+            HKQuantityTypeIdentifier.waistCircumference.rawValue,
+        ]
+        guard let container = modelContainer else { return }
+        let context = ModelContext(container)
+        for tid in typeIds {
+            let predicate = #Predicate<SyncState> { $0.typeIdentifier == tid }
+            let descriptor = FetchDescriptor(predicate: predicate)
+            if let existing = try? context.fetch(descriptor).first {
+                context.delete(existing)
+            }
+        }
+        try? context.save()
+    }
+
     @MainActor
     func performFullSync() async {
         guard !isSyncing else { return }
+        let startedAt = Date()
         isSyncing = true
         shouldStop = false
         lastError = nil
@@ -51,6 +129,7 @@ final class SyncService {
         typeProgress = 0
         totalSamplesSynced = 0
         currentWindowDate = nil
+        lastSyncStartedAt = startedAt
 
         // Process pending writes and deletions FIRST (quick)
         await processPendingWrites()
@@ -129,6 +208,14 @@ final class SyncService {
                 syncLog.append("Nessun nuovo dato da sincronizzare")
             }
         }
+
+        // Preserve summary of this sync for the UI + persist across launches
+        let wasInterrupted = shouldStop
+        lastSyncDurationSeconds = Date().timeIntervalSince(startedAt)
+        lastSyncTotalSamples = totalSamplesSynced
+        lastSyncLog = syncLog
+        lastSyncWasInterrupted = wasInterrupted
+        saveLastSyncSummary(startedAt: startedAt, interrupted: wasInterrupted)
 
         currentType = ""
         currentWindowDate = nil

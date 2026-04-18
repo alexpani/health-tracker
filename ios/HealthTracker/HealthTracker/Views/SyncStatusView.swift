@@ -1,5 +1,15 @@
 import SwiftUI
 
+private func formatDuration(_ seconds: Double) -> String {
+    let s = Int(seconds)
+    let h = s / 3600
+    let m = (s % 3600) / 60
+    let sec = s % 60
+    if h > 0 { return "\(h)h \(m)m \(sec)s" }
+    if m > 0 { return "\(m)m \(sec)s" }
+    return "\(sec)s"
+}
+
 struct SyncStatusView: View {
     @Environment(SyncService.self) private var syncService
     @State private var serverConnected = false
@@ -113,12 +123,70 @@ struct SyncStatusView: View {
                     }
                 }
 
-                if !syncService.syncLog.isEmpty {
-                    Section("Log") {
-                        ForEach(syncService.syncLog, id: \.self) { entry in
-                            Text(entry)
+                if syncService.isSyncing {
+                    // Live log during an active sync
+                    if !syncService.syncLog.isEmpty {
+                        Section("Attivita'") {
+                            ForEach(syncService.syncLog, id: \.self) { entry in
+                                Text(entry)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } else {
+                    // Persistent summary of the last completed sync
+                    if syncService.lastSyncLog.isEmpty && syncService.lastSyncDate == nil {
+                        Section("Ultima sync") {
+                            Text("Nessuna sync effettuata in questa sessione.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Section("Ultima sync") {
+                            if syncService.lastSyncWasInterrupted {
+                                HStack {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.orange)
+                                    Text("Interrotta")
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                            if let started = syncService.lastSyncStartedAt {
+                                HStack {
+                                    Text("Iniziata")
+                                    Spacer()
+                                    Text(started, format: .dateTime.day().month().year().hour().minute())
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                }
+                            }
+                            if let duration = syncService.lastSyncDurationSeconds {
+                                HStack {
+                                    Text("Durata")
+                                    Spacer()
+                                    Text(formatDuration(duration))
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                }
+                            }
+                            HStack {
+                                Text("Campioni inviati")
+                                Spacer()
+                                Text(syncService.lastSyncTotalSamples.formatted())
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
+
+                        if !syncService.lastSyncLog.isEmpty {
+                            Section("Log ultima sync") {
+                                ForEach(syncService.lastSyncLog, id: \.self) { entry in
+                                    Text(entry)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
                     }
                 }

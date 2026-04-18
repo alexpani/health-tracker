@@ -9,6 +9,8 @@ import {
   Moon,
   PlusCircle,
   Scale,
+  Settings as SettingsIcon,
+  Zap,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -19,9 +21,11 @@ const navItems = [
   { to: "/body", label: "Corpo", icon: Scale },
   { to: "/sleep", label: "Sonno", icon: Moon },
   { to: "/workouts", label: "Workout", icon: Dumbbell },
+  { to: "/fitness", label: "Fitness", icon: Zap },
   { to: "/nutrition", label: "Nutrizione", icon: Apple },
   { to: "/explore", label: "Esplora", icon: Compass },
   { to: "/insert", label: "Inserisci", icon: PlusCircle },
+  { to: "/settings", label: "Impostazioni", icon: SettingsIcon },
 ]
 
 export default function Sidebar() {

@@ -3,14 +3,14 @@ import SwiftUI
 struct ContentView: View {
     var body: some View {
         TabView {
-            DashboardView()
-                .tabItem {
-                    Label("Dashboard", systemImage: "heart.text.square")
-                }
-
             SyncStatusView()
                 .tabItem {
                     Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                }
+
+            DashboardView()
+                .tabItem {
+                    Label("Dashboard", systemImage: "heart.text.square")
                 }
 
             SettingsView()

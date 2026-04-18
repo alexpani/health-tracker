@@ -1,6 +1,7 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,16 +25,32 @@ async def query_samples(
     start: datetime | None = None,
     end: datetime | None = None,
     aggregation: str = Query("none", pattern="^(none|hourly|daily|weekly|monthly)$"),
+    sources: list[str] | None = Query(None),
+    devices: list[str] | None = Query(None),
+    value_min: float | None = None,
+    value_max: float | None = None,
     limit: int = Query(1000, le=10000),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
+    def apply_filters(stmt):
+        if sources:
+            stmt = stmt.where(HealthSample.source_name.in_(sources))
+        if devices:
+            stmt = stmt.where(HealthSample.device.in_(devices))
+        if value_min is not None:
+            stmt = stmt.where(HealthSample.value >= value_min)
+        if value_max is not None:
+            stmt = stmt.where(HealthSample.value <= value_max)
+        return stmt
+
     if aggregation == "none":
         stmt = select(HealthSample).where(HealthSample.type == type)
         if start:
             stmt = stmt.where(HealthSample.start_date >= start)
         if end:
             stmt = stmt.where(HealthSample.start_date <= end)
+        stmt = apply_filters(stmt)
         stmt = stmt.order_by(HealthSample.start_date.desc()).offset(offset).limit(limit)
 
         result = await db.execute(stmt)
@@ -45,6 +62,7 @@ async def query_samples(
             count_stmt = count_stmt.where(HealthSample.start_date >= start)
         if end:
             count_stmt = count_stmt.where(HealthSample.start_date <= end)
+        count_stmt = apply_filters(count_stmt)
         total = (await db.execute(count_stmt)).scalar() or 0
 
         # Get unit from first sample
@@ -56,6 +74,7 @@ async def query_samples(
             aggregation="none",
             data=[
                 {
+                    "id": r.id,
                     "uuid": r.uuid,
                     "type": r.type,
                     "value": r.value,
@@ -91,6 +110,7 @@ async def query_samples(
             stmt = stmt.where(HealthSample.start_date >= start)
         if end:
             stmt = stmt.where(HealthSample.start_date <= end)
+        stmt = apply_filters(stmt)
         stmt = stmt.offset(offset).limit(limit)
 
         result = await db.execute(stmt)
@@ -120,6 +140,42 @@ async def query_samples(
             ],
             total_count=len(rows),
         )
+
+
+@router.get("/samples/facets")
+async def sample_facets(type: str, db: AsyncSession = Depends(get_db)):
+    """
+    Returns distinct source_name, device values and min/max for a type.
+    Used by the dashboard to populate filter selects.
+    """
+    sources_stmt = (
+        select(HealthSample.source_name)
+        .where(HealthSample.type == type)
+        .distinct()
+    )
+    devices_stmt = (
+        select(HealthSample.device)
+        .where(HealthSample.type == type)
+        .distinct()
+    )
+    range_stmt = (
+        select(
+            func.min(HealthSample.value).label("min"),
+            func.max(HealthSample.value).label("max"),
+        )
+        .where(HealthSample.type == type)
+    )
+
+    sources = [r[0] for r in (await db.execute(sources_stmt)).all() if r[0] is not None]
+    devices = [r[0] for r in (await db.execute(devices_stmt)).all() if r[0] is not None]
+    rng_row = (await db.execute(range_stmt)).first()
+
+    return {
+        "sources": sorted(sources),
+        "devices": sorted(devices),
+        "value_min": float(rng_row.min) if rng_row and rng_row.min is not None else None,
+        "value_max": float(rng_row.max) if rng_row and rng_row.max is not None else None,
+    }
 
 
 @router.get("/samples/types", response_model=list[TypeCount])
@@ -200,6 +256,70 @@ async def query_workouts(
 
     result = await db.execute(stmt)
     return result.scalars().all()
+
+
+@router.get("/samples/{sample_id}/correlated")
+async def correlated_samples(
+    sample_id: int,
+    types: list[str] = Query(...),
+    minutes: float = Query(5.0, ge=0, le=60),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns samples of given types within +/- `minutes` of the target sample's start_date.
+    Useful to find related measurements (BMI, body fat, lean mass) taken at the same
+    instant as a weight sample.
+    """
+    base = await db.execute(select(HealthSample).where(HealthSample.id == sample_id))
+    target = base.scalar_one_or_none()
+    if not target:
+        raise HTTPException(404, "Sample not found")
+
+    from datetime import timedelta
+    window = timedelta(minutes=minutes)
+    lower = target.start_date - window
+    upper = target.start_date + window
+
+    stmt = (
+        select(HealthSample)
+        .where(HealthSample.type.in_(types))
+        .where(HealthSample.id != sample_id)
+        .where(HealthSample.start_date >= lower)
+        .where(HealthSample.start_date <= upper)
+        .order_by(HealthSample.start_date)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "uuid": str(r.uuid),
+            "type": r.type,
+            "value": r.value,
+            "unit": r.unit,
+            "start_date": r.start_date.isoformat(),
+            "source_name": r.source_name,
+        }
+        for r in rows
+    ]
+
+
+class BulkDeleteIn(BaseModel):
+    ids: list[int]
+
+
+@router.post("/samples/bulk-delete")
+async def bulk_delete_samples(body: BulkDeleteIn, db: AsyncSession = Depends(get_db)):
+    """
+    Deletes samples by id. The trg_blacklist_on_delete trigger automatically
+    adds their UUIDs to ingest_blacklist so they won't re-appear on future syncs.
+    """
+    if not body.ids:
+        return {"deleted": 0}
+    from sqlalchemy import delete
+    stmt = delete(HealthSample).where(HealthSample.id.in_(body.ids))
+    result = await db.execute(stmt)
+    await db.commit()
+    return {"deleted": result.rowcount}
 
 
 @router.get("/sync/status", response_model=SyncStatus)

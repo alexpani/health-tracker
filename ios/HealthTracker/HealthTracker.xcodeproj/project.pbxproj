@@ -14,6 +14,7 @@
 		4D96AC4424EEAA398ED6CB14 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A60BB3C318B9CA695CEE01 /* Constants.swift */; };
 		54923C6D8FF5A424D1484E99 /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF9EB56B6D00C2BACFBE883A /* SyncStatusView.swift */; };
 		691355C902F6DC39D831A355 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 253684C4C0B0773872A1613B /* ContentView.swift */; };
+		B30C00B73518A05EBB8FA42D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 24D89267C47E66F8ACD66ECE /* Assets.xcassets */; };
 		C110D0EF6A9380D7CBFC9EB6 /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E3F3AFC2132124704CFB06 /* HealthKitManager.swift */; };
 		EAEEB979DC9D1D24BAD1C97F /* SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BEC369264AB7988CB443F12 /* SyncService.swift */; };
 		EE6977263D9785D394A154A0 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46126F0450B493E6B724CFFD /* APIClient.swift */; };
@@ -21,6 +22,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		24D89267C47E66F8ACD66ECE /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		253684C4C0B0773872A1613B /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		46126F0450B493E6B724CFFD /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		4DC5DF57A8D3D04EEADD97F8 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -49,6 +51,7 @@
 		6E48B5C56668D2DD9BB3DBE2 /* HealthTracker */ = {
 			isa = PBXGroup;
 			children = (
+				24D89267C47E66F8ACD66ECE /* Assets.xcassets */,
 				C2FE697B438E4F47F995CBA9 /* HealthTracker.entitlements */,
 				C5E1835B5C8F30F9D4BD65B4 /* HealthTrackerApp.swift */,
 				6D98CF1A3E203B0805534D5C /* Info.plist */,
@@ -114,6 +117,7 @@
 			buildConfigurationList = D43F69F8BBB571993081214D /* Build configuration list for PBXNativeTarget "HealthTracker" */;
 			buildPhases = (
 				9E8956505AD43441B5EC8EFC /* Sources */,
+				754B4E9A388040E061EF5C1E /* Resources */,
 			);
 			buildRules = (
 			);
@@ -153,6 +157,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		754B4E9A388040E061EF5C1E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B30C00B73518A05EBB8FA42D /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		9E8956505AD43441B5EC8EFC /* Sources */ = {

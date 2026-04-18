@@ -1,6 +1,5 @@
-import { TypeBrowser } from "@/components/TypeBrowser"
-import { CATEGORIES } from "@/lib/healthkit"
+import BodyBrowser from "@/components/BodyBrowser"
 
 export default function Body() {
-  return <TypeBrowser title="Corpo" subtitle="Peso, BMI, massa grassa e magra" types={CATEGORIES.body.types} />
+  return <BodyBrowser />
 }

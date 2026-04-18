@@ -8,7 +8,9 @@ import Sleep from "@/pages/Sleep"
 import Workouts from "@/pages/Workouts"
 import Nutrition from "@/pages/Nutrition"
 import Explore from "@/pages/Explore"
+import Fitness from "@/pages/Fitness"
 import Insert from "@/pages/Insert"
+import Settings from "@/pages/Settings"
 
 export default function App() {
   return (
@@ -20,9 +22,11 @@ export default function App() {
         <Route path="/body" element={<Body />} />
         <Route path="/sleep" element={<Sleep />} />
         <Route path="/workouts" element={<Workouts />} />
+        <Route path="/fitness" element={<Fitness />} />
         <Route path="/nutrition" element={<Nutrition />} />
         <Route path="/explore" element={<Explore />} />
         <Route path="/insert" element={<Insert />} />
+        <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
   )

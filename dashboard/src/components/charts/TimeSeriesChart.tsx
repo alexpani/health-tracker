@@ -50,12 +50,36 @@ export function TimeSeriesChart({ type, data, aggregation, chartType = "line", h
         value: d.value * meta.unitMultiplier,
       }))
 
+  // Detect whether the data spans more than one calendar year
+  const years = new Set(formatted.map(d => new Date(d.time).getFullYear()))
+  const multiYear = years.size > 1
+
   const dateFormatter = (iso: string) => {
     const d = new Date(iso)
-    if (aggregation === "hourly") return d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
+    if (aggregation === "hourly") {
+      return multiYear
+        ? d.toLocaleString("it-IT", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })
+        : d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
+    }
     if (aggregation === "monthly") return d.toLocaleDateString("it-IT", { month: "short", year: "2-digit" })
-    if (aggregation === "weekly") return d.toLocaleDateString("it-IT", { day: "2-digit", month: "short" })
-    return d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })
+    if (aggregation === "weekly") {
+      return multiYear
+        ? d.toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "2-digit" })
+        : d.toLocaleDateString("it-IT", { day: "2-digit", month: "short" })
+    }
+    return multiYear
+      ? d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit", year: "2-digit" })
+      : d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })
+  }
+
+  // Full date for tooltip (always shows year)
+  const tooltipLabel = (iso: string) => {
+    const d = new Date(iso)
+    if (aggregation === "hourly") {
+      return d.toLocaleString("it-IT", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+    }
+    if (aggregation === "monthly") return d.toLocaleDateString("it-IT", { month: "long", year: "numeric" })
+    return d.toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })
   }
 
   const valueFormatter = (v: number) => {
@@ -65,14 +89,32 @@ export function TimeSeriesChart({ type, data, aggregation, chartType = "line", h
 
   const ChartComp = chartType === "area" ? AreaChart : chartType === "bar" ? BarChart : LineChart
 
+  // Compute a tight Y-axis domain: [min - padding, max + padding] with 5% margin.
+  // For bar charts we keep 0 as baseline (otherwise bars look misleading).
+  const values = formatted.map(d => d.value).filter(v => Number.isFinite(v))
+  const dataMin = values.length ? Math.min(...values) : 0
+  const dataMax = values.length ? Math.max(...values) : 1
+  const range = dataMax - dataMin || Math.abs(dataMax) || 1
+  const pad = range * 0.08
+  const yDomain: [number | string, number | string] =
+    chartType === "bar"
+      ? [0, dataMax + pad]
+      : [Math.max(0, dataMin - pad), dataMax + pad]
+
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ChartComp data={formatted}>
         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
         <XAxis dataKey="time" tickFormatter={dateFormatter} minTickGap={40} tick={{ fontSize: 12 }} />
-        <YAxis tick={{ fontSize: 12 }} />
+        <YAxis
+          tick={{ fontSize: 12 }}
+          domain={yDomain}
+          tickFormatter={(v: number) =>
+            typeof v === "number" ? v.toLocaleString("it-IT", { maximumFractionDigits: 1 }) : String(v)
+          }
+        />
         <Tooltip
-          labelFormatter={dateFormatter}
+          labelFormatter={tooltipLabel}
           formatter={(v: number) => [valueFormatter(v), meta.label]}
           contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
         />

@@ -68,6 +68,7 @@ class BatchResult(BaseModel):
 
 
 class SampleOut(BaseModel):
+    id: int | None = None
     uuid: UUID
     type: str
     value: float
