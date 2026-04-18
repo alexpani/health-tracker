@@ -487,7 +487,19 @@ export function extractWorkoutMetadata(metadata?: Record<string, unknown> | null
       result.weatherTemperature = raw
     }
   }
-  if (m.HKWeatherHumidity) result.weatherHumidity = String(m.HKWeatherHumidity)
+  if (m.HKWeatherHumidity) {
+    // Apple Health serializes HKWeatherHumidity as HKQuantity in percent, often
+    // like "8100 %" meaning 81%. Normalize: if value > 100, divide by 100.
+    const raw = String(m.HKWeatherHumidity)
+    const match = raw.match(/(-?\d+(?:\.\d+)?)/)
+    if (match) {
+      let v = parseFloat(match[1])
+      if (v > 100) v = v / 100
+      result.weatherHumidity = `${v.toFixed(0)}%`
+    } else {
+      result.weatherHumidity = raw
+    }
+  }
   if (m.HKWeatherCondition) result.weatherCondition = String(m.HKWeatherCondition)
   if (m.HKWorkoutBrandName) result.brandName = String(m.HKWorkoutBrandName)
   if (m.location) result.location = String(m.location)
