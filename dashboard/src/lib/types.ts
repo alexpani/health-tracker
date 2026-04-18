@@ -45,6 +45,7 @@ export interface WorkoutDetail {
   end_date: string
   source_name: string | null
   metadata: Record<string, unknown> | null
+  notes: string | null
 }
 
 export interface WorkoutSplit {

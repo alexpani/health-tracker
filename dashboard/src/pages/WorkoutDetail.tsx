@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import {
   CartesianGrid,
@@ -13,7 +13,8 @@ import { ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { useSamples, useWorkoutByUuid, useWorkoutSplits } from "@/lib/queries"
+import { Textarea } from "@/components/ui/textarea"
+import { useSamples, useUpdateWorkoutNotes, useWorkoutByUuid, useWorkoutSplits } from "@/lib/queries"
 import { extractWorkoutMetadata, workoutName } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { AggregatedPoint, Sample } from "@/lib/types"
@@ -50,6 +51,27 @@ export default function WorkoutDetail() {
   const { uuid } = useParams<{ uuid: string }>()
   const { data: workout, isLoading } = useWorkoutByUuid(uuid)
   const { data: splitsData } = useWorkoutSplits(uuid)
+  const updateNotes = useUpdateWorkoutNotes()
+
+  const [notesDraft, setNotesDraft] = useState("")
+  const [notesSaved, setNotesSaved] = useState(false)
+
+  useEffect(() => {
+    setNotesDraft(workout?.notes ?? "")
+  }, [workout?.notes])
+
+  const saveNotes = async () => {
+    if (!uuid) return
+    try {
+      await updateNotes.mutateAsync({ uuid, notes: notesDraft })
+      setNotesSaved(true)
+      setTimeout(() => setNotesSaved(false), 2500)
+    } catch (err) {
+      alert("Errore salvataggio note: " + (err as Error).message)
+    }
+  }
+
+  const notesDirty = (workout?.notes ?? "") !== notesDraft
 
   // Fetch time-series metrics within workout range
   const hr = useSamples({
@@ -261,13 +283,40 @@ export default function WorkoutDetail() {
             </div>
             {meta.notes && (
               <div className="mt-4 pt-3 border-t">
-                <p className="text-xs text-muted-foreground mb-1">Note</p>
+                <p className="text-xs text-muted-foreground mb-1">Note allenamento (sorgente)</p>
                 <p className="text-sm">{meta.notes}</p>
               </div>
             )}
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader><CardTitle>Note</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          <Textarea
+            value={notesDraft}
+            onChange={e => setNotesDraft(e.target.value)}
+            placeholder="Aggiungi una nota per questo workout..."
+            rows={4}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={saveNotes}
+              disabled={!notesDirty || updateNotes.isPending}
+            >
+              {updateNotes.isPending ? "Salvo..." : "Salva"}
+            </Button>
+            {notesDirty && (
+              <Button size="sm" variant="ghost" onClick={() => setNotesDraft(workout.notes ?? "")}>
+                Annulla
+              </Button>
+            )}
+            {notesSaved && <span className="text-xs text-green-600">Salvata</span>}
+          </div>
+        </CardContent>
+      </Card>
 
       {splitsData && splitsData.splits.length > 0 && (
         <Card>

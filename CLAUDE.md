@@ -63,7 +63,7 @@ docker compose exec api alembic upgrade head
 
 ### Key Files
 - `app/models.py` — SQLAlchemy ORM:
-  - `HealthSample` / `CategorySample` / `Workout` — health data
+  - `HealthSample` / `CategorySample` / `Workout` — health data (Workout has user-editable `notes` column)
   - `PendingWrite` — web → HealthKit queue
   - `PendingDeletion` — web → HealthKit delete queue
   - `IngestRule` — configurable validation rules (value_range, blocked_source) with hit counters
@@ -96,6 +96,7 @@ docker compose exec api alembic upgrade head
 - `GET /api/v1/workouts/by-uuid/{uuid}` — single workout detail
 - `GET /api/v1/workouts/by-uuid/{uuid}/splits?distance_km=1.0` — per-distance splits with pace and avg HR
 - `DELETE /api/v1/workouts/by-uuid/{uuid}` — delete; returns snapshot for client-side undo
+- `PATCH /api/v1/workouts/by-uuid/{uuid}` — update editable fields (currently: notes)
 
 **Write / Delete (web ↔ Apple Health)**
 - `POST /api/v1/write` — queue a write for Apple Health
@@ -200,7 +201,7 @@ docker compose up -d --build
 - `/body` — Weight/BMI/body fat/lean mass with multi-value tooltip + row delete
 - `/sleep` — Sleep analysis with stacked bar per night
 - `/workouts` — Workout list with filters (date, activity type, distance range, sources) + configurable chart aggregation (day/week/month/year) + pace column + row-level delete with undo toast (8s)
-- `/workouts/:uuid` — Workout detail with stats, per-km splits, and charts (HR, speed, power, cadence)
+- `/workouts/:uuid` — Workout detail with stats, per-km splits, charts (HR, speed, power, cadence), and editable user notes
 - `/nutrition` — Calories, macros, water, caffeine
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - `/explore` — Universal: select any type, view chart + raw table + filters

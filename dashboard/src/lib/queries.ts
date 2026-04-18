@@ -267,6 +267,17 @@ export function useWorkoutFacets() {
   })
 }
 
+export function useUpdateWorkoutNotes() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ uuid, notes }: { uuid: string; notes: string }) =>
+      apiPatch<{ uuid: string; notes: string | null }>(`/api/v1/workouts/by-uuid/${uuid}`, { notes }),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["workout", vars.uuid] })
+    },
+  })
+}
+
 export function useDeleteWorkout() {
   const qc = useQueryClient()
   return useMutation({

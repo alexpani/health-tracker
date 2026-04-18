@@ -52,6 +52,7 @@ class WorkoutIn(BaseModel):
     end_date: datetime
     source_name: str | None = None
     metadata: dict | None = None
+    notes: str | None = None
 
 
 class WorkoutBatchIn(BaseModel):
@@ -118,6 +119,7 @@ class WorkoutOut(BaseModel):
     start_date: datetime
     end_date: datetime
     source_name: str | None
+    notes: str | None = None
     metadata: dict | None = Field(None, validation_alias="metadata_")
 
     model_config = {"from_attributes": True, "populate_by_name": True}

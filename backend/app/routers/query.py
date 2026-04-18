@@ -255,6 +255,29 @@ async def workout_by_uuid(workout_uuid: str, db: AsyncSession = Depends(get_db))
         "end_date": row.end_date.isoformat(),
         "source_name": row.source_name,
         "metadata": row.metadata_,
+        "notes": row.notes,
+    }
+
+
+class WorkoutUpdate(BaseModel):
+    notes: str | None = None
+
+
+@router.patch("/workouts/by-uuid/{workout_uuid}")
+async def update_workout(workout_uuid: str, body: WorkoutUpdate, db: AsyncSession = Depends(get_db)):
+    """Update editable fields of a workout (currently: notes)."""
+    stmt = select(Workout).where(Workout.uuid == workout_uuid)
+    row = (await db.execute(stmt)).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "Workout not found")
+    if body.notes is not None:
+        # Empty string clears the field
+        row.notes = body.notes if body.notes else None
+    await db.commit()
+    await db.refresh(row)
+    return {
+        "uuid": str(row.uuid),
+        "notes": row.notes,
     }
 
 
@@ -493,6 +516,7 @@ async def delete_workout(workout_uuid: str, db: AsyncSession = Depends(get_db)):
         "end_date": row.end_date.isoformat(),
         "source_name": row.source_name,
         "metadata": row.metadata_,
+        "notes": row.notes,
     }
     await db.execute(sqldelete(Workout).where(Workout.id == row.id))
     await db.commit()
