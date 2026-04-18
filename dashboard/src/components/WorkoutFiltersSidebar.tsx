@@ -31,6 +31,23 @@ const PACE_PRESETS: { label: string; min?: number; max?: number }[] = [
   { label: "> 7:30", min: 450 },
 ]
 
+// Distance presets in meters
+const DISTANCE_PRESETS: { label: string; min?: number; max?: number }[] = [
+  { label: "< 5 km", max: 5000 },
+  { label: "5 - 10 km", min: 5000, max: 10000 },
+  { label: "10 - 21 km", min: 10000, max: 21097 },
+  { label: "Mezza (21+ km)", min: 21097, max: 30000 },
+  { label: "Maratona (30+ km)", min: 30000 },
+]
+
+// Duration presets in seconds
+const DURATION_PRESETS: { label: string; min?: number; max?: number }[] = [
+  { label: "< 30 min", max: 1800 },
+  { label: "30 - 60 min", min: 1800, max: 3600 },
+  { label: "1 - 2 h", min: 3600, max: 7200 },
+  { label: "> 2 h", min: 7200 },
+]
+
 export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
   const { data: facets } = useWorkoutFacets()
 
@@ -56,7 +73,7 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
   ].filter(Boolean).length
 
   return (
-    <div className="space-y-5 p-4 h-full overflow-y-auto">
+    <div className="space-y-5 p-4 pb-24 h-full overflow-y-auto">
       <div className="flex items-center justify-between pb-3 border-b">
         <h3 className="font-semibold">Filtri {activeCount > 0 && <span className="text-xs text-muted-foreground">({activeCount})</span>}</h3>
         <div className="flex gap-1">
@@ -192,6 +209,23 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
             onChange={e => set("distance_max", e.target.value ? parseFloat(e.target.value) * 1000 : undefined)}
           />
         </div>
+        <div className="flex flex-wrap gap-1">
+          {DISTANCE_PRESETS.map(p => {
+            const active = value.distance_min === p.min && value.distance_max === p.max
+            return (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => onChange({ ...value, distance_min: p.min, distance_max: p.max })}
+                className={`text-xs px-2 py-1 rounded-md border ${
+                  active ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-accent"
+                }`}
+              >
+                {p.label}
+              </button>
+            )
+          })}
+        </div>
       </section>
 
       {/* Duration */}
@@ -215,6 +249,23 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
             value={value.duration_max !== undefined ? Math.round(value.duration_max / 60) : ""}
             onChange={e => set("duration_max", e.target.value ? parseFloat(e.target.value) * 60 : undefined)}
           />
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {DURATION_PRESETS.map(p => {
+            const active = value.duration_min === p.min && value.duration_max === p.max
+            return (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => onChange({ ...value, duration_min: p.min, duration_max: p.max })}
+                className={`text-xs px-2 py-1 rounded-md border ${
+                  active ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-accent"
+                }`}
+              >
+                {p.label}
+              </button>
+            )
+          })}
         </div>
       </section>
 
