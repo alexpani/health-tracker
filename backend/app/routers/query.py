@@ -434,6 +434,7 @@ async def query_workouts(
     duration_max: float | None = None,  # seconds
     pace_min: float | None = None,      # seconds per km (faster = lower)
     pace_max: float | None = None,      # seconds per km (slower = higher)
+    notes_contains: str | None = None,  # ILIKE %value%
     limit: int = Query(1000, le=10000),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -459,6 +460,9 @@ async def query_workouts(
         stmt = stmt.where(Workout.duration >= duration_min)
     if duration_max is not None:
         stmt = stmt.where(Workout.duration <= duration_max)
+    if notes_contains:
+        pattern = f"%{notes_contains}%"
+        stmt = stmt.where(Workout.notes.ilike(pattern))
     if pace_min is not None or pace_max is not None:
         # pace = duration / (distance_m / 1000) = duration * 1000 / distance
         # Filter only workouts with meaningful distance (> 100 m) to avoid div-by-zero

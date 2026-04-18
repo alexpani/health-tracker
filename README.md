@@ -64,7 +64,7 @@ React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui + Recharts + TanStack Qu
 - **Vitali** — HR, HRV, SpO2, BP, respiratory, temperature, glucose
 - **Corpo** — weight, BMI, body fat, lean mass, height, waist. **Tooltip shows all body values at the same instant** + row-level delete with correlated-samples confirmation
 - **Sonno** — sleep analysis, stacked bar chart per night
-- **Workout** — main page with **right sidebar filters** (year chips, activity, source, datetime range, distance km, duration min, **pace dual-range slider + preset chips**), summary stats, workouts-per-period chart with **click-to-drilldown** zoom (year → month → week → day → workout), list with pace column, row delete with 8s undo. Filters **persisted in sessionStorage** so they survive navigation.
+- **Workout** — main page with **left sidebar filters** (year, activity chips, source, datetime range, distance km, duration min, **pace dual-range slider + preset chips**, notes search), summary stats, workouts-per-period chart with **click-to-drilldown** zoom (year → month → week → day → workout), **sortable list** (pace, notes columns included), row delete with 8s undo. Filters **persisted in sessionStorage** so they survive navigation. Main layout uses a **hamburger menu** top-bar that opens the nav drawer.
 - **Workout detail** (`/workouts/:uuid`) — Apple Fitness-style: metrics (duration, distance, calories, pace, HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), **per-km splits** table, time-series charts (HR, running speed, power, cadence), **editable notes** card
 - **Nutrizione** — calories, macros, water, caffeine
 - **Fitness** — VO2 max, running/cycling/walking advanced metrics, stair speeds

@@ -27,7 +27,7 @@ HealthKit is only accessible from native iOS apps. This system syncs all health 
 
 - **iOS App** (`ios/HealthTracker/`): SwiftUI + HealthKit + SwiftData, reads/writes/deletes Apple Health data, syncs to backend
 - **Backend** (`backend/`): FastAPI + async SQLAlchemy + PostgreSQL 16 + Alembic, deployed via Docker on Proxmox LXC
-- **Dashboard** (`dashboard/`): React 18 + Vite + TypeScript + Tailwind + shadcn/ui + Recharts + TanStack Query, deployed via Nginx on Proxmox LXC
+- **Dashboard** (`dashboard/`): React 18 + Vite + TypeScript + Tailwind + shadcn/ui + Recharts + TanStack Query, deployed via Nginx on Proxmox LXC. Layout has a **hamburger top-bar** that opens a nav drawer (Sidebar nav items listed in `src/components/layout/Sidebar.tsx`); main content is full-width.
 
 ### Infrastructure
 
@@ -128,6 +128,7 @@ Ordered history (most recent last):
 - `GET /api/v1/workouts` query params:
   - `activity_type[]`, `effective_types[]` (slugs), `sources[]`, `years[]`
   - `start`, `end`, `distance_min/max` (meters), `duration_min/max` (seconds), `pace_min/max` (sec/km)
+  - `notes_contains` (ILIKE %x%)
   - `limit` (max 10000), `offset`
 - `GET /api/v1/workouts/facets` — for filter sidebar: `effective_types` with counts, `sources`, `years` with counts, `distance_min/max`, `duration_min/max`
 - `GET /api/v1/workouts/by-uuid/{uuid}` — single workout detail (includes notes + metadata)
@@ -281,7 +282,7 @@ docker compose up -d --build   # → http://192.168.68.190
 - `/vitals` — HR, HRV, SpO2, blood pressure, respiratory, temperature, glucose
 - `/body` — weight, BMI, body fat, lean mass, height, waist — **custom tooltip shows all body values at same instant**; row-level delete with correlated-samples confirmation
 - `/sleep` — sleep analysis, stacked bar per night
-- `/workouts` — **main Workouts page** with right sidebar filters, summary metric cards, workouts-per-period chart with click-to-drilldown (zoom in), full list table with pace column, row-level delete with 8s undo toast
+- `/workouts` — **main Workouts page** with **left sidebar filters** (year, activity, source, datetime, distance km, duration min, pace slider + presets, notes search), summary cards, workouts-per-period chart with click-to-drilldown, **sortable** list table (click headers to sort asc/desc) with pace and truncated **notes** columns, row-level delete with 8s undo toast
 - `/workouts/:uuid` — **Apple Fitness-style detail**: metrics (duration, distance, calories, avg pace, avg/max HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), per-km splits table, time-series charts (HR, running speed, power, cadence), **editable notes** card
 - `/nutrition` — calories, macros, water, caffeine
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
-import { Filter, Trash2, Undo2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Filter, Trash2, Undo2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -13,6 +13,22 @@ import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { Workout, WorkoutFilters } from "@/lib/types"
 
 type ChartAggregation = "day" | "week" | "month" | "all"
+
+type SortKey = "start_date" | "activity" | "duration" | "distance" | "pace" | "calories" | "source" | "notes"
+type SortDir = "asc" | "desc"
+
+function compare<T>(a: T, b: T, dir: SortDir): number {
+  if (a === null || a === undefined) return 1
+  if (b === null || b === undefined) return -1
+  if (a < b) return dir === "asc" ? -1 : 1
+  if (a > b) return dir === "asc" ? 1 : -1
+  return 0
+}
+
+function paceSecPerKm(w: Workout): number | null {
+  if (!w.duration || !w.total_distance || w.total_distance <= 0) return null
+  return w.duration / (w.total_distance / 1000)
+}
 
 function formatPace(durationSec: number | null, distanceMeters: number | null): string {
   if (!durationSec || !distanceMeters || distanceMeters <= 0) return "-"
@@ -97,16 +113,60 @@ export default function Workouts() {
   const [filters, setFilters] = useState<WorkoutFilters>(saved.filters ?? {})
   const [chartAgg, setChartAgg] = useState<ChartAggregation>(saved.chartAgg ?? "week")
   const [showMobileFilters, setShowMobileFilters] = useState(false)
+  const [sortKey, setSortKey] = useState<SortKey>(saved.sortKey ?? "start_date")
+  const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir ?? "desc")
 
   const firstRender = useRef(true)
   useEffect(() => {
     if (firstRender.current) { firstRender.current = false; return }
     try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ filters, chartAgg }))
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ filters, chartAgg, sortKey, sortDir }))
     } catch {}
-  }, [filters, chartAgg])
+  }, [filters, chartAgg, sortKey, sortDir])
 
-  const { data: workouts, isLoading } = useWorkouts(filters)
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc")
+    } else {
+      setSortKey(key)
+      setSortDir(key === "start_date" || key === "duration" || key === "distance" || key === "calories" ? "desc" : "asc")
+    }
+  }
+
+  const SortHeader = ({ k, children, align = "left" }: { k: SortKey; children: React.ReactNode; align?: "left" | "right" }) => (
+    <button
+      type="button"
+      onClick={() => toggleSort(k)}
+      className={`inline-flex items-center gap-1 font-medium hover:text-foreground ${align === "right" ? "flex-row-reverse w-full justify-end" : ""}`}
+    >
+      {children}
+      {sortKey === k ? (
+        sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+      ) : (
+        <ArrowUpDown className="h-3 w-3 opacity-40" />
+      )}
+    </button>
+  )
+
+  const { data: rawWorkouts, isLoading } = useWorkouts(filters)
+
+  const workouts = useMemo(() => {
+    if (!rawWorkouts) return rawWorkouts
+    const arr = [...rawWorkouts]
+    arr.sort((a, b) => {
+      switch (sortKey) {
+        case "start_date": return compare(a.start_date, b.start_date, sortDir)
+        case "activity":   return compare(workoutName(a.activity_type, a.metadata), workoutName(b.activity_type, b.metadata), sortDir)
+        case "duration":   return compare(a.duration ?? -1, b.duration ?? -1, sortDir)
+        case "distance":   return compare(a.total_distance ?? -1, b.total_distance ?? -1, sortDir)
+        case "pace":       return compare(paceSecPerKm(a) ?? Infinity, paceSecPerKm(b) ?? Infinity, sortDir)
+        case "calories":   return compare(a.total_energy_burned ?? -1, b.total_energy_burned ?? -1, sortDir)
+        case "source":     return compare(a.source_name ?? "", b.source_name ?? "", sortDir)
+        case "notes":      return compare((a.notes ?? "").toLowerCase(), (b.notes ?? "").toLowerCase(), sortDir)
+      }
+    })
+    return arr
+  }, [rawWorkouts, sortKey, sortDir])
 
   // Undo snapshot
   const [undoSnapshot, setUndoSnapshot] = useState<{
@@ -199,8 +259,13 @@ export default function Workouts() {
   ].filter(Boolean).length
 
   return (
-    <div className="flex gap-6 -m-6 p-6 min-h-[calc(100vh-0px)]">
-      <div className="flex-1 space-y-6 min-w-0">
+    <div className="flex gap-6 -m-6 p-0 min-h-[calc(100vh-0px)]">
+      {/* Sidebar desktop a SINISTRA */}
+      <aside className="hidden lg:block w-[320px] shrink-0 border-r bg-card/30 sticky top-0 h-screen overflow-hidden">
+        <WorkoutFiltersSidebar value={filters} onChange={setFilters} />
+      </aside>
+
+      <div className="flex-1 space-y-6 min-w-0 p-6">
         <div className="flex items-center justify-between gap-2">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Workout</h1>
@@ -301,13 +366,14 @@ export default function Workouts() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Data</TableHead>
-                    <TableHead>Attivita</TableHead>
-                    <TableHead className="text-right">Durata</TableHead>
-                    <TableHead className="text-right">Distanza</TableHead>
-                    <TableHead className="text-right">Ritmo</TableHead>
-                    <TableHead className="text-right">Calorie</TableHead>
-                    <TableHead className="hidden md:table-cell">Sorgente</TableHead>
+                    <TableHead><SortHeader k="start_date">Data</SortHeader></TableHead>
+                    <TableHead><SortHeader k="activity">Attivita</SortHeader></TableHead>
+                    <TableHead className="text-right"><SortHeader k="duration" align="right">Durata</SortHeader></TableHead>
+                    <TableHead className="text-right"><SortHeader k="distance" align="right">Distanza</SortHeader></TableHead>
+                    <TableHead className="text-right"><SortHeader k="pace" align="right">Ritmo</SortHeader></TableHead>
+                    <TableHead className="text-right"><SortHeader k="calories" align="right">Calorie</SortHeader></TableHead>
+                    <TableHead className="hidden md:table-cell"><SortHeader k="source">Sorgente</SortHeader></TableHead>
+                    <TableHead className="hidden lg:table-cell max-w-[280px]"><SortHeader k="notes">Note</SortHeader></TableHead>
                     <TableHead className="w-[40px]"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -329,6 +395,12 @@ export default function Workouts() {
                         {w.total_energy_burned ? `${formatNumber(w.total_energy_burned)} kcal` : "-"}
                       </TableCell>
                       <TableCell className="text-muted-foreground hidden md:table-cell">{w.source_name ?? "-"}</TableCell>
+                      <TableCell
+                        className="hidden lg:table-cell text-muted-foreground text-xs max-w-[280px] truncate"
+                        title={w.notes ?? ""}
+                      >
+                        {w.notes ?? "-"}
+                      </TableCell>
                       <TableCell>
                         <Button
                           variant="ghost" size="icon"
@@ -349,11 +421,6 @@ export default function Workouts() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Sidebar desktop */}
-      <aside className="hidden lg:block w-[320px] shrink-0 border-l bg-card/30 -m-6 ml-0 sticky top-0 h-screen overflow-hidden">
-        <WorkoutFiltersSidebar value={filters} onChange={setFilters} />
-      </aside>
 
       {/* Sidebar mobile: overlay */}
       {showMobileFilters && (

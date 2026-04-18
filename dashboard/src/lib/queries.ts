@@ -258,6 +258,7 @@ export function useWorkouts(filters: WorkoutFilters = {}) {
         duration_max: filters.duration_max,
         pace_min: filters.pace_min,
         pace_max: filters.pace_max,
+        notes_contains: filters.notes_contains,
         limit: 10000,
       }),
     staleTime: 60_000,

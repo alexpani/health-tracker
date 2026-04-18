@@ -143,6 +143,16 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
         </section>
       )}
 
+      {/* Notes search */}
+      <section className="space-y-2">
+        <Label className="text-xs font-medium">Ricerca nelle note</Label>
+        <Input
+          placeholder="es. ritmo, serie, soglia..."
+          value={value.notes_contains ?? ""}
+          onChange={e => set("notes_contains", e.target.value || undefined)}
+        />
+      </section>
+
       {/* Period precise */}
       <section className="space-y-2">
         <Label className="text-xs font-medium">Periodo preciso</Label>
