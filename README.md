@@ -50,6 +50,7 @@ SwiftUI native app targeting iOS 17+.
 - Auto-sync on launch + foreground (10-min throttle), plus hourly `BGAppRefreshTask` fallback
 - **Writes** pending data from web apps to Apple Health via `HKHealthStore.save()`
 - **Deletes** samples via `HKHealthStore.delete()` (only samples the app created — HealthKit rule)
+- **Propagates Apple Health deletions**: workouts are synced via `HKAnchoredObjectQuery`, so cancellations on the phone side are mirrored to the backend (and auto-blacklisted so they can't re-appear)
 - Progress UI: per-type progress bar, sample counter, stop button, **date reached** display
 - Persistent sync summary (last sync log, duration, samples) across app launches via UserDefaults
 - Tabs: **Sync (default)**, Dashboard (today's body metrics), Settings

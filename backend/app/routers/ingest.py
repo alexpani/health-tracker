@@ -169,6 +169,16 @@ async def ingest_workouts(batch: WorkoutBatchIn, db: AsyncSession = Depends(get_
     if not batch.workouts:
         return BatchResult(inserted=0, duplicates_skipped=0)
 
+    # Filter out blacklisted UUIDs (same pool used for samples)
+    uuids = [w.uuid for w in batch.workouts]
+    bl_stmt = select(IngestBlacklist.hk_uuid).where(IngestBlacklist.hk_uuid.in_(uuids))
+    blocked = {r[0] for r in (await db.execute(bl_stmt)).all()}
+    original_count = len(batch.workouts)
+    workouts_in = [w for w in batch.workouts if w.uuid not in blocked]
+    bl_filtered = original_count - len(workouts_in)
+    if not workouts_in:
+        return BatchResult(inserted=0, duplicates_skipped=bl_filtered)
+
     values = [
         {
             "uuid": w.uuid,
@@ -184,7 +194,7 @@ async def ingest_workouts(batch: WorkoutBatchIn, db: AsyncSession = Depends(get_
             "title": w.title or ((w.metadata or {}).get("workout name") if isinstance(w.metadata, dict) else None),
             "notes": w.notes,
         }
-        for w in batch.workouts
+        for w in workouts_in
     ]
 
     stmt = insert(Workout.__table__).values(values).on_conflict_do_nothing(index_elements=["uuid"])
@@ -198,5 +208,5 @@ async def ingest_workouts(batch: WorkoutBatchIn, db: AsyncSession = Depends(get_
 
     return BatchResult(
         inserted=inserted,
-        duplicates_skipped=len(batch.workouts) - inserted,
+        duplicates_skipped=original_count - inserted,
     )

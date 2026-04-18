@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -565,6 +566,22 @@ async def delete_workout(workout_uuid: str, db: AsyncSession = Depends(get_db)):
     await db.execute(sqldelete(Workout).where(Workout.id == row.id))
     await db.commit()
     return {"deleted": True, "snapshot": snapshot}
+
+
+class WorkoutBulkDeleteIn(BaseModel):
+    uuids: list[UUID]
+
+
+@router.post("/workouts/bulk-delete")
+async def bulk_delete_workouts(body: WorkoutBulkDeleteIn, db: AsyncSession = Depends(get_db)):
+    """Delete workouts by UUID. Trigger will auto-blacklist them."""
+    if not body.uuids:
+        return {"deleted": 0}
+    from sqlalchemy import delete as sqldelete
+    stmt = sqldelete(Workout).where(Workout.uuid.in_(body.uuids))
+    result = await db.execute(stmt)
+    await db.commit()
+    return {"deleted": result.rowcount}
 
 
 @router.get("/samples/{sample_id}/correlated")

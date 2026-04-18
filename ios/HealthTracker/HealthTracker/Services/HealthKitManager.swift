@@ -378,6 +378,47 @@ actor HealthKitManager {
         }
     }
 
+    /// Fetches workouts using an anchored query so we also receive deletions.
+    /// Returns the workouts to upsert, the UUIDs of workouts deleted since the
+    /// last anchor, and the new anchor (to persist).
+    func fetchWorkoutsAnchored(anchor: HKQueryAnchor?) async throws -> (added: [WorkoutPayload], deletedUUIDs: [UUID], newAnchor: HKQueryAnchor?) {
+        let result: ([HKWorkout], [HKDeletedObject], HKQueryAnchor?) = try await withCheckedThrowingContinuation { cont in
+            let query = HKAnchoredObjectQuery(
+                type: .workoutType(),
+                predicate: nil,
+                anchor: anchor,
+                limit: HKObjectQueryNoLimit
+            ) { _, samples, deleted, newAnchor, error in
+                if let error { cont.resume(throwing: error); return }
+                cont.resume(returning: ((samples as? [HKWorkout]) ?? [], deleted ?? [], newAnchor))
+            }
+            healthStore.execute(query)
+        }
+
+        let (added, deleted, newAnchor) = result
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let payloads = added.map { workout -> WorkoutPayload in
+            WorkoutPayload(
+                uuid: workout.uuid.uuidString,
+                activityType: Int(workout.workoutActivityType.rawValue),
+                activityName: workout.workoutActivityType.displayName,
+                duration: workout.duration,
+                totalEnergyBurned: workout.totalEnergyBurned?.doubleValue(for: .kilocalorie()),
+                totalDistance: workout.totalDistance?.doubleValue(for: .meter()),
+                startDate: formatter.string(from: workout.startDate),
+                endDate: formatter.string(from: workout.endDate),
+                sourceName: workout.sourceRevision.source.name,
+                metadata: workout.metadata?.compactMapValues { "\($0)" },
+                title: workout.metadata?["workout name"] as? String
+            )
+        }
+
+        let deletedUUIDs = deleted.map { $0.uuid }
+        return (payloads, deletedUUIDs, newAnchor)
+    }
+
     func fetchWorkouts(since: Date?, until: Date? = nil) async throws -> [WorkoutPayload] {
         let predicate: NSPredicate? = (since != nil || until != nil)
             ? HKQuery.predicateForSamples(withStart: since, end: until, options: .strictStartDate)

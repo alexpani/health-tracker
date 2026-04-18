@@ -405,58 +405,45 @@ final class SyncService {
 
     @MainActor
     private func syncWorkouts() async {
-        let startDate = (await getSyncDate(for: "HKWorkoutType")) ?? Date.distantPast
-        let endDate = Date()
-        var totalInserted = 0
+        // Use HKAnchoredObjectQuery so we receive deletions too.
+        let anchorKey = "hk_workout_anchor_v1"
+        let anchor: HKQueryAnchor? = {
+            guard let data = UserDefaults.standard.data(forKey: anchorKey) else { return nil }
+            return try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
+        }()
 
-        let effectiveStart = startDate == Date.distantPast ? endDate.addingTimeInterval(-86400 * 365 * 20) : startDate
-        let totalDuration = endDate.timeIntervalSince(effectiveStart)
+        do {
+            let (added, deletedUUIDs, newAnchor) = try await healthKitManager.fetchWorkoutsAnchored(anchor: anchor)
 
-        var windowStart = startDate
-        while windowStart < endDate {
-            if shouldStop { return }
-            let windowEnd = min(Calendar.current.date(byAdding: .day, value: fetchWindowDays, to: windowStart) ?? endDate, endDate)
-
-            do {
-                let workouts = try await healthKitManager.fetchWorkouts(
-                    since: windowStart == Date.distantPast ? nil : windowStart,
-                    until: windowEnd
-                )
-
-                if !workouts.isEmpty {
-                    let chunks = workouts.chunked(into: Constants.syncBatchSize)
-                    do {
-                        let inserted = try await postChunksInParallel(chunks) { chunk in
-                            try await self.apiClient.postWorkouts(chunk)
-                        }
-                        totalInserted += inserted
-                        totalSamplesSynced += inserted
-                    } catch {
-                        let msg = "Workouts: chunk failed - \(error.localizedDescription)"
-                        syncLog.append(msg)
-                        logger.error("\(msg)")
-                        return
-                    }
+            var totalInserted = 0
+            if !added.isEmpty {
+                let chunks = added.chunked(into: Constants.syncBatchSize)
+                let inserted = try await postChunksInParallel(chunks) { chunk in
+                    try await self.apiClient.postWorkouts(chunk)
                 }
-                await updateSyncDate(for: "HKWorkoutType", date: windowEnd)
-                currentWindowDate = windowEnd
-                if totalDuration > 0 {
-                    typeProgress = min(1.0, windowEnd.timeIntervalSince(effectiveStart) / totalDuration)
-                }
-            } catch {
-                let msg = "Workouts: window failed - \(error.localizedDescription)"
-                syncLog.append(msg)
-                logger.error("\(msg)")
-                return
+                totalInserted = inserted
+                totalSamplesSynced += inserted
             }
 
-            windowStart = windowEnd
-        }
+            var deletedCount = 0
+            if !deletedUUIDs.isEmpty {
+                deletedCount = try await apiClient.deleteWorkouts(uuids: deletedUUIDs)
+            }
 
-        if totalInserted > 0 {
-            let msg = "Workouts: \(totalInserted) synced"
+            // Persist the new anchor only on success
+            if let newAnchor, let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
+                UserDefaults.standard.set(data, forKey: anchorKey)
+            }
+
+            if totalInserted > 0 || deletedCount > 0 {
+                let msg = "Workouts: \(totalInserted) synced, \(deletedCount) removed"
+                syncLog.append(msg)
+                logger.info("\(msg)")
+            }
+        } catch {
+            let msg = "Workouts: anchored sync failed - \(error.localizedDescription)"
             syncLog.append(msg)
-            logger.info("\(msg)")
+            logger.error("\(msg)")
         }
     }
 
