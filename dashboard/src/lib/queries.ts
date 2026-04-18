@@ -16,6 +16,8 @@ import type {
   TypeCount,
   Workout,
   WorkoutDetail,
+  WorkoutFacets,
+  WorkoutFilters,
   WorkoutSplits,
   WriteInput,
 } from "./types"
@@ -240,16 +242,48 @@ export function useWorkoutSplits(uuid: string | undefined, distanceKm = 1.0) {
   })
 }
 
-export function useWorkouts(activityType?: number, start?: string, end?: string) {
+export function useWorkouts(filters: WorkoutFilters = {}) {
   return useQuery({
-    queryKey: ["workouts", activityType, start, end],
+    queryKey: ["workouts", filters],
     queryFn: () =>
       apiGet<Workout[]>("/api/v1/workouts", {
-        activity_type: activityType,
-        start,
-        end,
+        start: filters.start,
+        end: filters.end,
+        activity_type: filters.activity_type as any,
+        sources: filters.sources,
+        distance_min: filters.distance_min,
+        distance_max: filters.distance_max,
         limit: 1000,
       }),
     staleTime: 60_000,
+  })
+}
+
+export function useWorkoutFacets() {
+  return useQuery({
+    queryKey: ["workoutFacets"],
+    queryFn: () => apiGet<WorkoutFacets>("/api/v1/workouts/facets"),
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useDeleteWorkout() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (uuid: string) =>
+      apiDelete<{ deleted: boolean; snapshot: Record<string, unknown> }>(`/api/v1/workouts/by-uuid/${uuid}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["workouts"] }),
+  })
+}
+
+export function useRestoreWorkout() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (snapshot: Record<string, unknown>) =>
+      apiPost<{ inserted: number; duplicates_skipped: number }>("/api/v1/workouts/batch", {
+        device_id: "dashboard-restore",
+        workouts: [snapshot],
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["workouts"] }),
   })
 }

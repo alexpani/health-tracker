@@ -10,6 +10,22 @@ export interface Sample {
   device: string | null
 }
 
+export interface WorkoutFacets {
+  activity_types: { activity_type: number; activity_name: string | null }[]
+  sources: string[]
+  distance_min: number | null
+  distance_max: number | null
+}
+
+export interface WorkoutFilters {
+  start?: string
+  end?: string
+  activity_type?: number[]
+  sources?: string[]
+  distance_min?: number  // meters
+  distance_max?: number  // meters
+}
+
 export interface WorkoutDetail {
   id: number
   uuid: string

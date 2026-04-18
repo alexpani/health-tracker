@@ -38,7 +38,7 @@ export default function Home() {
     aggregation: "hourly",
   })
 
-  const workouts = useWorkouts(undefined, undefined, undefined)
+  const workouts = useWorkouts({})
   const status = useSyncStatus()
   const sessions = useSyncSessions(10)
 

@@ -345,24 +345,84 @@ async def workout_splits(workout_uuid: str, distance_km: float = 1.0, db: AsyncS
 
 @router.get("/workouts", response_model=list[WorkoutOut])
 async def query_workouts(
-    activity_type: int | None = None,
+    activity_type: list[int] | None = Query(None),
     start: datetime | None = None,
     end: datetime | None = None,
+    sources: list[str] | None = Query(None),
+    distance_min: float | None = None,  # meters
+    distance_max: float | None = None,  # meters
     limit: int = Query(1000, le=10000),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Workout)
-    if activity_type is not None:
-        stmt = stmt.where(Workout.activity_type == activity_type)
+    if activity_type:
+        stmt = stmt.where(Workout.activity_type.in_(activity_type))
     if start:
         stmt = stmt.where(Workout.start_date >= start)
     if end:
         stmt = stmt.where(Workout.start_date <= end)
+    if sources:
+        stmt = stmt.where(Workout.source_name.in_(sources))
+    if distance_min is not None:
+        stmt = stmt.where(Workout.total_distance >= distance_min)
+    if distance_max is not None:
+        stmt = stmt.where(Workout.total_distance <= distance_max)
     stmt = stmt.order_by(Workout.start_date.desc()).offset(offset).limit(limit)
 
     result = await db.execute(stmt)
     return result.scalars().all()
+
+
+@router.get("/workouts/facets")
+async def workout_facets(db: AsyncSession = Depends(get_db)):
+    """Distinct activity types + sources + distance range for the workout filter UI."""
+    types_stmt = select(Workout.activity_type, Workout.activity_name).distinct()
+    sources_stmt = select(Workout.source_name).distinct()
+    range_stmt = select(
+        func.min(Workout.total_distance).label("min"),
+        func.max(Workout.total_distance).label("max"),
+    )
+
+    types = [
+        {"activity_type": r.activity_type, "activity_name": r.activity_name}
+        for r in (await db.execute(types_stmt)).all()
+    ]
+    sources = [r[0] for r in (await db.execute(sources_stmt)).all() if r[0] is not None]
+    rng = (await db.execute(range_stmt)).first()
+
+    return {
+        "activity_types": types,
+        "sources": sorted(sources),
+        "distance_min": float(rng.min) if rng and rng.min is not None else None,
+        "distance_max": float(rng.max) if rng and rng.max is not None else None,
+    }
+
+
+@router.delete("/workouts/by-uuid/{workout_uuid}")
+async def delete_workout(workout_uuid: str, db: AsyncSession = Depends(get_db)):
+    """Delete a single workout by UUID. Returns its payload so the client can restore it (undo)."""
+    stmt = select(Workout).where(Workout.uuid == workout_uuid)
+    row = (await db.execute(stmt)).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "Workout not found")
+
+    from sqlalchemy import delete as sqldelete
+    snapshot = {
+        "uuid": str(row.uuid),
+        "activity_type": row.activity_type,
+        "activity_name": row.activity_name,
+        "duration": row.duration,
+        "total_energy_burned": row.total_energy_burned,
+        "total_distance": row.total_distance,
+        "start_date": row.start_date.isoformat(),
+        "end_date": row.end_date.isoformat(),
+        "source_name": row.source_name,
+        "metadata": row.metadata_,
+    }
+    await db.execute(sqldelete(Workout).where(Workout.id == row.id))
+    await db.commit()
+    return {"deleted": True, "snapshot": snapshot}
 
 
 @router.get("/samples/{sample_id}/correlated")
