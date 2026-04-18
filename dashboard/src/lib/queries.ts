@@ -15,6 +15,8 @@ import type {
   SyncStatus,
   TypeCount,
   Workout,
+  WorkoutDetail,
+  WorkoutSplits,
   WriteInput,
 } from "./types"
 
@@ -217,6 +219,24 @@ export function useCreateWrite() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["recentWrites"] })
     },
+  })
+}
+
+export function useWorkoutByUuid(uuid: string | undefined) {
+  return useQuery({
+    queryKey: ["workout", uuid],
+    queryFn: () => apiGet<WorkoutDetail>(`/api/v1/workouts/by-uuid/${uuid}`),
+    enabled: !!uuid,
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useWorkoutSplits(uuid: string | undefined, distanceKm = 1.0) {
+  return useQuery({
+    queryKey: ["workoutSplits", uuid, distanceKm],
+    queryFn: () => apiGet<WorkoutSplits>(`/api/v1/workouts/by-uuid/${uuid}/splits`, { distance_km: distanceKm }),
+    enabled: !!uuid,
+    staleTime: 5 * 60_000,
   })
 }
 

@@ -64,7 +64,7 @@ React + Vite + TypeScript + Tailwind CSS + shadcn/ui + Recharts.
 - **Vitali** — HR, HRV, SpO2, BP, respiratory, temperature, glucose
 - **Corpo** — weight, BMI, body fat, lean mass, height, waist — with multi-value tooltip (all body metrics at the same instant) + row-level delete with correlated-samples confirmation
 - **Sonno** — sleep analysis, stacked bar chart with sleep stages per night
-- **Workout** — list with filters + weekly frequency chart + stats
+- **Workout** — list with filters + weekly frequency chart + stats; click a row for the **Apple Fitness-style detail page** with metrics, per-km splits, and time-series charts (heart rate, speed, power, cadence)
 - **Nutrizione** — calories, macros, water, caffeine
 - **Fitness** — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - **Esplora** — universal browser for any data type with filters

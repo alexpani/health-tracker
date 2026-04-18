@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -18,6 +19,8 @@ export default function Workouts() {
     dates.start,
     dates.end
   )
+
+  const navigate = useNavigate()
 
   const stats = useMemo(() => {
     if (!data) return { count: 0, totalDuration: 0, totalDistance: 0, totalCalories: 0 }
@@ -128,7 +131,11 @@ export default function Workouts() {
               </TableHeader>
               <TableBody>
                 {data.map(w => (
-                  <TableRow key={w.uuid}>
+                  <TableRow
+                    key={w.uuid}
+                    className="cursor-pointer"
+                    onClick={() => navigate(`/workouts/${w.uuid}`)}
+                  >
                     <TableCell>{formatDateTime(w.start_date)}</TableCell>
                     <TableCell>{w.activity_name ?? workoutName(w.activity_type)}</TableCell>
                     <TableCell className="text-right tabular-nums">

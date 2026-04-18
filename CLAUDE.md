@@ -91,6 +91,8 @@ docker compose exec api alembic upgrade head
 - `POST /api/v1/samples/bulk-delete` — delete by IDs (trigger auto-blacklists)
 - `GET /api/v1/sync/status[?include_types=true]` — fast totals via pg_class.reltuples
 - `GET /api/v1/sync/sessions?limit=10` — recent sync sessions (groups sync_log entries with <5 min gap)
+- `GET /api/v1/workouts/by-uuid/{uuid}` — single workout detail
+- `GET /api/v1/workouts/by-uuid/{uuid}/splits?distance_km=1.0` — per-distance splits with pace and avg HR
 
 **Write / Delete (web ↔ Apple Health)**
 - `POST /api/v1/write` — queue a write for Apple Health
@@ -194,7 +196,8 @@ docker compose up -d --build
 - `/vitals` — Heart rate, HRV, SpO2, blood pressure, respiratory rate
 - `/body` — Weight/BMI/body fat/lean mass with multi-value tooltip + row delete
 - `/sleep` — Sleep analysis with stacked bar per night
-- `/workouts` — Workout list + weekly frequency chart + filters
+- `/workouts` — Workout list + weekly frequency chart + filters; click row → detail
+- `/workouts/:uuid` — Workout detail with stats, per-km splits, and charts (HR, speed, power, cadence)
 - `/nutrition` — Calories, macros, water, caffeine
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - `/explore` — Universal: select any type, view chart + raw table + filters

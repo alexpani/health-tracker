@@ -236,6 +236,113 @@ async def query_categories(
     return result.scalars().all()
 
 
+@router.get("/workouts/by-uuid/{workout_uuid}")
+async def workout_by_uuid(workout_uuid: str, db: AsyncSession = Depends(get_db)):
+    """Return a single workout by UUID."""
+    stmt = select(Workout).where(Workout.uuid == workout_uuid)
+    row = (await db.execute(stmt)).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "Workout not found")
+    return {
+        "id": row.id,
+        "uuid": str(row.uuid),
+        "activity_type": row.activity_type,
+        "activity_name": row.activity_name,
+        "duration": row.duration,
+        "total_energy_burned": row.total_energy_burned,
+        "total_distance": row.total_distance,
+        "start_date": row.start_date.isoformat(),
+        "end_date": row.end_date.isoformat(),
+        "source_name": row.source_name,
+        "metadata": row.metadata_,
+    }
+
+
+@router.get("/workouts/by-uuid/{workout_uuid}/splits")
+async def workout_splits(workout_uuid: str, distance_km: float = 1.0, db: AsyncSession = Depends(get_db)):
+    """
+    Calculate per-distance splits (default 1 km each) for a workout.
+    Uses DistanceWalkingRunning samples within the workout's time range.
+    Returns: list of splits with duration, avg pace, avg heart rate.
+    """
+    wstmt = select(Workout).where(Workout.uuid == workout_uuid)
+    workout = (await db.execute(wstmt)).scalar_one_or_none()
+    if not workout:
+        raise HTTPException(404, "Workout not found")
+
+    # Get all distance samples within workout range, ordered
+    dist_stmt = (
+        select(HealthSample.start_date, HealthSample.end_date, HealthSample.value)
+        .where(HealthSample.type == "HKQuantityTypeIdentifierDistanceWalkingRunning")
+        .where(HealthSample.start_date >= workout.start_date)
+        .where(HealthSample.end_date <= workout.end_date)
+        .order_by(HealthSample.start_date)
+    )
+    dist_rows = (await db.execute(dist_stmt)).all()
+    if not dist_rows:
+        return {"splits": [], "total_distance": 0, "note": "no distance samples in range"}
+
+    # Get heart rate samples in range
+    hr_stmt = (
+        select(HealthSample.start_date, HealthSample.value)
+        .where(HealthSample.type == "HKQuantityTypeIdentifierHeartRate")
+        .where(HealthSample.start_date >= workout.start_date)
+        .where(HealthSample.start_date <= workout.end_date)
+        .order_by(HealthSample.start_date)
+    )
+    hr_rows = (await db.execute(hr_stmt)).all()
+
+    # Build splits: walk through distance samples accumulating distance
+    split_meters = distance_km * 1000
+    splits = []
+    cumulative = 0.0
+    split_num = 1
+    split_start = workout.start_date
+    split_start_distance = 0.0
+
+    for r in dist_rows:
+        cumulative += r.value
+        # When we cross the split boundary, finalize
+        while cumulative - split_start_distance >= split_meters:
+            # Interpolate the end time
+            split_end = r.end_date
+            duration = (split_end - split_start).total_seconds()
+            # Average HR during this split
+            hr_in_split = [h.value for h in hr_rows if split_start <= h.start_date <= split_end]
+            avg_hr = sum(hr_in_split) / len(hr_in_split) if hr_in_split else None
+            # Pace in sec/km
+            pace_sec_per_km = duration / distance_km if duration > 0 else None
+            splits.append({
+                "n": split_num,
+                "distance_km": round((cumulative - split_start_distance) / 1000, 3),
+                "duration_seconds": duration,
+                "pace_sec_per_km": pace_sec_per_km,
+                "avg_heart_rate": round(avg_hr, 1) if avg_hr else None,
+            })
+            split_start_distance += split_meters
+            split_start = split_end
+            split_num += 1
+
+    # Final partial split (if any)
+    if cumulative - split_start_distance > 0:
+        split_end = dist_rows[-1].end_date
+        duration = (split_end - split_start).total_seconds()
+        hr_in_split = [h.value for h in hr_rows if split_start <= h.start_date <= split_end]
+        avg_hr = sum(hr_in_split) / len(hr_in_split) if hr_in_split else None
+        partial_km = (cumulative - split_start_distance) / 1000
+        pace_sec_per_km = duration / partial_km if partial_km > 0 else None
+        splits.append({
+            "n": split_num,
+            "distance_km": round(partial_km, 3),
+            "duration_seconds": duration,
+            "pace_sec_per_km": pace_sec_per_km,
+            "avg_heart_rate": round(avg_hr, 1) if avg_hr else None,
+            "partial": True,
+        })
+
+    return {"splits": splits, "total_distance_meters": cumulative}
+
+
 @router.get("/workouts", response_model=list[WorkoutOut])
 async def query_workouts(
     activity_type: int | None = None,

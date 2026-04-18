@@ -10,6 +10,35 @@ export interface Sample {
   device: string | null
 }
 
+export interface WorkoutDetail {
+  id: number
+  uuid: string
+  activity_type: number
+  activity_name: string | null
+  duration: number | null
+  total_energy_burned: number | null
+  total_distance: number | null
+  start_date: string
+  end_date: string
+  source_name: string | null
+  metadata: Record<string, unknown> | null
+}
+
+export interface WorkoutSplit {
+  n: number
+  distance_km: number
+  duration_seconds: number
+  pace_sec_per_km: number | null
+  avg_heart_rate: number | null
+  partial?: boolean
+}
+
+export interface WorkoutSplits {
+  splits: WorkoutSplit[]
+  total_distance_meters?: number
+  note?: string
+}
+
 export interface SyncSession {
   started_at: string
   ended_at: string
