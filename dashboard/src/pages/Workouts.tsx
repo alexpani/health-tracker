@@ -58,14 +58,56 @@ function bucketKey(d: Date, agg: ChartAggregation): string {
   return String(d.getFullYear())
 }
 
-function formatBucketLabel(key: string, agg: ChartAggregation): string {
-  if (agg === "day") return new Date(key).toLocaleDateString("it-IT", { day: "2-digit", month: "short" })
-  if (agg === "week") return "Sett. " + new Date(key).toLocaleDateString("it-IT", { day: "2-digit", month: "short" })
+function formatBucketLabel(key: string, agg: ChartAggregation, withYear = false): string {
+  if (agg === "day") {
+    return new Date(key).toLocaleDateString("it-IT", withYear
+      ? { day: "2-digit", month: "short", year: "numeric" }
+      : { day: "2-digit", month: "short" })
+  }
+  if (agg === "week") {
+    const d = new Date(key)
+    const start = d.toLocaleDateString("it-IT", { day: "2-digit", month: "short" })
+    const end = new Date(d.getTime() + 6 * 24 * 3600 * 1000).toLocaleDateString("it-IT", { day: "2-digit", month: "short" })
+    return withYear ? `${start} - ${end} ${d.getFullYear()}` : `${start} - ${end}`
+  }
   if (agg === "month") {
     const [y, m] = key.split("-")
-    return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("it-IT", { month: "short", year: "2-digit" })
+    return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("it-IT", { month: "long", year: "numeric" })
   }
   return key
+}
+
+function bucketRange(key: string, agg: ChartAggregation): { start: string; end: string } {
+  if (agg === "day") {
+    const d = new Date(key)
+    const start = new Date(d); start.setHours(0, 0, 0, 0)
+    const end = new Date(d); end.setHours(23, 59, 59, 999)
+    return { start: start.toISOString(), end: end.toISOString() }
+  }
+  if (agg === "week") {
+    const d = new Date(key); d.setHours(0, 0, 0, 0)
+    const end = new Date(d.getTime() + 7 * 24 * 3600 * 1000 - 1)
+    return { start: d.toISOString(), end: end.toISOString() }
+  }
+  if (agg === "month") {
+    const [y, m] = key.split("-").map(Number)
+    const start = new Date(y, m - 1, 1)
+    const end = new Date(y, m, 0, 23, 59, 59, 999)
+    return { start: start.toISOString(), end: end.toISOString() }
+  }
+  // year
+  const y = Number(key)
+  return {
+    start: new Date(y, 0, 1).toISOString(),
+    end: new Date(y, 11, 31, 23, 59, 59, 999).toISOString(),
+  }
+}
+
+function nextFinerAggregation(agg: ChartAggregation): ChartAggregation | null {
+  if (agg === "all") return "month"
+  if (agg === "month") return "week"
+  if (agg === "week") return "day"
+  return null // already "day"
 }
 
 export default function Workouts() {
@@ -160,14 +202,37 @@ export default function Workouts() {
 
   const chartData = useMemo(() => {
     if (!workouts) return []
-    const buckets = new Map<string, { key: string; count: number }>()
+    const buckets = new Map<string, { key: string; count: number; uuids: string[] }>()
     workouts.forEach(w => {
       const k = bucketKey(new Date(w.start_date), chartAgg)
-      if (!buckets.has(k)) buckets.set(k, { key: k, count: 0 })
-      buckets.get(k)!.count++
+      if (!buckets.has(k)) buckets.set(k, { key: k, count: 0, uuids: [] })
+      const b = buckets.get(k)!
+      b.count++
+      b.uuids.push(w.uuid)
     })
     return Array.from(buckets.values()).sort((a, b) => (a.key < b.key ? -1 : 1))
   }, [workouts, chartAgg])
+
+  const onBarClick = (d: any) => {
+    if (!d) return
+    const key: string | undefined = d.key ?? d.payload?.key
+    const uuids: string[] | undefined = d.uuids ?? d.payload?.uuids
+    if (!key) return
+
+    // Single workout → open detail
+    if (uuids && uuids.length === 1) {
+      navigate(`/workouts/${uuids[0]}`)
+      return
+    }
+
+    // Multiple → drill down into the bucket period
+    const rng = bucketRange(key, chartAgg)
+    setStartLocal(isoToLocal(rng.start))
+    setEndLocal(isoToLocal(rng.end))
+    setShowAdvanced(true)
+    const finer = nextFinerAggregation(chartAgg)
+    if (finer) setChartAgg(finer)
+  }
 
   const clearAdvanced = () => {
     setStartLocal(""); setEndLocal(""); setDistMinKm(""); setDistMaxKm(""); setSelectedSources([])
@@ -293,8 +358,12 @@ export default function Workouts() {
           {chartData.length === 0 ? (
             <p className="text-muted-foreground py-8">Nessun workout nel periodo</p>
           ) : (
+            <>
             <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={chartData}>
+              <BarChart data={chartData} onClick={(state: any) => {
+                const p = state?.activePayload?.[0]?.payload
+                if (p) onBarClick(p)
+              }}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                 <XAxis
                   dataKey="key"
@@ -304,12 +373,20 @@ export default function Workouts() {
                 />
                 <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
                 <Tooltip
-                  labelFormatter={k => formatBucketLabel(k as string, chartAgg)}
+                  labelFormatter={k => formatBucketLabel(k as string, chartAgg, true)}
+                  formatter={(v: number, _name, item: any) => {
+                    const n = item?.payload?.count ?? v
+                    return [`${n} workout${n === 1 ? "" : ""}`, ""]
+                  }}
                   contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
                 />
-                <Bar dataKey="count" fill="#3b82f6" />
+                <Bar dataKey="count" fill="#3b82f6" cursor="pointer" />
               </BarChart>
             </ResponsiveContainer>
+            <p className="text-xs text-muted-foreground mt-2">
+              Click sulla barra: {chartAgg === "day" ? "apre il workout (se unico)" : "zoom sul periodo"}
+            </p>
+            </>
           )}
         </CardContent>
       </Card>
