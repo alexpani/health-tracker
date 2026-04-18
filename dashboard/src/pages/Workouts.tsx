@@ -394,7 +394,6 @@ export default function Workouts() {
                       singleName?: string
                     }
                     const durMin = Math.round(p.totalDuration / 60)
-                    const durHrs = p.totalDuration / 3600
                     const distKm = p.totalDistance / 1000
                     return (
                       <div className="bg-card border rounded-lg shadow-md p-3 text-sm space-y-1">
@@ -410,7 +409,7 @@ export default function Workouts() {
                         ) : (
                           <>
                             <div>Workout: <span className="tabular-nums font-medium">{p.count}</span></div>
-                            <div>Durata totale: <span className="tabular-nums font-medium">{durHrs.toFixed(1)} h</span></div>
+                            <div>Durata totale: <span className="tabular-nums font-medium">{durMin} min</span></div>
                             {p.totalDistance > 0 && (
                               <div>Distanza totale: <span className="tabular-nums font-medium">{distKm.toFixed(1)} km</span></div>
                             )}
