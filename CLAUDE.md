@@ -13,197 +13,358 @@ Whenever you introduce **substantial** changes to this project, **update both `C
 
 Minor refactors, bug fixes, and internal renames do **not** require doc updates.
 
-When updating, keep the files concise: prefer lists over prose, document the *what* and *why*, not line-by-line details. Always commit docs + code in the same commit.
+Keep the files concise: prefer lists over prose, document the *what* and *why*, not line-by-line details. Always commit docs + code in the same commit.
+
+---
 
 ## Project Overview
 
-Health Tracker Bridge: a bidirectional bridge between Apple Health and web applications. HealthKit is only accessible from native iOS apps, so this system syncs all health data to a backend database and exposes REST APIs for web apps to consume and write back.
+**Health Tracker Bridge** — self-hosted stack that bridges Apple Health and web applications.
 
-## Architecture
+HealthKit is only accessible from native iOS apps. This system syncs all health data to a backend database and exposes REST APIs for web apps to consume and write back. It also supports bulk imports (e.g., Endomondo), data cleaning via rules and UUID blacklist, workout detail views (Apple Fitness-style), and configurable filters.
 
-```
-iPhone (SwiftUI + HealthKit) ←→ FastAPI Backend (Proxmox LXC) ←→ Web Dashboard (React)
-                                      ↕
-                                 PostgreSQL
-```
+### Components
 
-- **iOS App** (`ios/`): SwiftUI + HealthKit, reads/writes/deletes Apple Health data, syncs to backend
-- **Backend** (`backend/`): FastAPI + SQLAlchemy + PostgreSQL, REST API for ingest/query/write/delete/rules
-- **Dashboard** (`dashboard/`): React + Vite + TypeScript + Tailwind + shadcn/ui + Recharts
+- **iOS App** (`ios/HealthTracker/`): SwiftUI + HealthKit + SwiftData, reads/writes/deletes Apple Health data, syncs to backend
+- **Backend** (`backend/`): FastAPI + async SQLAlchemy + PostgreSQL 16 + Alembic, deployed via Docker on Proxmox LXC
+- **Dashboard** (`dashboard/`): React 18 + Vite + TypeScript + Tailwind + shadcn/ui + Recharts + TanStack Query, deployed via Nginx on Proxmox LXC
 
-## Infrastructure
+### Infrastructure
 
 | Component | Host | IP | Port |
 |-----------|------|-----|------|
 | Backend API + PostgreSQL | LXC `ealth-tracker` (Proxmox) | 192.168.68.166 | 8000 |
 | Dashboard | LXC `ealth-dashboard` (Proxmox) | 192.168.68.190 | 80 |
-| iOS App | iPhone (physical device) | - | - |
+| iOS App | iPhone (physical device) | — | — |
+
+Deployment workflow: `scp` files from Mac to LXC, then `docker compose up -d --build`. SSH key `~/.ssh/id_ed25519` authorized on both LXCs for `root`.
+
+### Repo
+
+- GitHub: **https://github.com/alexpani/health-tracker** (public)
+- Main branch: `main`
+- Commit policy: always create new commits; never amend or force-push. Co-author line for Claude:
+  `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`
+
+---
 
 ## Key Technical Decisions
 
-- **Single `health_samples` table** with `type` discriminator instead of 80+ per-type tables. Index on `(type, start_date)`.
+- **Single `health_samples` table** with `type` discriminator (avoids 80+ per-type tables). Indexes: `(type, start_date)`, `start_date`, `uuid UNIQUE`.
 - **UUID-based dedup**: `INSERT ... ON CONFLICT (uuid) DO NOTHING` — crash-safe, idempotent sync.
-- **Incremental sync**: `lastSyncDate` per type stored in SwiftData. Fetches only new data since last sync.
-- **90-day fetch windows**: HealthKit queries are chunked to avoid memory pressure on large datasets (HeartRate has millions of samples).
+- **Incremental sync**: `lastSyncDate` per type stored in SwiftData on the iPhone.
+- **90-day fetch windows**: HealthKit queries chunked to avoid OOM (HeartRate has millions of samples).
 - **Parallel POST**: 4 concurrent HTTP uploads per window for throughput.
-- **Server-side ingest filters**: DB-configurable rules (value ranges, blocked sources) reject spurious data at ingest time.
-- **Auto-blacklist on delete**: PostgreSQL trigger `trg_blacklist_on_delete` auto-inserts deleted sample UUIDs into `ingest_blacklist`, preventing re-ingestion after future syncs.
-- **Bidirectional writes/deletes**: web apps POST to `/api/v1/write` and `/api/v1/delete/plan`; iOS polls pending operations and syncs to HealthKit via `HKHealthStore.save()` / `.delete(_)`.
-- **Real-time sync**: `HKObserverQuery` + background delivery notifies the app on new HealthKit data (watch writes, manual entries) — auto-triggers sync. Plus sync on app launch and foreground (10 min throttle).
-- **Persistent sync summary**: the last sync's log + timing + sample count is persisted in UserDefaults across app launches.
+- **Real-time sync**: `HKObserverQuery` + background delivery triggers auto-sync on new HealthKit data. Auto-sync also on app launch and foreground (10-min throttle).
+- **Server-side ingest filters**: DB-configurable `IngestRule` rows (value_range, blocked_source) with hit counters, plus a `IngestBlacklist` table keyed by HKSample UUID.
+- **Auto-blacklist on delete**: PostgreSQL trigger `trg_blacklist_on_delete` automatically inserts any deleted `health_samples.uuid` into `ingest_blacklist`. Prevents re-ingestion after re-sync.
+- **Bidirectional writes/deletes**: web apps POST to `/api/v1/write` and `/api/v1/delete/plan`; iOS polls these queues and calls `HKHealthStore.save()` / `.delete(_)`.
+- **Persistent sync summary**: last sync's log + timing + sample count persisted in iOS `UserDefaults` (`last_sync_summary_v1`).
+- **Effective workout type**: backend derives a canonical slug (e.g., `treadmill_run`, `swim_pool`) from `activity_type` + metadata (`HKIndoorWorkout`, `HKSwimmingLocationType`). Used for filtering and labeling.
 
-## Backend
+---
+
+## Backend (`backend/`)
 
 ### Setup
+
 ```bash
 cd backend
 docker compose up -d
 docker compose exec api alembic upgrade head
 ```
 
-### Key Files
-- `app/models.py` — SQLAlchemy ORM:
-  - `HealthSample` / `CategorySample` / `Workout` — health data (Workout has user-editable `notes` column)
-  - `PendingWrite` — web → HealthKit queue
-  - `PendingDeletion` — web → HealthKit delete queue
-  - `IngestRule` — configurable validation rules (value_range, blocked_source) with hit counters
-  - `IngestBlacklist` — UUIDs never to insert (auto-populated by trigger on DELETE)
-  - `SyncLog` — sync audit log
-- `app/routers/ingest.py` — POST batch endpoints; applies `IngestRule` filters + blacklist check
-- `app/routers/query.py` — GET endpoints with aggregation (hourly/daily/weekly/monthly), filters (sources, devices, value range), correlated samples, bulk delete
-- `app/routers/write.py` — bidirectional write queue (web → Apple Health)
-- `app/routers/delete.py` — deletion plan/confirm/fail workflow
-- `app/routers/rules.py` — CRUD for ingest rules, hit counters, summary
-- `app/routers/blacklist.py` — list/add/remove UUIDs in blacklist; `purge-and-blacklist` to delete + blacklist in one step
-- `app/schemas.py` — Pydantic request/response models
-- `alembic/versions/87f97b75eed7_auto_blacklist_trigger.py` — PG trigger for auto-blacklist on DELETE
+Alembic revision migrations folder is mounted as a volume so migrations persist across image rebuilds.
+
+### Models (`app/models.py`)
+
+- `HealthSample` — quantity samples (steps, heart rate, weight, ...). Columns: id, uuid (unique), type, value, unit, start_date, end_date, source_name, source_bundle_id, device, metadata JSONB.
+- `CategorySample` — category samples (sleep, stand hour, etc.). Similar shape with integer value (enum).
+- `Workout` — workouts (activity_type, duration seconds, total_distance meters, total_energy_burned kcal, start/end, source, metadata JSONB, **user-editable `notes`** column).
+- `PendingWrite` — web → HealthKit write queue (type, value, unit, start/end, status: pending/written/failed, hk_uuid after confirm).
+- `PendingDeletion` — web → HealthKit delete queue (hk_uuid, type, source_sample_id, status).
+- `IngestRule` — configurable filters (rule_type: `value_range` or `blocked_source`; optional type_identifier/source_name; value_min/max; active bool; hits_count, last_hit_at).
+- `IngestBlacklist` — UUIDs never to insert; auto-populated by trigger on DELETE from `health_samples`.
+- `SyncLog` — per-batch sync audit entries (device_id, sample_count, synced_at).
+
+### Alembic Migrations
+
+Ordered history (most recent last):
+1. initial (health_samples, category_samples, workouts, sync_log)
+2. pending_writes
+3. pending_deletions
+4. ingest_blacklist
+5. **auto_blacklist_trigger** (`alembic/versions/87f97b75eed7_auto_blacklist_trigger.py`) — creates `fn_blacklist_on_delete()` function + `trg_blacklist_on_delete` trigger on `health_samples`.
+6. ingest_rules
+7. workout_notes (adds `workouts.notes` TEXT)
+
+### Routers
+
+- `ingest.py` — POST batch endpoints (samples, categories, workouts). Applies:
+  1. UUID blacklist filter
+  2. DB-configured IngestRule (`_apply_rules`) with hit recording
+  3. `INSERT ... ON CONFLICT (uuid) DO NOTHING`
+- `query.py` — all GET endpoints + some POST/PATCH/DELETE for samples and workouts.
+- `write.py` — `/api/v1/write` queue endpoints (POST, GET /pending, POST /{id}/confirm|fail, GET /recent, GET /allowed-types).
+- `delete.py` — `/api/v1/delete/*` workflow for bulk deletion via iOS.
+- `rules.py` — `/api/v1/rules` CRUD + summary + reset-stats.
+- `blacklist.py` — `/api/v1/blacklist` list/add/remove + `purge-and-blacklist` (atomic delete + blacklist).
 
 ### Main API Endpoints
 
-**Ingest / Query**
+**Ingest**
 - `POST /api/v1/samples/batch` — ingest quantity samples (filtered by rules + blacklist)
-- `POST /api/v1/categories/batch`, `POST /api/v1/workouts/batch`
-- `GET /api/v1/samples?type=...&start=...&end=...&aggregation=daily&sources=X&devices=Y&value_min=&value_max=` — query with filters
-- `GET /api/v1/samples/types` — list available types with counts
-- `GET /api/v1/samples/latest?type=...` — latest sample per type
-- `GET /api/v1/samples/facets?type=...` — distinct sources/devices + value range for a type
-- `GET /api/v1/samples/{id}/correlated?types=...&minutes=5` — samples within time window
-- `POST /api/v1/samples/bulk-delete` — delete by IDs (trigger auto-blacklists)
-- `GET /api/v1/sync/status[?include_types=true]` — fast totals via pg_class.reltuples
-- `GET /api/v1/sync/sessions?limit=10` — recent sync sessions (groups sync_log entries with <5 min gap)
-- `GET /api/v1/workouts` — filter by activity_type[], start/end, sources[], distance_min/max (meters)
-- `GET /api/v1/workouts/facets` — distinct activity types + sources + distance range
-- `GET /api/v1/workouts/by-uuid/{uuid}` — single workout detail
-- `GET /api/v1/workouts/by-uuid/{uuid}/splits?distance_km=1.0` — per-distance splits with pace and avg HR
-- `DELETE /api/v1/workouts/by-uuid/{uuid}` — delete; returns snapshot for client-side undo
-- `PATCH /api/v1/workouts/by-uuid/{uuid}` — update editable fields (currently: notes)
+- `POST /api/v1/categories/batch`, `POST /api/v1/workouts/batch` (workouts accept `notes`)
 
-**Write / Delete (web ↔ Apple Health)**
-- `POST /api/v1/write` — queue a write for Apple Health
-- `GET /api/v1/write/pending` — iOS polls
-- `POST /api/v1/write/{id}/confirm|fail`
-- `GET /api/v1/write/recent` — dashboard feedback
-- `POST /api/v1/delete/plan` — plan bulk deletion
-- `GET /api/v1/delete/pending`, `POST /api/v1/delete/{id}/confirm|fail`
+**Query samples**
+- `GET /api/v1/samples?type=&start=&end=&aggregation=none|hourly|daily|weekly|monthly&sources=&devices=&value_min=&value_max=&limit=&offset=`
+- `GET /api/v1/samples/types` — distinct types with counts
+- `GET /api/v1/samples/latest?type=`
+- `GET /api/v1/samples/facets?type=` — distinct sources/devices + value range for filter UI
+- `GET /api/v1/samples/{id}/correlated?types=&minutes=5` — samples within ±N minutes (for body page tooltip + related-deletion preview)
+- `POST /api/v1/samples/bulk-delete` body `{ids:[...]}` — the DELETE trigger auto-blacklists UUIDs
 
-**Rules**
-- `GET|POST /api/v1/rules` — list/create
-- `PATCH|DELETE /api/v1/rules/{id}` — update/remove
+**Workouts** (heavy metadata-aware filtering)
+- `GET /api/v1/workouts` query params:
+  - `activity_type[]`, `effective_types[]` (slugs), `sources[]`, `years[]`
+  - `start`, `end`, `distance_min/max` (meters), `duration_min/max` (seconds), `pace_min/max` (sec/km)
+  - `limit` (max 10000), `offset`
+- `GET /api/v1/workouts/facets` — for filter sidebar: `effective_types` with counts, `sources`, `years` with counts, `distance_min/max`, `duration_min/max`
+- `GET /api/v1/workouts/by-uuid/{uuid}` — single workout detail (includes notes + metadata)
+- `GET /api/v1/workouts/by-uuid/{uuid}/splits?distance_km=1.0` — per-km splits with duration, pace, avg HR
+- `DELETE /api/v1/workouts/by-uuid/{uuid}` — returns full snapshot for undo
+- `PATCH /api/v1/workouts/by-uuid/{uuid}` body `{notes:"..."}` — update editable fields (currently just notes)
+
+**Effective type slugs** (see `_apply_effective_type_filter`):
+- `treadmill_run`  — activity_type=37 & HKIndoorWorkout=1
+- `treadmill_walk` — activity_type=52 & HKIndoorWorkout=1
+- `cyclette`       — activity_type=13 & HKIndoorWorkout=1
+- `swim_pool`      — activity_type=46 & HKSwimmingLocationType=1
+- `swim_open_water`— activity_type=46 & HKSwimmingLocationType=2
+- `type_XXX`       — plain activity_type=XXX with NO matching variant
+
+**Sync status**
+- `GET /api/v1/sync/status[?include_types=true]` — fast totals (pg_class.reltuples); full breakdown with `include_types`
+- `GET /api/v1/sync/sessions?limit=10` — groups sync_log entries with <5 min gap into sessions (for the Home page table)
+
+**Write / Delete queues (web ↔ Apple Health)**
+- `POST /api/v1/write`, `GET /api/v1/write/pending`, `POST /api/v1/write/{id}/confirm|fail`
+- `GET /api/v1/write/recent` — dashboard feedback on write status
+- `GET /api/v1/write/allowed-types` — whitelist of write-allowed HK identifiers
+- `POST /api/v1/delete/plan`, `GET /api/v1/delete/pending`, `POST /api/v1/delete/{id}/confirm|fail`, `GET /api/v1/delete/status`
+
+**Rules** (dashboard Settings page)
+- `GET|POST /api/v1/rules` — list / create
+- `PATCH|DELETE /api/v1/rules/{id}` — edit range, toggle active, delete
 - `POST /api/v1/rules/{id}/reset-stats`
-- `GET /api/v1/rules/summary` — counts
+- `GET /api/v1/rules/summary` — active/total rules, blacklist size, total/recent hits
 
-**Blacklist**
-- `GET /api/v1/blacklist` — list
-- `POST /api/v1/blacklist/add` — add UUIDs
-- `POST /api/v1/blacklist/purge-and-blacklist` — delete + blacklist matching samples
+**Blacklist** (dashboard Settings page)
+- `GET /api/v1/blacklist` — paginated list
+- `POST /api/v1/blacklist/add` body `{entries:[{hk_uuid,reason}]}`
+- `POST /api/v1/blacklist/purge-and-blacklist` — delete matching samples AND blacklist their UUIDs
 - `DELETE /api/v1/blacklist/{id}`
 
-### Ingest Rules (DB-configurable via `/api/v1/rules`)
-Two rule types:
-- `value_range` — discards if value outside [value_min, value_max] for `type_identifier`
-- `blocked_source` — discards if `source_name` matches (optional per-type constraint)
+### Ingest Rules semantics
 
-Each rule has `hits_count` + `last_hit_at` updated on each discard. UI in dashboard `/settings`.
+Applied in this order:
+1. **IngestBlacklist**: drop sample if its UUID is already blacklisted.
+2. **IngestRule** (active only):
+   - `value_range`: discard if value outside [value_min, value_max] for matching `type_identifier`
+   - `blocked_source`: discard if `source_name` matches (optional `type_identifier` to scope)
 
-## iOS App
+Each rule hit increments `hits_count` and updates `last_hit_at`.
+
+Current seed rules (applied once, can be edited from dashboard):
+- value_range BodyMass 70–200 kg
+- value_range BodyMassIndex 18–50
+- value_range BodyFatPercentage 0.01–0.60
+- value_range LeanBodyMass 45–150 kg
+- blocked_source "Renpho"
+
+---
+
+## iOS App (`ios/HealthTracker/`)
 
 ### Requirements
-- Xcode 16+, iOS 17+, physical iPhone
-- HealthKit capability + entitlements (`com.apple.developer.healthkit`, `com.apple.developer.healthkit.background-delivery`)
-- `NSHealthShareUsageDescription` + `NSHealthUpdateUsageDescription` in Info.plist
-- `BGTaskSchedulerPermittedIdentifiers` for background refresh
+
+- Xcode 16+, iOS 17+, **physical iPhone** (HealthKit has no simulator support)
+- Entitlements: `com.apple.developer.healthkit`, `com.apple.developer.healthkit.background-delivery`
+- `Info.plist`: `NSHealthShareUsageDescription`, `NSHealthUpdateUsageDescription`, `BGTaskSchedulerPermittedIdentifiers=["com.healthtracker.sync"]`
+- Bundle identifier (personal team): `com.alexpani.healthtracker.app`
+- Personal teams cannot use `healthkit.access` (Clinical Health Records) — entitlements file intentionally omits it.
 
 ### Key Files
-- `Services/HealthKitManager.swift`:
-  - Authorization request (read + write for body/nutrition)
-  - Fetch quantity/category/workout samples with date windows
-  - Write samples (`writeQuantitySample`)
-  - Delete samples by UUID
-  - **`startObservingNewSamples`**: `HKObserverQuery` + background delivery for all read types
-- `Services/SyncService.swift` — orchestrates full sync cycle:
-  1. Process pending writes (web → HealthKit)
-  2. Process pending deletions
-  3. Sync quantity types (non-deferred)
-  4. Sync category types
-  5. Sync workouts
-  6. Sync deferred types (if configured)
-  - `performQuickSync(minInterval:)` — throttled trigger for auto-sync
-  - Persists last sync summary (log, duration, samples) via UserDefaults
-- `Services/APIClient.swift` — HTTP client with retry + timeout; endpoints for samples/writes/deletions
-- `Services/BackgroundTaskManager.swift` — `BGAppRefreshTask` scheduling
-- `Views/ContentView.swift` — TabView: Sync (default), Dashboard, Settings
-- `Views/SyncStatusView.swift` — live sync progress + persistent "last sync" summary with timing, samples, full log
-- `Views/DashboardView.swift` — today's metrics (weight, steps, calories, body fat, BMI) from HealthKit directly
-- `Views/SettingsView.swift` — server URL config only
+
+- `Services/HealthKitManager.swift` — actor with:
+  - `quantityTypes` static list (40+ read types including fitness-advanced: VO2 max, running power/speed/stride/GCT/vert osc, cycling power/cadence/speed/FTP, walking/stair speeds)
+  - `categoryTypes` (sleep, stand hour, mindful, heart rate events)
+  - `writableQuantityTypes` (body + nutrition subset)
+  - `requestAuthorization` (read + write)
+  - `fetchQuantitySamples/fetchCategorySamples/fetchWorkouts` with `since`/`until` for windowed fetching
+  - `writeQuantitySample`, `deleteSample` (only for samples this app created — HealthKit limitation)
+  - `startObservingNewSamples` — registers `HKObserverQuery` + `enableBackgroundDelivery(.hourly)` for all read types
+- `Services/SyncService.swift` — `@Observable` class orchestrating full sync:
+  1. `processPendingWrites` (GET pending writes → save to HK → confirm)
+  2. `processPendingDeletions` (GET pending deletions → HK delete → confirm)
+  3. Quantity types — looped with 90-day windows (`fetchWindowDays=90`), parallel POST (`syncConcurrency=4`), batch size 1000
+  4. Category types (same loop)
+  5. Workouts
+  6. Deferred types (empty set by default; was used to defer HeartRate/HRV)
+  - `performQuickSync(minInterval:120)` — throttled for auto-triggers
+  - `resetBodySync()` — clears lastSyncDate for body types (was a Settings button, removed; can be reintroduced)
+  - Persists last summary via UserDefaults `last_sync_summary_v1` with `LastSyncSummary` Codable struct
+  - `shouldStop` flag for the stop button
+- `Services/APIClient.swift` — URLSession actor with retry/backoff, endpoints for samples/categories/workouts POST + pending writes + pending deletions + confirm/fail
+- `Services/BackgroundTaskManager.swift` — `BGAppRefreshTask` registration + 1h scheduling
+- `Views/ContentView.swift` — TabView order: **Sync (default), Dashboard, Settings**
+- `Views/SyncStatusView.swift` — connection status, running sync progress (general + per-type with date reached), stop button, **persistent last-sync summary** (start time, duration, samples, log, interrupted badge)
+- `Views/DashboardView.swift` — 5 card metrics from HealthKit direct: weight, today steps, today active calories, body fat %, BMI (all with relative timestamp subtitle)
+- `Views/SettingsView.swift` — server URL + device ID + API docs link
+- `HealthTrackerApp.swift` — app entry: registers BG task, requests HK auth at launch, wires `SyncService` with ModelContainer, starts HKObserverQuery, schedules auto-sync on launch + scenePhase=active (throttled 10 min)
 
 ### Auto-sync Triggers
-- App launch (throttled to 10 min)
-- App returns to foreground (throttled to 10 min)
-- `HKObserverQuery` notification (throttled to 2 min via `performQuickSync`)
-- `BGAppRefreshTask` (iOS-managed, ~hourly best case)
+
+- App launch (throttle 10 min)
+- App returns to foreground (throttle 10 min)
+- `HKObserverQuery` callback on new HealthKit data (throttle 2 min via `performQuickSync`)
+- `BGAppRefreshTask` (iOS decides, typically hourly)
+
+### App Icon
+
+- Generated with Python + Pillow: gradient blue→pink background + white heart + pink ECG line
+- `Assets.xcassets/AppIcon.appiconset/icon-1024.png` (1024×1024)
+- xcodegen `project.yml` sets `ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon`
 
 ### Build
+
 1. Open `ios/HealthTracker/HealthTracker.xcodeproj`
 2. Signing: set team + unique bundle ID
 3. Connect iPhone, ⌘+R
 
-## Dashboard
+---
+
+## Dashboard (`dashboard/`)
 
 ### Setup
+
 ```bash
 cd dashboard
 npm install
 VITE_API_URL=http://192.168.68.166:8000 npm run dev
-```
-
-### Deploy
-```bash
-cd dashboard
-docker compose up -d --build
-# http://192.168.68.190
+# Prod:
+docker compose up -d --build   # → http://192.168.68.190
 ```
 
 ### Key Files
-- `src/lib/api.ts` — `apiGet` / `apiPost` / `apiPatch` / `apiDelete`, array params supported
-- `src/lib/queries.ts` — React Query hooks: samples, facets, writes, rules, blacklist, bulk-delete
-- `src/lib/healthkit.ts` — HK type → label/unit/color/multiplier mapping + categories
-- `src/components/TypeBrowser.tsx` — reusable chart+table for single-type browsing
-- `src/components/BodyBrowser.tsx` — specialized Body page: parallel fetch of all body types, tooltip shows all values at point, row-level delete with correlated samples dialog
-- `src/components/FilterBar.tsx` — date range, sources, devices, value min/max filter UI
-- `src/components/SampleTable.tsx` — paginated raw samples table, optional `onDelete` prop for trash button
-- `src/components/charts/TimeSeriesChart.tsx` — Recharts wrapper with autoscale Y-axis + multi-year date formatting
-- `src/pages/Settings.tsx` — rules CRUD + blacklist management + hit stats
 
-### Pages
-- `/` — Home: today's metrics, weekly charts, sync status, last 10 sync sessions table
-- `/activity` — Steps, distance, flights, calories
-- `/vitals` — Heart rate, HRV, SpO2, blood pressure, respiratory rate
-- `/body` — Weight/BMI/body fat/lean mass with multi-value tooltip + row delete
-- `/sleep` — Sleep analysis with stacked bar per night
-- `/workouts` — Workout list with filters (date, activity type, distance range, sources) + configurable chart aggregation (day/week/month/year) + pace column + row-level delete with undo toast (8s)
-- `/workouts/:uuid` — Workout detail with stats, per-km splits, charts (HR, speed, power, cadence), and editable user notes
-- `/nutrition` — Calories, macros, water, caffeine
+- `src/lib/api.ts` — `apiGet` / `apiPost` / `apiPatch` / `apiDelete`, with array query-param support
+- `src/lib/queries.ts` — TanStack Query hooks: samples, facets, correlated, bulk-delete, writes, rules, blacklist, workouts, workout detail, splits, delete/update/restore workout, sync sessions/status, write allowed types
+- `src/lib/types.ts` — TypeScript types matching backend schemas (Sample, AggregatedPoint, SamplesResponse, Workout, WorkoutDetail, WorkoutFilters, WorkoutFacets, EffectiveTypeFacet, IngestRule, RulesSummary, BlacklistEntry, PendingWrite, SyncSession, SyncStatus, CorrelatedSample, ...)
+- `src/lib/healthkit.ts` — master HK type → label/unit/color/multiplier mapping (`TYPE_META`), categories (`CATEGORIES`: activity, vitals, body, nutrition, fitness, other), sleep stages, workout activity type names (`WORKOUT_NAMES` — full HKWorkoutActivityType table), `workoutName(type, metadata)` with indoor + swim-location detection, `effectiveTypeLabel(slug, activityType)`, `extractWorkoutMetadata()` (parses HKIndoorWorkout, HKSwimmingLocationType, HKLapLength, elevation, METs, weather, brand, notes)
+- `src/lib/utils.ts` — cn(), formatNumber, formatDate, formatDateTime
+- `src/components/ui/` — shadcn components: button (variants incl. destructive), card, tabs, select, table, input, label, textarea, **slider** (Radix-based)
+- `src/components/FilterBar.tsx` — generic filter bar for type pages (date/sources/devices/value range)
+- `src/components/WorkoutFiltersSidebar.tsx` — dedicated right-sidebar filter panel for Workouts (year chips, activity chips via effective_types with counts, sources chips, datetime range, distance km, duration min, **pace dual-range slider with preset chips**)
+- `src/components/TypeBrowser.tsx` — reusable tabbed browser used by Activity/Vitals/Nutrition; integrates FilterBar
+- `src/components/BodyBrowser.tsx` — specialized Body page: parallel fetch of all body types, custom tooltip showing ALL values at the same instant, row-level delete with correlated-samples confirmation dialog
+- `src/components/SampleTable.tsx` — paginated raw samples table, optional `onDelete` prop for trash button per row
+- `src/components/charts/TimeSeriesChart.tsx` — Recharts wrapper with autoscale Y-axis, multi-year-aware X-axis formatter, full-year tooltips
+- `src/components/charts/MetricCard.tsx`
+- `src/components/controls/TimeRangeSelector.tsx`, `AggregationSelector.tsx`
+- `src/pages/Settings.tsx` — rules CRUD (with live hits stats) + blacklist UUID list
+
+### Pages / Routes
+
+- `/` — **Home**: today metric cards, weekly charts, last 3 workouts, sync status card, **last 10 sync sessions table**
+- `/activity` — steps, distance, flights, calories (tabbed via TypeBrowser)
+- `/vitals` — HR, HRV, SpO2, blood pressure, respiratory, temperature, glucose
+- `/body` — weight, BMI, body fat, lean mass, height, waist — **custom tooltip shows all body values at same instant**; row-level delete with correlated-samples confirmation
+- `/sleep` — sleep analysis, stacked bar per night
+- `/workouts` — **main Workouts page** with right sidebar filters, summary metric cards, workouts-per-period chart with click-to-drilldown (zoom in), full list table with pace column, row-level delete with 8s undo toast
+- `/workouts/:uuid` — **Apple Fitness-style detail**: metrics (duration, distance, calories, avg pace, avg/max HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), per-km splits table, time-series charts (HR, running speed, power, cadence), **editable notes** card
+- `/nutrition` — calories, macros, water, caffeine
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds
-- `/explore` — Universal: select any type, view chart + raw table + filters
-- `/insert` — Form to write body/nutrition data to Apple Health via backend
-- `/settings` — Ingest rules management, blacklist UUIDs, stats
+- `/explore` — universal browser: pick any sample type with full filter bar + chart + raw table
+- `/insert` — form to queue body/nutrition writes for Apple Health
+- `/settings` — ingest rules CRUD (add, edit min/max, toggle active, delete, reset stats), blacklist UUID list with remove
+
+### Filter Persistence
+
+- Workouts page filters persisted in `sessionStorage` key `workouts_filters_v2` (filter object + chart aggregation). Survives navigation into/out of workout detail page.
+
+### Pace Filter UX (in WorkoutFiltersSidebar)
+
+- Dual-handle `<Slider>` (Radix-based) 3:00-15:00 /km, step 10s
+- Live current range display in m:ss/km
+- 5 preset chips: `< 4:30`, `4:30-5:30`, `5:30-6:30`, `6:30-7:30`, `> 7:30`
+
+---
+
+## Bulk Imports
+
+### Endomondo import (historical data)
+
+- CSV export converted to JSON and POSTed to `/api/v1/workouts/batch`
+- Mapping table (Endomondo sport → HKWorkoutActivityType + variant):
+  - RUNNING → 37
+  - WALKING → 52
+  - SWIMMING → 46
+  - TREADMILL_RUNNING → 37 + `HKIndoorWorkout=1`
+  - TREADMILL_WALKING → 52 + `HKIndoorWorkout=1`
+  - SPINNING → 13 + `HKIndoorWorkout=1`
+  - WEIGHT_TRAINING → 50 (traditionalStrengthTraining)
+  - OTHER → 3000
+- Notes field: `"name"` concatenated with `" - "` + `"notes"` from CSV (omits duplicates or empty)
+- UUIDs are deterministic via `uuid5(namespace, f"endomondo:{start_time}:{sport}")` → re-running the script is idempotent (no duplicates)
+- Source: `source_name="Endomondo"`, metadata includes `{"source":"Endomondo","endomondo_source": <TRACK_MOBILE|INPUT_MANUAL|IMPORT_GPX|IMPORT_GARMIN>}`
+- Timestamps in the CSV are UTC; stored as TIMESTAMPTZ (display converts to local)
+- 302 workouts imported (2011-10-08 → 2015-09-07) — the first Apple-recorded workout is 2015-09-17
+
+---
+
+## Operational Commands
+
+### Deploy
+
+```bash
+# Backend
+scp backend/app/... root@192.168.68.166:/opt/health-tracker/backend/...
+ssh root@192.168.68.166 "cd /opt/health-tracker/backend && docker compose up -d --build api"
+# Migrations
+ssh root@192.168.68.166 "cd /opt/health-tracker/backend && docker compose exec -T api alembic revision --autogenerate -m 'msg' && docker compose exec -T api alembic upgrade head"
+
+# Dashboard
+scp -r dashboard/src root@192.168.68.190:/opt/ealth-dashboard/dashboard/
+ssh root@192.168.68.190 "cd /opt/ealth-dashboard/dashboard && docker compose up -d --build"
+```
+
+### DB quick queries
+
+```bash
+# Per-type counts
+ssh root@192.168.68.166 "docker exec health-tracker-db psql -U health -d health_tracker -c \"SELECT type, COUNT(*) FROM health_samples GROUP BY type ORDER BY 2 DESC;\""
+
+# Inspect workout metadata keys
+ssh root@192.168.68.166 "docker exec health-tracker-db psql -U health -d health_tracker -c \"SELECT activity_type, k, COUNT(*) FROM workouts, jsonb_each(metadata) AS kv(k, v) WHERE jsonb_typeof(metadata)='object' GROUP BY 1,2 ORDER BY 1;\""
+
+# Blacklist size
+ssh root@192.168.68.166 "docker exec health-tracker-db psql -U health -d health_tracker -c \"SELECT COUNT(*) FROM ingest_blacklist;\""
+```
+
+### Sync check
+
+```bash
+curl -s http://192.168.68.166:8000/api/v1/sync/status | python3 -m json.tool
+curl -s "http://192.168.68.166:8000/api/v1/sync/status?include_types=true" | python3 -m json.tool
+```
+
+---
+
+## Known Limitations / Notes
+
+- HealthKit does not let apps delete samples they didn't create (e.g., Withings scale data). For those, user must delete from Apple Salute manually, OR we blacklist the UUID server-side (which prevents re-ingestion but doesn't remove from Apple Health).
+- The auto-blacklist trigger applies ONLY to `health_samples`, not to `workouts`. Workout deletes rely on the undo snapshot + 8-second window.
+- `iOS Info.plist` is regenerated by xcodegen from `project.yml`. Custom keys added directly to `Info.plist` persist, but do not rely on it: prefer setting them via `project.yml` entitlements/settings.
+- `BGAppRefreshTask` scheduling is a hint — iOS decides the actual execution time. Real-time reactivity comes from `HKObserverQuery` + `.hourly` background delivery.
+- Personal team signing: cannot use `com.apple.developer.healthkit.access` (Clinical Health Records). Standard HealthKit + background-delivery are fine.
