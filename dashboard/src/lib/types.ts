@@ -10,6 +10,15 @@ export interface Sample {
   device: string | null
 }
 
+export interface SyncSession {
+  started_at: string
+  ended_at: string
+  duration_seconds: number
+  total_samples: number
+  batches: number
+  device_id: string | null
+}
+
 export interface IngestRule {
   id: number
   rule_type: "value_range" | "blocked_source"

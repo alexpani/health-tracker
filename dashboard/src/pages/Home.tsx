@@ -2,7 +2,7 @@ import { Activity, Flame, Footprints, Heart, Moon } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { MetricCard } from "@/components/charts/MetricCard"
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart"
-import { useLatest, useSamples, useSyncStatus, useWorkouts } from "@/lib/queries"
+import { useLatest, useSamples, useSyncSessions, useSyncStatus, useWorkouts } from "@/lib/queries"
 import { getMeta, workoutName } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 
@@ -40,6 +40,7 @@ export default function Home() {
 
   const workouts = useWorkouts(undefined, undefined, undefined)
   const status = useSyncStatus()
+  const sessions = useSyncSessions(10)
 
   const stepsTodayTotal = steps.data?.data?.[0] && "avg" in steps.data.data[0]
     ? (steps.data.data[0] as any).avg * (steps.data.data[0] as any).count
@@ -184,6 +185,48 @@ export default function Home() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Ultime sincronizzazioni</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {sessions.data && sessions.data.length > 0 ? (
+            <div className="space-y-1 text-sm">
+              <div className="grid grid-cols-12 gap-2 text-xs text-muted-foreground border-b pb-2">
+                <div className="col-span-5">Quando</div>
+                <div className="col-span-2 text-right">Campioni</div>
+                <div className="col-span-2 text-right">Batch</div>
+                <div className="col-span-3 text-right">Durata</div>
+              </div>
+              {sessions.data.map((s, i) => (
+                <div key={i} className="grid grid-cols-12 gap-2 py-1.5 border-b last:border-0">
+                  <div className="col-span-5">
+                    <span className="font-medium">{formatDateTime(s.started_at)}</span>
+                  </div>
+                  <div className="col-span-2 text-right tabular-nums">{formatNumber(s.total_samples)}</div>
+                  <div className="col-span-2 text-right tabular-nums text-muted-foreground">{s.batches}</div>
+                  <div className="col-span-3 text-right tabular-nums text-muted-foreground">
+                    {formatDuration(s.duration_seconds)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Nessuna sync registrata</p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
+}
+
+function formatDuration(seconds: number): string {
+  const s = Math.round(seconds)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const sec = s % 60
+  if (m < 60) return `${m}m ${sec}s`
+  const h = Math.floor(m / 60)
+  return `${h}h ${m % 60}m`
 }

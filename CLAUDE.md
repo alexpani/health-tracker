@@ -90,6 +90,7 @@ docker compose exec api alembic upgrade head
 - `GET /api/v1/samples/{id}/correlated?types=...&minutes=5` — samples within time window
 - `POST /api/v1/samples/bulk-delete` — delete by IDs (trigger auto-blacklists)
 - `GET /api/v1/sync/status[?include_types=true]` — fast totals via pg_class.reltuples
+- `GET /api/v1/sync/sessions?limit=10` — recent sync sessions (groups sync_log entries with <5 min gap)
 
 **Write / Delete (web ↔ Apple Health)**
 - `POST /api/v1/write` — queue a write for Apple Health
@@ -188,7 +189,7 @@ docker compose up -d --build
 - `src/pages/Settings.tsx` — rules CRUD + blacklist management + hit stats
 
 ### Pages
-- `/` — Home: today's metrics, weekly charts, sync status
+- `/` — Home: today's metrics, weekly charts, sync status, last 10 sync sessions table
 - `/activity` — Steps, distance, flights, calories
 - `/vitals` — Heart rate, HRV, SpO2, blood pressure, respiratory rate
 - `/body` — Weight/BMI/body fat/lean mass with multi-value tooltip + row delete

@@ -59,7 +59,7 @@ SwiftUI native app targeting iOS 17+.
 React + Vite + TypeScript + Tailwind CSS + shadcn/ui + Recharts.
 
 **Pages:**
-- **Home** — today's metrics + weekly charts + sync status
+- **Home** — today's metrics + weekly charts + sync status + last 10 sync sessions
 - **Attivita** — steps, distance, flights, calories (tabbed, filter bar)
 - **Vitali** — HR, HRV, SpO2, BP, respiratory, temperature, glucose
 - **Corpo** — weight, BMI, body fat, lean mass, height, waist — with multi-value tooltip (all body metrics at the same instant) + row-level delete with correlated-samples confirmation

@@ -322,6 +322,52 @@ async def bulk_delete_samples(body: BulkDeleteIn, db: AsyncSession = Depends(get
     return {"deleted": result.rowcount}
 
 
+@router.get("/sync/sessions")
+async def sync_sessions(limit: int = Query(10, le=100), db: AsyncSession = Depends(get_db)):
+    """
+    Groups sync_log entries into sessions: consecutive entries within 5 minutes
+    of each other belong to the same session. Returns the most recent sessions.
+    """
+    stmt = text(
+        """
+        WITH ordered AS (
+            SELECT id, device_id, sample_count, synced_at,
+                   LAG(synced_at) OVER (ORDER BY synced_at) AS prev_at
+            FROM sync_log
+        ),
+        flagged AS (
+            SELECT *,
+                   SUM(CASE WHEN prev_at IS NULL OR synced_at - prev_at > INTERVAL '5 minutes' THEN 1 ELSE 0 END)
+                       OVER (ORDER BY synced_at) AS session_id
+            FROM ordered
+        )
+        SELECT
+            MIN(synced_at) AS started_at,
+            MAX(synced_at) AS ended_at,
+            EXTRACT(EPOCH FROM (MAX(synced_at) - MIN(synced_at))) AS duration_seconds,
+            SUM(sample_count)::bigint AS total_samples,
+            COUNT(*)::int AS batches,
+            MAX(device_id) AS device_id
+        FROM flagged
+        GROUP BY session_id
+        ORDER BY started_at DESC
+        LIMIT :limit
+        """
+    )
+    result = await db.execute(stmt, {"limit": limit})
+    return [
+        {
+            "started_at": r.started_at.isoformat() if r.started_at else None,
+            "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+            "duration_seconds": float(r.duration_seconds) if r.duration_seconds is not None else 0,
+            "total_samples": int(r.total_samples) if r.total_samples is not None else 0,
+            "batches": r.batches,
+            "device_id": r.device_id,
+        }
+        for r in result.all()
+    ]
+
+
 @router.get("/sync/status", response_model=SyncStatus)
 async def sync_status(
     include_types: bool = Query(False),

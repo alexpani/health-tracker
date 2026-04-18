@@ -11,6 +11,7 @@ import type {
   RulesSummary,
   SampleFacets,
   SamplesResponse,
+  SyncSession,
   SyncStatus,
   TypeCount,
   Workout,
@@ -62,6 +63,15 @@ export function useTypes() {
     queryKey: ["types"],
     queryFn: () => apiGet<TypeCount[]>("/api/v1/samples/types"),
     staleTime: 300_000,
+  })
+}
+
+export function useSyncSessions(limit = 10) {
+  return useQuery({
+    queryKey: ["syncSessions", limit],
+    queryFn: () => apiGet<SyncSession[]>("/api/v1/sync/sessions", { limit }),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
   })
 }
 
