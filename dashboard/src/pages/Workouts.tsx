@@ -202,13 +202,25 @@ export default function Workouts() {
 
   const chartData = useMemo(() => {
     if (!workouts) return []
-    const buckets = new Map<string, { key: string; count: number; uuids: string[] }>()
+    type Bucket = {
+      key: string
+      count: number
+      uuids: string[]
+      totalDuration: number
+      totalDistance: number
+      singleName?: string
+    }
+    const buckets = new Map<string, Bucket>()
     workouts.forEach(w => {
       const k = bucketKey(new Date(w.start_date), chartAgg)
-      if (!buckets.has(k)) buckets.set(k, { key: k, count: 0, uuids: [] })
+      if (!buckets.has(k)) buckets.set(k, { key: k, count: 0, uuids: [], totalDuration: 0, totalDistance: 0 })
       const b = buckets.get(k)!
       b.count++
       b.uuids.push(w.uuid)
+      b.totalDuration += w.duration ?? 0
+      b.totalDistance += w.total_distance ?? 0
+      if (b.count === 1) b.singleName = w.activity_name ?? workoutName(w.activity_type)
+      else b.singleName = undefined
     })
     return Array.from(buckets.values()).sort((a, b) => (a.key < b.key ? -1 : 1))
   }, [workouts, chartAgg])
@@ -373,12 +385,40 @@ export default function Workouts() {
                 />
                 <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
                 <Tooltip
-                  labelFormatter={k => formatBucketLabel(k as string, chartAgg, true)}
-                  formatter={(v: number, _name, item: any) => {
-                    const n = item?.payload?.count ?? v
-                    return [`${n} workout${n === 1 ? "" : ""}`, ""]
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null
+                    const p = payload[0].payload as {
+                      count: number
+                      totalDuration: number
+                      totalDistance: number
+                      singleName?: string
+                    }
+                    const durMin = Math.round(p.totalDuration / 60)
+                    const durHrs = p.totalDuration / 3600
+                    const distKm = p.totalDistance / 1000
+                    return (
+                      <div className="bg-card border rounded-lg shadow-md p-3 text-sm space-y-1">
+                        <div className="font-medium">{formatBucketLabel(label as string, chartAgg, true)}</div>
+                        {p.count === 1 ? (
+                          <>
+                            <div className="text-xs text-muted-foreground">{p.singleName}</div>
+                            <div>Durata: <span className="tabular-nums font-medium">{durMin} min</span></div>
+                            {p.totalDistance > 0 && (
+                              <div>Distanza: <span className="tabular-nums font-medium">{distKm.toFixed(2)} km</span></div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div>Workout: <span className="tabular-nums font-medium">{p.count}</span></div>
+                            <div>Durata totale: <span className="tabular-nums font-medium">{durHrs.toFixed(1)} h</span></div>
+                            {p.totalDistance > 0 && (
+                              <div>Distanza totale: <span className="tabular-nums font-medium">{distKm.toFixed(1)} km</span></div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )
                   }}
-                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
                 />
                 <Bar dataKey="count" fill="#3b82f6" cursor="pointer" />
               </BarChart>
