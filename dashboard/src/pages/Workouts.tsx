@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Filter, Trash2, Undo2, X } from "lucide-react"
@@ -115,18 +115,38 @@ export default function Workouts() {
   const deleteWorkout = useDeleteWorkout()
   const restoreWorkout = useRestoreWorkout()
 
-  // Filters
-  const [range, setRange] = useState<TimeRange>("1y")
-  const [effectiveType, setEffectiveType] = useState<string>("all")
-  const [chartAgg, setChartAgg] = useState<ChartAggregation>("week")
+  // Persisted filters (sessionStorage, so filters survive navigation to/from detail)
+  const STORAGE_KEY = "workouts_filters_v1"
+  const saved = useMemo<Record<string, any>>(() => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY)
+      return raw ? JSON.parse(raw) : {}
+    } catch {
+      return {}
+    }
+  }, [])
 
-  // Advanced filters
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const [startLocal, setStartLocal] = useState("")
-  const [endLocal, setEndLocal] = useState("")
-  const [distMinKm, setDistMinKm] = useState("")
-  const [distMaxKm, setDistMaxKm] = useState("")
-  const [selectedSources, setSelectedSources] = useState<string[]>([])
+  const [range, setRange] = useState<TimeRange>(saved.range ?? "1y")
+  const [effectiveType, setEffectiveType] = useState<string>(saved.effectiveType ?? "all")
+  const [chartAgg, setChartAgg] = useState<ChartAggregation>(saved.chartAgg ?? "week")
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(saved.showAdvanced ?? false)
+  const [startLocal, setStartLocal] = useState<string>(saved.startLocal ?? "")
+  const [endLocal, setEndLocal] = useState<string>(saved.endLocal ?? "")
+  const [distMinKm, setDistMinKm] = useState<string>(saved.distMinKm ?? "")
+  const [distMaxKm, setDistMaxKm] = useState<string>(saved.distMaxKm ?? "")
+  const [selectedSources, setSelectedSources] = useState<string[]>(saved.selectedSources ?? [])
+
+  // Persist any filter change
+  const firstRender = useRef(true)
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return }
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        range, effectiveType, chartAgg, showAdvanced,
+        startLocal, endLocal, distMinKm, distMaxKm, selectedSources,
+      }))
+    } catch {}
+  }, [range, effectiveType, chartAgg, showAdvanced, startLocal, endLocal, distMinKm, distMaxKm, selectedSources])
 
   const { data: facets } = useWorkoutFacets()
 
