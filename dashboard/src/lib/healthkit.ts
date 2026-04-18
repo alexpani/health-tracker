@@ -406,14 +406,59 @@ export const WORKOUT_NAMES: Record<number, string> = {
   3000: "Altro",
 }
 
-/** Build a user-friendly workout name. Detects indoor cardio from metadata
- *  (treadmill: running/walking with HKIndoorWorkout=true). */
+/** Build a user-friendly workout name using metadata hints (indoor, swim location). */
 export function workoutName(type: number, metadata?: Record<string, unknown> | null): string {
-  const indoor = metadata && (metadata as any).HKIndoorWorkout === "1"
+  const m = metadata as any
+  const indoor = m?.HKIndoorWorkout === "1"
   if (indoor) {
     if (type === 37) return "Tapis roulant (corsa)"
     if (type === 52) return "Tapis roulant (camminata)"
     if (type === 13) return "Cyclette"
   }
+  if (type === 46) {
+    // HKSwimmingLocationType: 1=pool, 2=openWater
+    if (m?.HKSwimmingLocationType === "1") return "Nuoto in piscina"
+    if (m?.HKSwimmingLocationType === "2") return "Nuoto in acque aperte"
+  }
   return WORKOUT_NAMES[type] ?? `Workout (${type})`
+}
+
+/** Extract useful extra metadata for display. */
+export interface WorkoutMetadataSummary {
+  indoor?: boolean
+  swimmingLocation?: "pool" | "open_water"
+  lapLength?: string
+  elevationAscended?: string
+  averageMETs?: number
+  weatherTemperature?: string
+  weatherHumidity?: string
+  weatherCondition?: string
+  brandName?: string
+  location?: string
+  timeZone?: string
+  notes?: string
+}
+
+export function extractWorkoutMetadata(metadata?: Record<string, unknown> | null): WorkoutMetadataSummary {
+  if (!metadata) return {}
+  const m = metadata as any
+  const result: WorkoutMetadataSummary = {}
+  if (m.HKIndoorWorkout === "1") result.indoor = true
+  if (m.HKIndoorWorkout === "0") result.indoor = false
+  if (m.HKSwimmingLocationType === "1") result.swimmingLocation = "pool"
+  if (m.HKSwimmingLocationType === "2") result.swimmingLocation = "open_water"
+  if (m.HKLapLength) result.lapLength = String(m.HKLapLength)
+  if (m.HKElevationAscended) result.elevationAscended = String(m.HKElevationAscended)
+  if (m.HKAverageMETs) {
+    const match = String(m.HKAverageMETs).match(/[\d.]+/)
+    if (match) result.averageMETs = parseFloat(match[0])
+  }
+  if (m.HKWeatherTemperature) result.weatherTemperature = String(m.HKWeatherTemperature)
+  if (m.HKWeatherHumidity) result.weatherHumidity = String(m.HKWeatherHumidity)
+  if (m.HKWeatherCondition) result.weatherCondition = String(m.HKWeatherCondition)
+  if (m.HKWorkoutBrandName) result.brandName = String(m.HKWorkoutBrandName)
+  if (m.location) result.location = String(m.location)
+  if (m.HKTimeZone) result.timeZone = String(m.HKTimeZone)
+  if (m["workout note"]) result.notes = String(m["workout note"])
+  return result
 }

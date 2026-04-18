@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useSamples, useWorkoutByUuid, useWorkoutSplits } from "@/lib/queries"
-import { workoutName } from "@/lib/healthkit"
+import { extractWorkoutMetadata, workoutName } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { AggregatedPoint, Sample } from "@/lib/types"
 
@@ -147,6 +147,7 @@ export default function WorkoutDetail() {
 
   const name = workoutName(workout.activity_type, workout.metadata)
   const distanceKm = workout.total_distance ? workout.total_distance / 1000 : null
+  const meta = extractWorkoutMetadata(workout.metadata)
 
   const timeAxisFmt = (iso: string) => new Date(iso).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
 
@@ -191,6 +192,82 @@ export default function WorkoutDetail() {
           </div>
         </CardContent>
       </Card>
+
+      {(meta.indoor !== undefined || meta.swimmingLocation || meta.lapLength || meta.elevationAscended || meta.averageMETs || meta.weatherTemperature || meta.weatherHumidity || meta.brandName || meta.location || meta.notes) && (
+        <Card>
+          <CardHeader><CardTitle>Informazioni aggiuntive</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              {meta.indoor !== undefined && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Ambiente</p>
+                  <p className="font-medium">{meta.indoor ? "Indoor" : "Outdoor"}</p>
+                </div>
+              )}
+              {meta.swimmingLocation && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Tipo nuoto</p>
+                  <p className="font-medium">{meta.swimmingLocation === "pool" ? "Piscina" : "Acque aperte"}</p>
+                </div>
+              )}
+              {meta.lapLength && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Vasca</p>
+                  <p className="font-medium">{meta.lapLength}</p>
+                </div>
+              )}
+              {meta.elevationAscended && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Dislivello</p>
+                  <p className="font-medium">{meta.elevationAscended}</p>
+                </div>
+              )}
+              {meta.averageMETs !== undefined && (
+                <div>
+                  <p className="text-xs text-muted-foreground">METs medi</p>
+                  <p className="font-medium">{meta.averageMETs.toFixed(1)}</p>
+                </div>
+              )}
+              {meta.weatherTemperature && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Temperatura</p>
+                  <p className="font-medium">{meta.weatherTemperature}</p>
+                </div>
+              )}
+              {meta.weatherHumidity && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Umidita'</p>
+                  <p className="font-medium">{meta.weatherHumidity}</p>
+                </div>
+              )}
+              {meta.weatherCondition && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Meteo</p>
+                  <p className="font-medium">{meta.weatherCondition}</p>
+                </div>
+              )}
+              {meta.location && !meta.swimmingLocation && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Location</p>
+                  <p className="font-medium">{meta.location}</p>
+                </div>
+              )}
+              {meta.brandName && (
+                <div>
+                  <p className="text-xs text-muted-foreground">App</p>
+                  <p className="font-medium">{meta.brandName}</p>
+                </div>
+              )}
+            </div>
+            {meta.notes && (
+              <div className="mt-4 pt-3 border-t">
+                <p className="text-xs text-muted-foreground mb-1">Note</p>
+                <p className="text-sm">{meta.notes}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {splitsData && splitsData.splits.length > 0 && (
         <Card>
