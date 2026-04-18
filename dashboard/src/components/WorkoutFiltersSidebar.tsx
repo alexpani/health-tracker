@@ -2,6 +2,7 @@ import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Slider } from "@/components/ui/slider"
 import { useWorkoutFacets } from "@/lib/queries"
 import { effectiveTypeLabel } from "@/lib/healthkit"
 import type { WorkoutFilters } from "@/lib/types"
@@ -12,23 +13,23 @@ interface Props {
   onClose?: () => void
 }
 
-function paceSecToInput(sec?: number): string {
-  if (sec === undefined || sec === null || !isFinite(sec)) return ""
+const PACE_MIN_SEC = 180   // 3:00 /km
+const PACE_MAX_SEC = 900   // 15:00 /km
+const PACE_STEP = 10
+
+function formatPace(sec: number): string {
   const m = Math.floor(sec / 60)
   const s = Math.round(sec % 60)
   return `${m}:${String(s).padStart(2, "0")}`
 }
-function paceInputToSec(v: string): number | undefined {
-  if (!v.trim()) return undefined
-  const parts = v.split(":")
-  if (parts.length === 2) {
-    const m = parseInt(parts[0], 10)
-    const s = parseInt(parts[1], 10)
-    if (!isNaN(m) && !isNaN(s)) return m * 60 + s
-  }
-  const n = parseFloat(v)
-  return isNaN(n) ? undefined : n
-}
+
+const PACE_PRESETS: { label: string; min?: number; max?: number }[] = [
+  { label: "< 4:30", max: 270 },
+  { label: "4:30 - 5:30", min: 270, max: 330 },
+  { label: "5:30 - 6:30", min: 330, max: 390 },
+  { label: "6:30 - 7:30", min: 390, max: 450 },
+  { label: "> 7:30", min: 450 },
+]
 
 export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
   const { data: facets } = useWorkoutFacets()
@@ -208,22 +209,46 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
       </section>
 
       {/* Pace */}
-      <section className="space-y-2">
-        <Label className="text-xs font-medium">Ritmo (m:ss/km)</Label>
-        <div className="flex gap-2">
-          <Input
-            type="text" placeholder="piu' veloce di"
-            value={paceSecToInput(value.pace_min)}
-            onChange={e => set("pace_min", paceInputToSec(e.target.value))}
-          />
-          <Input
-            type="text" placeholder="piu' lento di"
-            value={paceSecToInput(value.pace_max)}
-            onChange={e => set("pace_max", paceInputToSec(e.target.value))}
-          />
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs font-medium">Ritmo</Label>
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {formatPace(value.pace_min ?? PACE_MIN_SEC)} - {formatPace(value.pace_max ?? PACE_MAX_SEC)} /km
+          </span>
+        </div>
+        <Slider
+          min={PACE_MIN_SEC}
+          max={PACE_MAX_SEC}
+          step={PACE_STEP}
+          value={[value.pace_min ?? PACE_MIN_SEC, value.pace_max ?? PACE_MAX_SEC]}
+          onValueChange={(vals) => {
+            const [lo, hi] = vals
+            onChange({
+              ...value,
+              pace_min: lo === PACE_MIN_SEC ? undefined : lo,
+              pace_max: hi === PACE_MAX_SEC ? undefined : hi,
+            })
+          }}
+        />
+        <div className="flex flex-wrap gap-1">
+          {PACE_PRESETS.map(p => {
+            const active = value.pace_min === p.min && value.pace_max === p.max
+            return (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => onChange({ ...value, pace_min: p.min, pace_max: p.max })}
+                className={`text-xs px-2 py-1 rounded-md border ${
+                  active ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-accent"
+                }`}
+              >
+                {p.label}
+              </button>
+            )
+          })}
         </div>
         <p className="text-xs text-muted-foreground">
-          Es. 5:30 = 5 min 30 sec/km. Applica solo ai workout con distanza.
+          Applica solo ai workout con distanza.
         </p>
       </section>
     </div>
