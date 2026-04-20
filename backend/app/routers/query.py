@@ -196,7 +196,7 @@ async def latest_sample(type: str, db: AsyncSession = Depends(get_db)):
     stmt = (
         select(HealthSample)
         .where(HealthSample.type == type)
-        .order_by(HealthSample.start_date.desc())
+        .order_by(HealthSample.start_date.desc(), HealthSample.id.desc())
         .limit(1)
     )
     result = await db.execute(stmt)
