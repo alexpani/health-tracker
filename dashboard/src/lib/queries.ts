@@ -40,7 +40,8 @@ export function useSamples(opts: SamplesQuery, enabled = true) {
     queryKey: ["samples", opts],
     queryFn: () => apiGet<SamplesResponse>("/api/v1/samples", opts as any),
     enabled,
-    staleTime: 60_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   })
 }
 
@@ -49,7 +50,8 @@ export function useLatest(type: string, enabled = true) {
     queryKey: ["latest", type],
     queryFn: () => apiGet<LatestSampleResponse>("/api/v1/samples/latest", { type }),
     enabled,
-    staleTime: 60_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   })
 }
 
