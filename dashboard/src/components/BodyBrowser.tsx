@@ -3,12 +3,13 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceArea,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts"
-import { Filter, Trash2 } from "lucide-react"
+import { Filter, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -398,6 +399,45 @@ export default function BodyBrowser() {
 
   const isLoading = selectedTypes.some(t => q[typeKey[t]].isLoading)
 
+  // Drag-to-select a time range on the chart to compute per-metric deltas
+  const [selStart, setSelStart] = useState<string | null>(null)
+  const [selEnd, setSelEnd] = useState<string | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [popoverCoord, setPopoverCoord] = useState<{ x: number; y: number } | null>(null)
+
+  const clearSelection = () => {
+    setSelStart(null); setSelEnd(null); setIsDragging(false); setPopoverCoord(null)
+  }
+
+  // Compute deltas over [selStart, selEnd] for each selected metric
+  const selectionStats = useMemo(() => {
+    if (!selStart || !selEnd) return null
+    const lo = selStart < selEnd ? selStart : selEnd
+    const hi = selStart < selEnd ? selEnd : selStart
+    return selectedTypes.map(type => {
+      const meta = getMeta(type)
+      const samples = rawFor(type)
+        .filter(s => {
+          if (!passesYear(s.start_date)) return false
+          if (!passesWeight(type, s.value)) return false
+          return s.start_date >= lo && s.start_date <= hi
+        })
+        .sort((a, b) => a.start_date.localeCompare(b.start_date))
+      if (samples.length === 0) return { type, meta, first: null, last: null, delta: null, n: 0 }
+      const first = samples[0].value * meta.unitMultiplier
+      const last = samples[samples.length - 1].value * meta.unitMultiplier
+      return {
+        type, meta,
+        first, last, delta: last - first,
+        firstDate: samples[0].start_date,
+        lastDate: samples[samples.length - 1].start_date,
+        n: samples.length,
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selStart, selEnd, selectedTypes, yearSet, filters.weight_min, filters.weight_max,
+      q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
+
   return (
     <div className="flex gap-6 -m-6 p-0 min-h-[calc(100vh-0px)]">
       <aside className="hidden lg:block w-[320px] shrink-0 border-r bg-card/30 sticky top-0 h-screen overflow-hidden">
@@ -447,7 +487,7 @@ export default function BodyBrowser() {
             <CardTitle>
               Andamento
               <span className="ml-2 text-xs font-normal text-muted-foreground">
-                — ogni metrica ha la propria scala Y (autoscale)
+                — trascina orizzontalmente per calcolare la variazione nell'intervallo
               </span>
             </CardTitle>
           </CardHeader>
@@ -457,43 +497,148 @@ export default function BodyBrowser() {
                 {isLoading ? "Caricamento..." : "Nessun dato nel periodo selezionato"}
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={360}>
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                  <XAxis
-                    dataKey="time"
-                    tickFormatter={axisFormat}
-                    minTickGap={40}
-                    tick={{ fontSize: 12 }}
-                  />
-                  {/* One hidden YAxis per type -> each series autoscales on its own range, using the full vertical space */}
-                  {selectedTypes.map(t => (
-                    <YAxis
-                      key={t}
-                      yAxisId={t}
-                      hide
-                      domain={["auto", "auto"]}
+              <div className="relative select-none">
+                <ResponsiveContainer width="100%" height={360}>
+                  <LineChart
+                    data={chartData}
+                    onMouseDown={(e: any) => {
+                      const lbl = e?.activeLabel
+                      if (!lbl) return
+                      setSelStart(lbl); setSelEnd(lbl)
+                      setIsDragging(true)
+                      setPopoverCoord(null)
+                    }}
+                    onMouseMove={(e: any) => {
+                      if (!isDragging) return
+                      const lbl = e?.activeLabel
+                      if (!lbl) return
+                      setSelEnd(lbl)
+                      const coord = e?.activeCoordinate
+                      if (coord) setPopoverCoord({ x: coord.x, y: coord.y })
+                    }}
+                    onMouseUp={() => {
+                      if (!isDragging) return
+                      setIsDragging(false)
+                      if (!selStart || !selEnd || selStart === selEnd) {
+                        clearSelection()
+                      }
+                    }}
+                    onMouseLeave={() => {
+                      if (isDragging) setIsDragging(false)
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                    <XAxis
+                      dataKey="time"
+                      tickFormatter={axisFormat}
+                      minTickGap={40}
+                      tick={{ fontSize: 12 }}
+                      allowDataOverflow
                     />
-                  ))}
-                  <Tooltip content={<CustomTooltip />} />
-                  {selectedTypes.map(t => {
-                    const meta = getMeta(t)
-                    return (
-                      <Line
+                    {/* One hidden YAxis per type -> each series autoscales on its own range, using the full vertical space */}
+                    {selectedTypes.map(t => (
+                      <YAxis
                         key={t}
                         yAxisId={t}
-                        type="monotone"
-                        dataKey={t}
-                        stroke={meta.color}
-                        strokeWidth={2}
-                        dot={aggregation === "none" ? { r: 2 } : false}
-                        connectNulls
-                        name={meta.label}
+                        hide
+                        domain={["auto", "auto"]}
                       />
-                    )
-                  })}
-                </LineChart>
-              </ResponsiveContainer>
+                    ))}
+                    <Tooltip content={<CustomTooltip />} />
+                    {selectedTypes.map(t => {
+                      const meta = getMeta(t)
+                      return (
+                        <Line
+                          key={t}
+                          yAxisId={t}
+                          type="monotone"
+                          dataKey={t}
+                          stroke={meta.color}
+                          strokeWidth={2}
+                          dot={aggregation === "none" ? { r: 2 } : false}
+                          connectNulls
+                          name={meta.label}
+                        />
+                      )
+                    })}
+                    {selStart && selEnd && selStart !== selEnd && (
+                      <ReferenceArea
+                        yAxisId={selectedTypes[0]}
+                        x1={selStart < selEnd ? selStart : selEnd}
+                        x2={selStart < selEnd ? selEnd : selStart}
+                        strokeOpacity={0.3}
+                        fill="#3b82f6"
+                        fillOpacity={0.15}
+                      />
+                    )}
+                  </LineChart>
+                </ResponsiveContainer>
+
+                {/* Selection popover (after mouseUp) */}
+                {!isDragging && selStart && selEnd && selStart !== selEnd && popoverCoord && selectionStats && (
+                  <div
+                    className="absolute z-10 bg-card border rounded-lg shadow-lg p-3 text-sm min-w-[220px]"
+                    style={{
+                      left: Math.min(Math.max(popoverCoord.x - 110, 8), 600),
+                      top: Math.max(popoverCoord.y - 160, 8),
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="text-xs text-muted-foreground tabular-nums">
+                        {tooltipLabel(selStart < selEnd ? selStart : selEnd)}
+                        <br />→ {tooltipLabel(selStart < selEnd ? selEnd : selStart)}
+                      </div>
+                      <button
+                        type="button"
+                        className="h-5 w-5 rounded hover:bg-accent inline-flex items-center justify-center shrink-0"
+                        onClick={clearSelection}
+                        aria-label="Chiudi"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <div className="space-y-1 pt-1 border-t">
+                      {selectionStats.map(s => {
+                        if (s.delta === null || s.first === null || s.last === null) {
+                          return (
+                            <div key={s.type} className="flex justify-between items-center gap-4 text-xs">
+                              <span className="flex items-center gap-1.5">
+                                <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.meta.color }} />
+                                {s.meta.label}
+                              </span>
+                              <span className="text-muted-foreground">nessun dato</span>
+                            </div>
+                          )
+                        }
+                        const sign = s.delta > 0 ? "+" : ""
+                        const color =
+                          Math.abs(s.delta) < 0.01 ? "text-muted-foreground"
+                          : s.delta > 0 ? "text-red-500"
+                          : "text-green-500"
+                        const fmt = (v: number) =>
+                          s.meta.formatValue ? s.meta.formatValue(v) : v.toLocaleString("it-IT", { maximumFractionDigits: 2 })
+                        return (
+                          <div key={s.type} className="flex justify-between items-center gap-4">
+                            <span className="flex items-center gap-1.5 text-xs">
+                              <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.meta.color }} />
+                              {s.meta.label}
+                            </span>
+                            <span className="tabular-nums text-right">
+                              <span className={`font-semibold ${color}`}>
+                                {sign}{fmt(s.delta)}
+                                <span className="text-muted-foreground text-[10px] font-normal ml-0.5">{s.meta.displayUnit}</span>
+                              </span>
+                              <span className="block text-[10px] text-muted-foreground">
+                                {fmt(s.first)} → {fmt(s.last)} ({s.n})
+                              </span>
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>
