@@ -43,6 +43,26 @@ final class SyncService {
     // Types to sync LAST (after everything else has finished).
     private let deferredTypes: Set<String> = []
 
+    // Body measurements often arrive in HealthKit with a startDate well in the
+    // past (smart scales sync minutes after weighing; manual entries can be
+    // back-dated). Without a lookback the cursor advances past those samples
+    // and they are silently lost forever. UUID dedup on the backend makes
+    // re-querying an overlap safe.
+    private static let bodyTypeIdentifiers: Set<String> = [
+        HKQuantityTypeIdentifier.bodyMass.rawValue,
+        HKQuantityTypeIdentifier.bodyMassIndex.rawValue,
+        HKQuantityTypeIdentifier.bodyFatPercentage.rawValue,
+        HKQuantityTypeIdentifier.leanBodyMass.rawValue,
+        HKQuantityTypeIdentifier.height.rawValue,
+        HKQuantityTypeIdentifier.waistCircumference.rawValue,
+    ]
+    private let bodyLookback: TimeInterval = 60 * 60 * 24 * 30 // 30 days
+    private let defaultLookback: TimeInterval = 60 * 60          // 1 hour
+
+    private func lookback(for typeIdentifier: String) -> TimeInterval {
+        Self.bodyTypeIdentifiers.contains(typeIdentifier) ? bodyLookback : defaultLookback
+    }
+
     private let lastSyncKey = "last_sync_summary_v1"
 
     init() {
@@ -288,7 +308,10 @@ final class SyncService {
 
     @MainActor
     private func syncQuantityType(typeId: HKQuantityTypeIdentifier, unit: HKUnit) async {
-        let startDate = (await getSyncDate(for: typeId.rawValue)) ?? Date.distantPast
+        let cursor = (await getSyncDate(for: typeId.rawValue)) ?? Date.distantPast
+        let startDate = cursor == Date.distantPast
+            ? cursor
+            : cursor.addingTimeInterval(-lookback(for: typeId.rawValue))
         let endDate = Date()
         var totalInserted = 0
 
@@ -347,7 +370,10 @@ final class SyncService {
 
     @MainActor
     private func syncCategoryType(typeId: HKCategoryTypeIdentifier) async {
-        let startDate = (await getSyncDate(for: typeId.rawValue)) ?? Date.distantPast
+        let cursor = (await getSyncDate(for: typeId.rawValue)) ?? Date.distantPast
+        let startDate = cursor == Date.distantPast
+            ? cursor
+            : cursor.addingTimeInterval(-lookback(for: typeId.rawValue))
         let endDate = Date()
         var totalInserted = 0
 
