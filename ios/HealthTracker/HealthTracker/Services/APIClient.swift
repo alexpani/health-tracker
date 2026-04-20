@@ -264,6 +264,17 @@ actor APIClient {
         return resp.deleted
     }
 
+    /// Deletes health samples by UUID (used by the anchored quantity sync path
+    /// to propagate Apple Health deletions for body-metric types). The PG
+    /// trigger on health_samples auto-populates the ingest blacklist.
+    func deleteSamples(uuids: [UUID]) async throws -> Int {
+        if uuids.isEmpty { return 0 }
+        struct Resp: Decodable { let deleted: Int }
+        let body: [String: Any] = ["uuids": uuids.map { $0.uuidString }]
+        let resp: Resp = try await post(path: "/api/v1/samples/bulk-delete-by-uuids", body: body)
+        return resp.deleted
+    }
+
     func checkConnection() async -> Bool {
         guard let url = URL(string: "\(serverURL)/health") else { return false }
         do {

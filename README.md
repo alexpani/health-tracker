@@ -50,7 +50,8 @@ SwiftUI native app targeting iOS 17+.
 - Auto-sync on launch + foreground (10-min throttle), plus hourly `BGAppRefreshTask` fallback
 - **Writes** pending data from web apps to Apple Health via `HKHealthStore.save()`
 - **Deletes** samples via `HKHealthStore.delete()` (only samples the app created — HealthKit rule)
-- **Propagates Apple Health deletions**: workouts are synced via `HKAnchoredObjectQuery`, so cancellations on the phone side are mirrored to the backend (and auto-blacklisted so they can't re-appear)
+- **Propagates Apple Health deletions**: workouts and body-metric samples (peso, BMI, grasso, magra, altezza, vita) are synced via `HKAnchoredObjectQuery`, so cancellations on the phone side are mirrored to the backend (and auto-blacklisted so they can't re-appear)
+- **Handles retroactive writes**: third-party scales like Withings write samples to HealthKit with `startDate` in the past but `creationDate` later; the anchored queries catch them reliably where a windowed `HKSampleQuery` would miss them
 - Progress UI: per-type progress bar, sample counter, stop button, **date reached** display
 - Persistent sync summary (last sync log, duration, samples) across app launches via UserDefaults
 - Tabs: **Sync (default)**, Dashboard (today's body metrics), Settings
@@ -63,7 +64,7 @@ React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui + Recharts + TanStack Qu
 - **Home** — today's metrics, weekly charts, last 3 workouts, sync status, last 10 sync sessions table
 - **Attivita** — steps, distance, flights, calories (tabbed)
 - **Vitali** — HR, HRV, SpO2, BP, respiratory, temperature, glucose
-- **Corpo** — weight, BMI, body fat, lean mass, height, waist. **Tooltip shows all body values at the same instant** + row-level delete with correlated-samples confirmation
+- **Corpo** — weight, BMI, body fat, lean mass, height, waist. **Left sidebar filters** (metriche, aggregazione, periodo, sorgente), **multi-line chart** con tooltip che mostra tutti i valori allo stesso istante, **tabella completa paginata** (50/pagina), row-level delete con conferma dei dati correlati
 - **Sonno** — sleep analysis, stacked bar chart per night
 - **Workout** — main page with **left sidebar filters** (year, activity chips, source, datetime range, distance km, duration min, **pace dual-range slider + preset chips**, title search, notes search), summary stats, workouts-per-period chart with **click-to-drilldown** zoom (year → month → week → day → workout), **sortable list** (title, pace, notes columns included), row delete with 8s undo. Third-party workout titles (e.g., Intervals Pro "Corsa Livello 2") are auto-promoted from metadata into a dedicated column. Filters **persisted in sessionStorage** so they survive navigation. Main layout uses a **hamburger menu** top-bar that opens the nav drawer.
 - **Workout detail** (`/workouts/:uuid`) — Apple Fitness-style: metrics (duration, distance, calories, pace, HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), **per-km splits** table, time-series charts (HR, running speed, power, cadence), **editable title and notes** cards

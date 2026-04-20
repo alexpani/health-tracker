@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiDelete, apiGet, apiPatch, apiPost } from "./api"
 import type {
   Aggregation,
@@ -42,6 +42,7 @@ export function useSamples(opts: SamplesQuery, enabled = true) {
     enabled,
     staleTime: 30_000,
     refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
   })
 }
 

@@ -224,6 +224,17 @@ export interface AdvancedFilters {
   value_max?: number
 }
 
+export interface BodyFilters {
+  start?: string
+  end?: string
+  types?: string[]
+  sources?: string[]
+  aggregation?: Aggregation
+  years?: number[]
+  weight_min?: number
+  weight_max?: number
+}
+
 export interface WriteInput {
   type: string
   value: number

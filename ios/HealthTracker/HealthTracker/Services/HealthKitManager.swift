@@ -419,6 +419,56 @@ actor HealthKitManager {
         return (payloads, deletedUUIDs, newAnchor)
     }
 
+    /// Fetches quantity samples of the given type via an anchored query.
+    /// Returns new samples, UUIDs deleted since last anchor, and the new anchor.
+    /// Used for slow-changing body metrics (weight, BMI, body fat, lean mass,
+    /// height, waist) where sources like Withings can write samples retroactively
+    /// into HealthKit — a plain windowed HKSampleQuery would miss those.
+    func fetchQuantitySamplesAnchored(
+        type: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        anchor: HKQueryAnchor?
+    ) async throws -> (added: [SamplePayload], deletedUUIDs: [UUID], newAnchor: HKQueryAnchor?) {
+        guard let sampleType = HKQuantityType.quantityType(forIdentifier: type) else {
+            return ([], [], anchor)
+        }
+
+        let result: ([HKQuantitySample], [HKDeletedObject], HKQueryAnchor?) = try await withCheckedThrowingContinuation { cont in
+            let query = HKAnchoredObjectQuery(
+                type: sampleType,
+                predicate: nil,
+                anchor: anchor,
+                limit: HKObjectQueryNoLimit
+            ) { _, samples, deleted, newAnchor, error in
+                if let error { cont.resume(throwing: error); return }
+                cont.resume(returning: ((samples as? [HKQuantitySample]) ?? [], deleted ?? [], newAnchor))
+            }
+            healthStore.execute(query)
+        }
+
+        let (added, deleted, newAnchor) = result
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let payloads = added.map { sample in
+            SamplePayload(
+                uuid: sample.uuid.uuidString,
+                type: type.rawValue,
+                value: sample.quantity.doubleValue(for: unit),
+                unit: unit.unitString,
+                startDate: formatter.string(from: sample.startDate),
+                endDate: formatter.string(from: sample.endDate),
+                sourceName: sample.sourceRevision.source.name,
+                sourceBundleId: sample.sourceRevision.source.bundleIdentifier,
+                device: sample.device?.model,
+                metadata: sample.metadata?.compactMapValues { "\($0)" }
+            )
+        }
+
+        let deletedUUIDs = deleted.map { $0.uuid }
+        return (payloads, deletedUUIDs, newAnchor)
+    }
+
     func fetchWorkouts(since: Date?, until: Date? = nil) async throws -> [WorkoutPayload] {
         let predicate: NSPredicate? = (since != nil || until != nil)
             ? HKQuery.predicateForSamples(withStart: since, end: until, options: .strictStartDate)

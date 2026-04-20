@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   CartesianGrid,
   Line,
@@ -8,54 +8,321 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
+import { Filter, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { SampleTable } from "@/components/SampleTable"
-import { FilterBar } from "@/components/FilterBar"
-import {
-  TimeRangeSelector,
-  suggestAggregation,
-  timeRangeToDates,
-} from "@/components/controls/TimeRangeSelector"
-import { AggregationSelector } from "@/components/controls/AggregationSelector"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { BodyFiltersSidebar } from "@/components/BodyFiltersSidebar"
 import { fetchCorrelated, useBulkDeleteSamples, useSamples } from "@/lib/queries"
 import { CATEGORIES, getMeta } from "@/lib/healthkit"
 import { formatDateTime } from "@/lib/utils"
-import type { AdvancedFilters, AggregatedPoint, Aggregation, CorrelatedSample, Sample, TimeRange } from "@/lib/types"
+import type { BodyFilters, CorrelatedSample, Sample } from "@/lib/types"
 
 const BODY_TYPES = CATEGORIES.body.types
+const STORAGE_KEY = "body_filters_v3"
+const PAGE_SIZE = 50
 
-interface SeriesPoint {
-  time: string
-  t: number // epoch ms for sorting/matching
-  values: Record<string, number | undefined>
+interface MergedRow {
+  id?: number
+  uuid: string
+  type: string
+  value: number
+  start_date: string
+  source_name: string | null
 }
 
-function isAggregated(data: any[]): data is AggregatedPoint[] {
-  return data.length > 0 && "period_start" in data[0]
+function bucketFloor(t: number, agg: string): number {
+  const d = new Date(t)
+  if (agg === "hourly") { d.setMinutes(0, 0, 0); return d.getTime() }
+  if (agg === "daily")  { d.setHours(0, 0, 0, 0); return d.getTime() }
+  if (agg === "weekly") {
+    const day = (d.getDay() + 6) % 7
+    d.setDate(d.getDate() - day)
+    d.setHours(0, 0, 0, 0)
+    return d.getTime()
+  }
+  if (agg === "monthly") { return new Date(d.getFullYear(), d.getMonth(), 1).getTime() }
+  return t
+}
+
+interface WeightStat {
+  first: number
+  last: number
+  delta: number
+  firstDate: string
+  lastDate: string
+  n: number
+}
+
+function WeightDeltaCard({ label, stat }: { label: string; stat: WeightStat | null }) {
+  if (!stat) {
+    return (
+      <Card>
+        <CardContent className="p-3">
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="text-xl font-semibold text-muted-foreground">—</p>
+          <p className="text-[11px] text-muted-foreground mt-1">Nessun dato</p>
+        </CardContent>
+      </Card>
+    )
+  }
+  const sign = stat.delta > 0 ? "+" : ""
+  const color =
+    Math.abs(stat.delta) < 0.05 ? "text-muted-foreground"
+    : stat.delta > 0 ? "text-red-500"
+    : "text-green-500"
+  const fmtDate = (iso: string) =>
+    new Date(iso).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "2-digit" })
+  return (
+    <Card>
+      <CardContent className="p-3">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className={`text-xl font-semibold tabular-nums ${color}`}>
+          {sign}{stat.delta.toFixed(1)} <span className="text-sm text-muted-foreground font-normal">kg</span>
+        </p>
+        <p className="text-[11px] text-muted-foreground mt-1 tabular-nums">
+          {stat.first.toFixed(1)} → {stat.last.toFixed(1)} kg
+        </p>
+        <p className="text-[11px] text-muted-foreground tabular-nums">
+          {fmtDate(stat.firstDate)} → {fmtDate(stat.lastDate)}
+        </p>
+      </CardContent>
+    </Card>
+  )
 }
 
 export default function BodyBrowser() {
-  const [activeType, setActiveType] = useState(BODY_TYPES[0])
-  const [range, setRange] = useState<TimeRange>("30d")
-  const [aggregation, setAggregation] = useState<Aggregation>(suggestAggregation("30d"))
-  const [advanced, setAdvanced] = useState<AdvancedFilters>({})
+  const saved = useMemo<any>(() => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY)
+      return raw ? JSON.parse(raw) : null
+    } catch { return null }
+  }, [])
+
+  const defaultFilters = useMemo<BodyFilters>(() => {
+    const end = new Date()
+    const start = new Date(end.getTime() - 365 * 86400_000)
+    return {
+      aggregation: "daily",
+      types: ["HKQuantityTypeIdentifierBodyMass"],
+      start: start.toISOString(),
+      end: end.toISOString(),
+    }
+  }, [])
+
+  const [filters, setFilters] = useState<BodyFilters>(saved?.filters ?? defaultFilters)
+  const [showMobileFilters, setShowMobileFilters] = useState(false)
+  const [page, setPage] = useState(0)
+
+  const firstRender = useRef(true)
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return }
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ filters })) } catch {}
+    setPage(0)
+  }, [filters])
+
+  const selectedTypes = filters.types && filters.types.length > 0 ? filters.types : ["HKQuantityTypeIdentifierBodyMass"]
+  const aggregation = filters.aggregation ?? "none"
+
+  // Year filter: applied client-side on top of start/end
+  const yearSet = useMemo(() => new Set(filters.years ?? []), [filters.years])
+
+  // All-time BodyMass samples (ignoring time filter) — used to compute
+  // the "variazione peso" cards (ultimo mese / anno / tutto). Respects
+  // sources filter for consistency with the main view.
+  const allBodyMassQ = useSamples({
+    type: "HKQuantityTypeIdentifierBodyMass",
+    aggregation: "none",
+    sources: filters.sources,
+    limit: 10000,
+  })
+
+  // Always fetch RAW (aggregation=none) — table must always show raw samples,
+  // and the chart aggregation happens client-side.
+  const q = {
+    BodyMass:          useSamples({ type: "HKQuantityTypeIdentifierBodyMass",          start: filters.start, end: filters.end, aggregation: "none", sources: filters.sources, limit: 10000 }),
+    BodyMassIndex:     useSamples({ type: "HKQuantityTypeIdentifierBodyMassIndex",     start: filters.start, end: filters.end, aggregation: "none", sources: filters.sources, limit: 10000 }),
+    BodyFatPercentage: useSamples({ type: "HKQuantityTypeIdentifierBodyFatPercentage", start: filters.start, end: filters.end, aggregation: "none", sources: filters.sources, limit: 10000 }),
+    LeanBodyMass:      useSamples({ type: "HKQuantityTypeIdentifierLeanBodyMass",      start: filters.start, end: filters.end, aggregation: "none", sources: filters.sources, limit: 10000 }),
+    Height:            useSamples({ type: "HKQuantityTypeIdentifierHeight",            start: filters.start, end: filters.end, aggregation: "none", sources: filters.sources, limit: 10000 }),
+    Waist:             useSamples({ type: "HKQuantityTypeIdentifierWaistCircumference",start: filters.start, end: filters.end, aggregation: "none", sources: filters.sources, limit: 10000 }),
+  }
+
+  const typeKey: Record<string, keyof typeof q> = {
+    HKQuantityTypeIdentifierBodyMass: "BodyMass",
+    HKQuantityTypeIdentifierBodyMassIndex: "BodyMassIndex",
+    HKQuantityTypeIdentifierBodyFatPercentage: "BodyFatPercentage",
+    HKQuantityTypeIdentifierLeanBodyMass: "LeanBodyMass",
+    HKQuantityTypeIdentifierHeight: "Height",
+    HKQuantityTypeIdentifierWaistCircumference: "Waist",
+  }
+
+  const rawFor = (type: string): Sample[] => {
+    const d = q[typeKey[type]].data?.data
+    if (!d || d.length === 0) return []
+    return d as Sample[]
+  }
+
+  const passesYear = (iso: string) =>
+    yearSet.size === 0 || yearSet.has(new Date(iso).getFullYear())
+
+  // Weight range applies only to BodyMass samples (in kg — BodyMass source unit is already kg)
+  const passesWeight = (type: string, value: number) => {
+    if (type !== "HKQuantityTypeIdentifierBodyMass") return true
+    if (filters.weight_min !== undefined && value < filters.weight_min) return false
+    if (filters.weight_max !== undefined && value > filters.weight_max) return false
+    return true
+  }
+
+  // Sources chip list: union across all fetched data
+  const availableSources = useMemo(() => {
+    const set = new Set<string>()
+    BODY_TYPES.forEach(t => rawFor(t).forEach(s => s.source_name && set.add(s.source_name)))
+    return Array.from(set).sort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
+
+  // Years available (union across all fetched data)
+  const availableYears = useMemo(() => {
+    const set = new Set<number>()
+    BODY_TYPES.forEach(t => rawFor(t).forEach(s => set.add(new Date(s.start_date).getFullYear())))
+    return Array.from(set).sort((a, b) => b - a)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
+
+  // Build chart data: time-indexed points, one key per selected type (client-side aggregation if requested)
+  const chartData = useMemo(() => {
+    type Agg = { sum: number; n: number }
+    const buckets = new Map<number, Record<string, Agg>>()
+
+    selectedTypes.forEach(type => {
+      const meta = getMeta(type)
+      rawFor(type).forEach(s => {
+        if (!passesYear(s.start_date)) return
+        if (!passesWeight(type, s.value)) return
+        const t0 = new Date(s.start_date).getTime()
+        const bucketT = aggregation === "none" ? t0 : bucketFloor(t0, aggregation)
+        if (!buckets.has(bucketT)) buckets.set(bucketT, {})
+        const row = buckets.get(bucketT)!
+        if (!row[type]) row[type] = { sum: 0, n: 0 }
+        row[type].sum += s.value * meta.unitMultiplier
+        row[type].n += 1
+      })
+    })
+
+    const out = Array.from(buckets.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([t, row]) => {
+        const obj: Record<string, any> = { t, time: new Date(t).toISOString() }
+        for (const [type, a] of Object.entries(row)) obj[type] = a.sum / a.n
+        return obj
+      })
+    return out
+  }, [selectedTypes, aggregation, yearSet, filters.weight_min, filters.weight_max, q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
+
+  // Table: ALL raw samples for selected types (respecting year filter), sorted desc
+  const tableRows = useMemo<MergedRow[]>(() => {
+    const rows: MergedRow[] = []
+    selectedTypes.forEach(type => {
+      rawFor(type).forEach(s => {
+        if (!passesYear(s.start_date)) return
+        if (!passesWeight(type, s.value)) return
+        rows.push({
+          id: s.id,
+          uuid: s.uuid,
+          type,
+          value: s.value,
+          start_date: s.start_date,
+          source_name: s.source_name,
+        })
+      })
+    })
+    rows.sort((a, b) => b.start_date.localeCompare(a.start_date))
+    return rows
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTypes, yearSet, filters.weight_min, filters.weight_max, q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
+
+  // Per-type count cards
+  const perTypeCount = useMemo(() => {
+    const counts: Record<string, number> = {}
+    selectedTypes.forEach(t => {
+      counts[t] = rawFor(t).filter(s => passesYear(s.start_date) && passesWeight(t, s.value)).length
+    })
+    return counts
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTypes, yearSet, filters.weight_min, filters.weight_max, q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
+
+  // Weight variation stats (last month / last year / all / selected period)
+  const weightStats = useMemo(() => {
+    const all = (allBodyMassQ.data?.data as Sample[] | undefined) ?? []
+    if (all.length === 0) return null
+    // Apply weight range filter to stay consistent with user's intent
+    const filtered = all.filter(s => {
+      if (filters.weight_min !== undefined && s.value < filters.weight_min) return false
+      if (filters.weight_max !== undefined && s.value > filters.weight_max) return false
+      return true
+    })
+    if (filtered.length === 0) return null
+    const sorted = [...filtered].sort((a, b) => a.start_date.localeCompare(b.start_date))
+    const now = Date.now()
+
+    const deltaInRange = (
+      startMs: number | null,
+      endMs: number | null,
+      yearFilter?: Set<number>,
+    ) => {
+      const slice = sorted.filter(s => {
+        const d = new Date(s.start_date)
+        const t = d.getTime()
+        if (startMs !== null && t < startMs) return false
+        if (endMs !== null && t > endMs) return false
+        if (yearFilter && yearFilter.size > 0 && !yearFilter.has(d.getFullYear())) return false
+        return true
+      })
+      if (slice.length === 0) return null
+      const first = slice[0]
+      const last = slice[slice.length - 1]
+      return {
+        first: first.value,
+        last: last.value,
+        delta: last.value - first.value,
+        firstDate: first.start_date,
+        lastDate: last.start_date,
+        n: slice.length,
+      }
+    }
+
+    // "Periodo selezionato" = datetime from/to (se presenti) ∩ anni selezionati.
+    const selStart = filters.start ? new Date(filters.start).getTime() : null
+    const selEnd = filters.end ? new Date(filters.end).getTime() : null
+    const yearFilter = filters.years && filters.years.length > 0 ? new Set(filters.years) : undefined
+    const hasSelected = selStart !== null || selEnd !== null || (yearFilter && yearFilter.size > 0)
+
+    return {
+      month:    deltaInRange(now - 30 * 86400_000, null),
+      year:     deltaInRange(now - 365 * 86400_000, null),
+      all:      deltaInRange(null, null),
+      selected: hasSelected ? deltaInRange(selStart, selEnd, yearFilter) : null,
+    }
+  }, [allBodyMassQ.data, filters.start, filters.end, filters.years, filters.weight_min, filters.weight_max])
+
+  const showWeightStats = selectedTypes.includes("HKQuantityTypeIdentifierBodyMass")
 
   // Delete flow
-  const [deleteTarget, setDeleteTarget] = useState<Sample | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<MergedRow | null>(null)
   const [correlated, setCorrelated] = useState<CorrelatedSample[] | null>(null)
   const [loadingCorrelated, setLoadingCorrelated] = useState(false)
   const bulkDelete = useBulkDeleteSamples()
 
-  const askDelete = async (s: Sample) => {
-    if (s.id === undefined) return
-    setDeleteTarget(s)
+  const askDelete = async (r: MergedRow, ev: React.MouseEvent) => {
+    ev.stopPropagation()
+    if (r.id === undefined) return
+    setDeleteTarget(r)
     setCorrelated(null)
     setLoadingCorrelated(true)
     try {
-      const others = BODY_TYPES.filter(t => t !== s.type)
-      const result = await fetchCorrelated(s.id, others, 5)
+      const others = BODY_TYPES.filter(t => t !== r.type)
+      const result = await fetchCorrelated(r.id, others, 5)
       setCorrelated(result)
     } finally {
       setLoadingCorrelated(false)
@@ -65,91 +332,14 @@ export default function BodyBrowser() {
   const confirmDelete = async (includeCorrelated: boolean) => {
     if (!deleteTarget?.id) return
     const ids = [deleteTarget.id]
-    if (includeCorrelated && correlated) {
-      correlated.forEach(c => ids.push(c.id))
-    }
+    if (includeCorrelated && correlated) correlated.forEach(c => ids.push(c.id))
     await bulkDelete.mutateAsync(ids)
     setDeleteTarget(null)
     setCorrelated(null)
   }
 
-  const dates = useMemo(() => timeRangeToDates(range), [range])
-  const effectiveStart = advanced.start ?? dates.start
-  const effectiveEnd = advanced.end ?? dates.end
-
-  // Fetch all body types in parallel (only value_min/max/sources/devices apply to the active type for raw)
-  const weight = useSamples({ type: "HKQuantityTypeIdentifierBodyMass", start: effectiveStart, end: effectiveEnd, aggregation, limit: 2000 })
-  const bmi = useSamples({ type: "HKQuantityTypeIdentifierBodyMassIndex", start: effectiveStart, end: effectiveEnd, aggregation, limit: 2000 })
-  const fat = useSamples({ type: "HKQuantityTypeIdentifierBodyFatPercentage", start: effectiveStart, end: effectiveEnd, aggregation, limit: 2000 })
-  const lean = useSamples({ type: "HKQuantityTypeIdentifierLeanBodyMass", start: effectiveStart, end: effectiveEnd, aggregation, limit: 2000 })
-  const height = useSamples({ type: "HKQuantityTypeIdentifierHeight", start: effectiveStart, end: effectiveEnd, aggregation, limit: 2000 })
-  const waist = useSamples({ type: "HKQuantityTypeIdentifierWaistCircumference", start: effectiveStart, end: effectiveEnd, aggregation, limit: 2000 })
-
-  const rawQuery = useSamples({
-    type: activeType,
-    start: effectiveStart,
-    end: effectiveEnd,
-    aggregation: "none",
-    sources: advanced.sources,
-    devices: advanced.devices,
-    value_min: advanced.value_min,
-    value_max: advanced.value_max,
-    limit: 100,
-  })
-
-  // Merge all type data into a single time-indexed series
-  const merged = useMemo<SeriesPoint[]>(() => {
-    const map = new Map<number, SeriesPoint>()
-
-    const addData = (type: string, data: any[] | undefined) => {
-      if (!data) return
-      const meta = getMeta(type)
-      const isAgg = isAggregated(data)
-      for (const d of data) {
-        const iso = isAgg ? d.period_start : d.start_date
-        const t = new Date(iso).getTime()
-        // Bucket at minute precision so points at the same instant merge
-        const key = Math.floor(t / 60_000)
-        const val = (isAgg ? d.avg : d.value) * meta.unitMultiplier
-        if (!map.has(key)) {
-          map.set(key, { time: iso, t, values: {} })
-        }
-        map.get(key)!.values[type] = val
-      }
-    }
-
-    addData("HKQuantityTypeIdentifierBodyMass", weight.data?.data)
-    addData("HKQuantityTypeIdentifierBodyMassIndex", bmi.data?.data)
-    addData("HKQuantityTypeIdentifierBodyFatPercentage", fat.data?.data)
-    addData("HKQuantityTypeIdentifierLeanBodyMass", lean.data?.data)
-    addData("HKQuantityTypeIdentifierHeight", height.data?.data)
-    addData("HKQuantityTypeIdentifierWaistCircumference", waist.data?.data)
-
-    return Array.from(map.values()).sort((a, b) => a.t - b.t)
-  }, [weight.data, bmi.data, fat.data, lean.data, height.data, waist.data])
-
-  const onRangeChange = (r: TimeRange) => {
-    setRange(r)
-    setAggregation(suggestAggregation(r))
-  }
-
-  // Build chart data for the active type only (one line)
-  const chartData = useMemo(
-    () => merged.map(p => ({ time: p.time, t: p.t, value: p.values[activeType], __all: p.values })).filter(p => p.value !== undefined),
-    [merged, activeType]
-  )
-
-  const activeMeta = getMeta(activeType)
-
-  // Y domain tight around active values
-  const vals = chartData.map(d => d.value as number).filter(v => Number.isFinite(v))
-  const dMin = vals.length ? Math.min(...vals) : 0
-  const dMax = vals.length ? Math.max(...vals) : 1
-  const range_ = dMax - dMin || Math.abs(dMax) || 1
-  const pad = range_ * 0.08
-  const yDomain: [number, number] = [Math.max(0, dMin - pad), dMax + pad]
-
-  const years = new Set(chartData.map(d => new Date(d.time).getFullYear()))
+  // Chart formatting
+  const years = new Set(chartData.map(p => new Date(p.time).getFullYear()))
   const multiYear = years.size > 1
 
   const axisFormat = (iso: string) => {
@@ -163,18 +353,16 @@ export default function BodyBrowser() {
   const tooltipLabel = (iso: string) => {
     const d = new Date(iso)
     return d.toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })
+      + " " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
   }
 
-  // Custom tooltip: show ALL body values at that point
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null
-    const all = payload[0]?.payload?.__all as Record<string, number | undefined> | undefined
-    if (!all) return null
-
-    const rows = BODY_TYPES
-      .map(t => ({ t, meta: getMeta(t), v: all[t] }))
-      .filter(r => r.v !== undefined)
-
+    const row = payload[0]?.payload ?? {}
+    const rows = selectedTypes
+      .map(t => ({ t, meta: getMeta(t), v: row[t] as number | undefined }))
+      .filter(r => r.v !== undefined && r.v !== null)
+    if (rows.length === 0) return null
     return (
       <div className="bg-card border rounded-lg shadow-md p-3 text-sm space-y-1">
         <div className="font-medium">{tooltipLabel(label)}</div>
@@ -196,76 +384,216 @@ export default function BodyBrowser() {
     )
   }
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Corpo</h1>
-        <p className="text-muted-foreground">Peso, BMI, massa grassa e magra</p>
-      </div>
+  const activeFiltersCount = [
+    filters.start, filters.end,
+    filters.types?.length && filters.types.length < BODY_TYPES.length ? 1 : undefined,
+    filters.sources?.length,
+    filters.years?.length,
+    filters.weight_min !== undefined ? 1 : undefined,
+    filters.weight_max !== undefined ? 1 : undefined,
+  ].filter(Boolean).length
 
-      <Tabs value={activeType} onValueChange={setActiveType}>
-        <div className="overflow-x-auto">
-          <TabsList className="w-max">
-            {BODY_TYPES.map(t => (
-              <TabsTrigger key={t} value={t}>
-                {getMeta(t).label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+  const totalPages = Math.max(1, Math.ceil(tableRows.length / PAGE_SIZE))
+  const pageRows = tableRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+
+  const isLoading = selectedTypes.some(t => q[typeKey[t]].isLoading)
+
+  return (
+    <div className="flex gap-6 -m-6 p-0 min-h-[calc(100vh-0px)]">
+      <aside className="hidden lg:block w-[320px] shrink-0 border-r bg-card/30 sticky top-0 h-screen overflow-hidden">
+        <BodyFiltersSidebar value={filters} onChange={setFilters} availableSources={availableSources} availableYears={availableYears} />
+      </aside>
+
+      <div className="flex-1 space-y-6 min-w-0 p-6">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Corpo</h1>
+            <p className="text-muted-foreground">Peso, BMI, massa grassa/magra, altezza, circonferenza vita</p>
+          </div>
+          <Button variant="outline" className="lg:hidden" onClick={() => setShowMobileFilters(true)}>
+            <Filter className="h-4 w-4 mr-2" />
+            Filtri {activeFiltersCount > 0 && <span className="ml-1 bg-primary text-primary-foreground rounded-full px-2 text-xs">{activeFiltersCount}</span>}
+          </Button>
         </div>
 
-        {BODY_TYPES.map(t => (
-          <TabsContent key={t} value={t} className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              <TimeRangeSelector value={range} onChange={onRangeChange} />
-              <AggregationSelector value={aggregation} onChange={setAggregation} />
-            </div>
-            <FilterBar type={t} value={advanced} onChange={setAdvanced} />
+        {showWeightStats && weightStats && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <WeightDeltaCard label="Ultimo mese" stat={weightStats.month} />
+            <WeightDeltaCard label="Ultimo anno" stat={weightStats.year} />
+            <WeightDeltaCard label="Tutto" stat={weightStats.all} />
+            <WeightDeltaCard label="Periodo selezionato" stat={weightStats.selected} />
+          </div>
+        )}
 
-            <Card>
-              <CardHeader>
-                <CardTitle>
-                  {activeMeta.label}{" "}
-                  <span className="text-sm font-normal text-muted-foreground">
-                    ({activeMeta.displayUnit || "-"})
-                  </span>
-                  <span className="ml-2 text-xs font-normal text-muted-foreground">
-                    — hover per vedere tutti i valori del giorno
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {chartData.length === 0 ? (
-                  <div className="flex items-center justify-center text-muted-foreground" style={{ height: 320 }}>
-                    Nessun dato nel periodo selezionato
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          {selectedTypes.map(t => {
+            const meta = getMeta(t)
+            return (
+              <Card key={t}>
+                <CardContent className="p-3">
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    <span className="inline-block w-2 h-2 rounded-full" style={{ background: meta.color }} />
+                    {meta.label}
+                  </p>
+                  <p className="text-xl font-semibold tabular-nums">{perTypeCount[t] ?? 0}</p>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Andamento
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                — ogni metrica ha la propria scala Y (autoscale)
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {chartData.length === 0 ? (
+              <div className="flex items-center justify-center text-muted-foreground" style={{ height: 320 }}>
+                {isLoading ? "Caricamento..." : "Nessun dato nel periodo selezionato"}
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={360}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis
+                    dataKey="time"
+                    tickFormatter={axisFormat}
+                    minTickGap={40}
+                    tick={{ fontSize: 12 }}
+                  />
+                  {/* One hidden YAxis per type -> each series autoscales on its own range, using the full vertical space */}
+                  {selectedTypes.map(t => (
+                    <YAxis
+                      key={t}
+                      yAxisId={t}
+                      hide
+                      domain={["auto", "auto"]}
+                    />
+                  ))}
+                  <Tooltip content={<CustomTooltip />} />
+                  {selectedTypes.map(t => {
+                    const meta = getMeta(t)
+                    return (
+                      <Line
+                        key={t}
+                        yAxisId={t}
+                        type="monotone"
+                        dataKey={t}
+                        stroke={meta.color}
+                        strokeWidth={2}
+                        dot={aggregation === "none" ? { r: 2 } : false}
+                        connectNulls
+                        name={meta.label}
+                      />
+                    )
+                  })}
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Tutti i campioni
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                ({tableRows.length} risultati)
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoading && <div className="h-40 animate-pulse bg-muted rounded" />}
+            {!isLoading && tableRows.length === 0 && (
+              <p className="text-muted-foreground py-4">Nessun campione</p>
+            )}
+            {!isLoading && tableRows.length > 0 && (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Data</TableHead>
+                      <TableHead>Metrica</TableHead>
+                      <TableHead className="text-right">Valore</TableHead>
+                      <TableHead>Sorgente</TableHead>
+                      <TableHead className="w-[40px]"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pageRows.map(r => {
+                      const meta = getMeta(r.type)
+                      const v = r.value * meta.unitMultiplier
+                      const formatted = meta.formatValue ? meta.formatValue(v) : v.toLocaleString("it-IT", { maximumFractionDigits: 2 })
+                      return (
+                        <TableRow key={`${r.uuid}-${r.type}`}>
+                          <TableCell className="tabular-nums">{formatDateTime(r.start_date)}</TableCell>
+                          <TableCell>
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className="inline-block w-2 h-2 rounded-full" style={{ background: meta.color }} />
+                              {meta.label}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums font-medium">
+                            {formatted} <span className="text-muted-foreground text-xs font-normal">{meta.displayUnit}</span>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{r.source_name ?? "-"}</TableCell>
+                          <TableCell>
+                            {r.id !== undefined && (
+                              <Button
+                                variant="ghost" size="icon"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                onClick={(e) => askDelete(r, e)} aria-label="Elimina"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-3 text-sm">
+                    <span className="text-muted-foreground">
+                      Pagina {page + 1} di {totalPages}
+                    </span>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage(p => Math.max(0, p - 1))}>
+                        Precedente
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}>
+                        Successiva
+                      </Button>
+                    </div>
                   </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={320}>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                      <XAxis dataKey="time" tickFormatter={axisFormat} minTickGap={40} tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} domain={yDomain} />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Line dataKey="value" stroke={activeMeta.color} strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
                 )}
-              </CardContent>
-            </Card>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Ultimi 100 campioni</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {rawQuery.data && (
-                  <SampleTable type={t} samples={rawQuery.data.data as Sample[]} onDelete={askDelete} />
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        ))}
-      </Tabs>
+      {showMobileFilters && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowMobileFilters(false)} />
+          <div className="absolute right-0 top-0 bottom-0 w-[85%] max-w-[360px] bg-background shadow-xl">
+            <BodyFiltersSidebar
+              value={filters}
+              onChange={setFilters}
+              availableSources={availableSources}
+              availableYears={availableYears}
+              onClose={() => setShowMobileFilters(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {deleteTarget && (
         <div

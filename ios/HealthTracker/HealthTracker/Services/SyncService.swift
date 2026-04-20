@@ -140,13 +140,30 @@ final class SyncService {
             + 1 // workouts
         var completedTypes = 0
 
-        // Split in two passes: non-deferred first, then deferred (heavy) at the end
-        let quantityNormal = HealthKitManager.quantityTypes.filter { !deferredTypes.contains($0.0.rawValue) }
+        // Split in two passes: non-deferred first, then deferred (heavy) at the end.
+        // Body-metric types are also pulled out and synced via anchored queries
+        // (they come first because they're fast and user-visible on the dashboard).
+        let anchoredIds = Self.anchoredQuantityIds
+        let quantityNormal = HealthKitManager.quantityTypes.filter {
+            !deferredTypes.contains($0.0.rawValue) && !anchoredIds.contains($0.0.rawValue)
+        }
         let quantityDeferred = HealthKitManager.quantityTypes.filter { deferredTypes.contains($0.0.rawValue) }
         let categoryNormal = HealthKitManager.categoryTypes.filter { !deferredTypes.contains($0.rawValue) }
         let categoryDeferred = HealthKitManager.categoryTypes.filter { deferredTypes.contains($0.rawValue) }
 
-        // PASS 1: light/normal types
+        // PASS 0: body-metric types via anchored queries (catches retroactive
+        // writes from Withings etc. that the windowed path would miss).
+        for (typeId, unit) in Self.anchoredQuantityTypes {
+            if shouldStop { break }
+            currentType = typeId.rawValue.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")
+            typeProgress = 0
+            currentWindowDate = nil
+            await syncQuantityTypeAnchored(typeId: typeId, unit: unit)
+            completedTypes += 1
+            progress = Double(completedTypes) / Double(totalTypes)
+        }
+
+        // PASS 1: light/normal types (windowed)
         for (typeId, unit) in quantityNormal {
             if shouldStop { break }
             currentType = typeId.rawValue.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")
@@ -442,6 +459,68 @@ final class SyncService {
             }
         } catch {
             let msg = "Workouts: anchored sync failed - \(error.localizedDescription)"
+            syncLog.append(msg)
+            logger.error("\(msg)")
+        }
+    }
+
+    /// Body-metric quantity types that are synced via HKAnchoredObjectQuery
+    /// instead of the plain windowed HKSampleQuery. These types are written
+    /// retroactively into HealthKit by sources like Withings (startDate in the
+    /// past, creationDate later), which the windowed path silently misses.
+    static let anchoredQuantityTypes: [(HKQuantityTypeIdentifier, HKUnit)] = [
+        (.bodyMass,            .gramUnit(with: .kilo)),
+        (.bodyMassIndex,       .count()),
+        (.bodyFatPercentage,   .percent()),
+        (.leanBodyMass,        .gramUnit(with: .kilo)),
+        (.height,              .meter()),
+        (.waistCircumference,  .meter()),
+    ]
+
+    static var anchoredQuantityIds: Set<String> {
+        Set(anchoredQuantityTypes.map { $0.0.rawValue })
+    }
+
+    @MainActor
+    private func syncQuantityTypeAnchored(typeId: HKQuantityTypeIdentifier, unit: HKUnit) async {
+        let anchorKey = "hk_quantity_anchor_v1_\(typeId.rawValue)"
+        let anchor: HKQueryAnchor? = {
+            guard let data = UserDefaults.standard.data(forKey: anchorKey) else { return nil }
+            return try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
+        }()
+
+        do {
+            let (added, deletedUUIDs, newAnchor) = try await healthKitManager.fetchQuantitySamplesAnchored(
+                type: typeId, unit: unit, anchor: anchor
+            )
+
+            var totalInserted = 0
+            if !added.isEmpty {
+                let chunks = added.chunked(into: Constants.syncBatchSize)
+                let inserted = try await postChunksInParallel(chunks) { chunk in
+                    try await self.apiClient.postSamples(chunk)
+                }
+                totalInserted = inserted
+                totalSamplesSynced += inserted
+            }
+
+            var deletedCount = 0
+            if !deletedUUIDs.isEmpty {
+                deletedCount = try await apiClient.deleteSamples(uuids: deletedUUIDs)
+            }
+
+            // Persist the new anchor only on success
+            if let newAnchor, let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
+                UserDefaults.standard.set(data, forKey: anchorKey)
+            }
+
+            if totalInserted > 0 || deletedCount > 0 {
+                let msg = "\(typeId.rawValue.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")): \(totalInserted) synced, \(deletedCount) removed (anchored)"
+                syncLog.append(msg)
+                logger.info("\(msg)")
+            }
+        } catch {
+            let msg = "\(typeId.rawValue): anchored fetch failed - \(error.localizedDescription)"
             syncLog.append(msg)
             logger.error("\(msg)")
         }

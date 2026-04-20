@@ -56,6 +56,7 @@ Deployment workflow: `scp` files from Mac to LXC, then `docker compose up -d --b
 - **90-day fetch windows**: HealthKit queries chunked to avoid OOM (HeartRate has millions of samples).
 - **Parallel POST**: 4 concurrent HTTP uploads per window for throughput.
 - **Real-time sync**: `HKObserverQuery` + background delivery triggers auto-sync on new HealthKit data. Auto-sync also on app launch and foreground (10-min throttle).
+- **Anchored queries for retroactive writes**: workouts and all 6 body-metric quantity types use `HKAnchoredObjectQuery` with per-type anchors in UserDefaults. This correctly handles samples written to HealthKit *after* their `startDate` (common for Withings, manual entries, CSV imports): the anchor tracks HealthKit insertion order (`HKObjectID`), not the sample's `startDate`, so late-arriving samples are never lost.
 - **Server-side ingest filters**: DB-configurable `IngestRule` rows (value_range, blocked_source) with hit counters, plus a `IngestBlacklist` table keyed by HKSample UUID.
 - **Auto-blacklist on delete**: PostgreSQL triggers `trg_blacklist_on_delete` (on `health_samples`) and `trg_blacklist_on_workout_delete` (on `workouts`) automatically insert the deleted UUIDs into `ingest_blacklist`. Both the samples batch and the workouts batch ingestion check this blacklist before inserting, preventing re-ingestion after re-sync.
 - **Bidirectional writes/deletes**: web apps POST to `/api/v1/write` and `/api/v1/delete/plan`; iOS polls these queues and calls `HKHealthStore.save()` / `.delete(_)`.
@@ -125,6 +126,7 @@ Ordered history (most recent last):
 - `GET /api/v1/samples/facets?type=` — distinct sources/devices + value range for filter UI
 - `GET /api/v1/samples/{id}/correlated?types=&minutes=5` — samples within ±N minutes (for body page tooltip + related-deletion preview)
 - `POST /api/v1/samples/bulk-delete` body `{ids:[...]}` — the DELETE trigger auto-blacklists UUIDs
+- `POST /api/v1/samples/bulk-delete-by-uuids` body `{uuids:[...]}` — UUID-based bulk delete (used by iOS anchored quantity sync to propagate HealthKit deletions for body-metric types)
 
 **Workouts** (heavy metadata-aware filtering)
 - `GET /api/v1/workouts` query params:
@@ -214,6 +216,7 @@ Current seed rules (applied once, can be edited from dashboard):
   3. Quantity types — looped with 90-day windows (`fetchWindowDays=90`), parallel POST (`syncConcurrency=4`), batch size 1000
   4. Category types (same loop)
   5. Workouts — uses `HKAnchoredObjectQuery` persisted in UserDefaults (`hk_workout_anchor_v1`). Detects HealthKit deletions and propagates them to the backend via `POST /workouts/bulk-delete`. Replaces the previous windowed `HKSampleQuery`-based approach for workouts.
+  6. **Body-metric quantity types** (BodyMass, BodyMassIndex, BodyFatPercentage, LeanBodyMass, Height, WaistCircumference) also use `HKAnchoredObjectQuery` with per-type anchor in UserDefaults (`hk_quantity_anchor_v1_<typeIdentifier>`). This catches samples written **retroactively** into HealthKit by sources like Withings (startDate in the past, creationDate later) — the windowed path with `.strictStartDate` predicate would silently miss them once `lastSyncDate` advanced past the sample's startDate. Deletions from Apple Health are propagated via `POST /samples/bulk-delete-by-uuids`.
   6. Deferred types (empty set by default; was used to defer HeartRate/HRV)
   - `performQuickSync(minInterval:120)` — throttled for auto-triggers
   - `resetBodySync()` — clears lastSyncDate for body types (was a Settings button, removed; can be reintroduced)
@@ -283,7 +286,7 @@ docker compose up -d --build   # → http://192.168.68.190
 - `/` — **Home**: today metric cards, weekly charts, last 3 workouts, sync status card, **last 10 sync sessions table**
 - `/activity` — steps, distance, flights, calories (tabbed via TypeBrowser)
 - `/vitals` — HR, HRV, SpO2, blood pressure, respiratory, temperature, glucose
-- `/body` — weight, BMI, body fat, lean mass, height, waist — **custom tooltip shows all body values at same instant**; row-level delete with correlated-samples confirmation
+- `/body` — weight, BMI, body fat, lean mass, height, waist. **Left sidebar filters** (metriche chips, aggregazione grafico, periodo preciso + preset 7g/30g/90g/1a/Tutto, sources chips). **Multi-line chart** con tutte le metriche selezionate e tooltip che mostra tutti i valori allo stesso istante. **Tabella con tutti i campioni** paginata (50/pagina), colonne Data / Metrica / Valore / Sorgente. Row-level delete con conferma dei dati correlati (±5 min). Filtri persistiti in `sessionStorage` (`body_filters_v1`).
 - `/sleep` — sleep analysis, stacked bar per night
 - `/workouts` — **main Workouts page** with **left sidebar filters** (year, activity, source, datetime, distance km, duration min, pace slider + presets, title search, notes search), summary cards, workouts-per-period chart with click-to-drilldown, **sortable** list table (click headers to sort asc/desc) with **title**, pace and truncated notes columns, row-level delete with 8s undo toast
 - `/workouts/:uuid` — **Apple Fitness-style detail**: page heading uses the custom title (fallback to activity name), metrics (duration, distance, calories, avg pace, avg/max HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), per-km splits table, time-series charts (HR, running speed, power, cadence), **editable title + notes** cards

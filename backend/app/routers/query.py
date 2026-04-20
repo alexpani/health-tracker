@@ -584,6 +584,23 @@ async def bulk_delete_workouts(body: WorkoutBulkDeleteIn, db: AsyncSession = Dep
     return {"deleted": result.rowcount}
 
 
+class SampleBulkDeleteUuidsIn(BaseModel):
+    uuids: list[UUID]
+
+
+@router.post("/samples/bulk-delete-by-uuids")
+async def bulk_delete_samples_by_uuids(body: SampleBulkDeleteUuidsIn, db: AsyncSession = Depends(get_db)):
+    """Delete health samples by UUID (used by iOS anchored-sync deletion propagation).
+    The auto-blacklist trigger on health_samples will prevent re-ingestion."""
+    if not body.uuids:
+        return {"deleted": 0}
+    from sqlalchemy import delete as sqldelete
+    stmt = sqldelete(HealthSample).where(HealthSample.uuid.in_(body.uuids))
+    result = await db.execute(stmt)
+    await db.commit()
+    return {"deleted": result.rowcount}
+
+
 @router.get("/samples/{sample_id}/correlated")
 async def correlated_samples(
     sample_id: int,

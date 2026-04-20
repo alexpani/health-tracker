@@ -86,29 +86,29 @@ export const TYPE_META: Record<string, TypeMeta> = {
     label: "Glicemia", category: "vitals", displayUnit: "mg/dL", sourceUnit: "mg/dL", unitMultiplier: 1, color: "#d946ef",
   },
 
-  // --- Body ---
+  // --- Body --- (colori ben distinti su ruota: viola/ambra/rosso/verde/ciano/magenta)
   HKQuantityTypeIdentifierBodyMass: {
-    label: "Peso", category: "body", displayUnit: "kg", sourceUnit: "kg", unitMultiplier: 1, color: "#8b5cf6",
+    label: "Peso", category: "body", displayUnit: "kg", sourceUnit: "kg", unitMultiplier: 1, color: "#8b5cf6", // viola
     formatValue: v => `${v.toFixed(2)}`,
   },
-  HKQuantityTypeIdentifierHeight: {
-    label: "Altezza", category: "body", displayUnit: "cm", sourceUnit: "m", unitMultiplier: 100, color: "#6366f1",
-    formatValue: v => `${v.toFixed(1)}`,
-  },
   HKQuantityTypeIdentifierBodyMassIndex: {
-    label: "BMI", category: "body", displayUnit: "", sourceUnit: "count", unitMultiplier: 1, color: "#a78bfa",
+    label: "BMI", category: "body", displayUnit: "", sourceUnit: "count", unitMultiplier: 1, color: "#f59e0b", // ambra
     formatValue: v => `${v.toFixed(1)}`,
   },
   HKQuantityTypeIdentifierBodyFatPercentage: {
-    label: "Grasso corporeo", category: "body", displayUnit: "%", sourceUnit: "%", unitMultiplier: 100, color: "#c084fc",
+    label: "Grasso corporeo", category: "body", displayUnit: "%", sourceUnit: "%", unitMultiplier: 100, color: "#ef4444", // rosso
     formatValue: v => `${v.toFixed(1)}`,
   },
   HKQuantityTypeIdentifierLeanBodyMass: {
-    label: "Massa magra", category: "body", displayUnit: "kg", sourceUnit: "kg", unitMultiplier: 1, color: "#9333ea",
+    label: "Massa magra", category: "body", displayUnit: "kg", sourceUnit: "kg", unitMultiplier: 1, color: "#10b981", // smeraldo
+    formatValue: v => `${v.toFixed(1)}`,
+  },
+  HKQuantityTypeIdentifierHeight: {
+    label: "Altezza", category: "body", displayUnit: "cm", sourceUnit: "m", unitMultiplier: 100, color: "#0ea5e9", // celeste
     formatValue: v => `${v.toFixed(1)}`,
   },
   HKQuantityTypeIdentifierWaistCircumference: {
-    label: "Circonferenza vita", category: "body", displayUnit: "cm", sourceUnit: "m", unitMultiplier: 100, color: "#7c3aed",
+    label: "Circonferenza vita", category: "body", displayUnit: "cm", sourceUnit: "m", unitMultiplier: 100, color: "#ec4899", // magenta
     formatValue: v => `${v.toFixed(1)}`,
   },
 
