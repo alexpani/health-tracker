@@ -6,9 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { WorkoutFiltersSidebar } from "@/components/WorkoutFiltersSidebar"
-import WorkoutRecordsPanel from "@/components/WorkoutRecordsPanel"
 import { useDeleteWorkout, useRestoreWorkout, useWorkouts } from "@/lib/queries"
 import { workoutDisplayTitle, workoutName } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
@@ -117,15 +115,14 @@ export default function Workouts() {
   const [showMobileFilters, setShowMobileFilters] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>(saved.sortKey ?? "start_date")
   const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir ?? "desc")
-  const [tab, setTab] = useState<"list" | "records">(saved.tab ?? "list")
 
   const firstRender = useRef(true)
   useEffect(() => {
     if (firstRender.current) { firstRender.current = false; return }
     try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ filters, chartAgg, sortKey, sortDir, tab }))
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ filters, chartAgg, sortKey, sortDir }))
     } catch {}
-  }, [filters, chartAgg, sortKey, sortDir, tab])
+  }, [filters, chartAgg, sortKey, sortDir])
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -281,14 +278,6 @@ export default function Workouts() {
           </Button>
         </div>
 
-        <Tabs value={tab} onValueChange={v => setTab(v as "list" | "records")} className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="list">Elenco</TabsTrigger>
-            <TabsTrigger value="records">Record</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="list" className="space-y-6 mt-0">
-
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Workout</p><p className="text-2xl font-semibold">{stats.count}</p></CardContent></Card>
           <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Ore totali</p><p className="text-2xl font-semibold">{(stats.totalDuration / 3600).toFixed(1)}</p></CardContent></Card>
@@ -439,12 +428,6 @@ export default function Workouts() {
             )}
           </CardContent>
         </Card>
-          </TabsContent>
-
-          <TabsContent value="records" className="mt-0">
-            <WorkoutRecordsPanel filters={filters} />
-          </TabsContent>
-        </Tabs>
       </div>
 
       {/* Sidebar mobile: overlay */}

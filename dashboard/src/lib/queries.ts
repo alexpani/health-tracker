@@ -18,7 +18,6 @@ import type {
   WorkoutDetail,
   WorkoutFacets,
   WorkoutFilters,
-  WorkoutRecords,
   WorkoutSplits,
   WriteInput,
 } from "./types"
@@ -275,31 +274,6 @@ export function useWorkoutFacets() {
     queryKey: ["workoutFacets"],
     queryFn: () => apiGet<WorkoutFacets>("/api/v1/workouts/facets"),
     staleTime: 5 * 60_000,
-  })
-}
-
-export function useWorkoutRecords(filters: WorkoutFilters = {}, enabled = true) {
-  return useQuery({
-    queryKey: ["workoutRecords", filters],
-    queryFn: () =>
-      apiGet<WorkoutRecords>("/api/v1/workouts/records", {
-        start: filters.start,
-        end: filters.end,
-        years: filters.years as any,
-        effective_types: filters.effective_types,
-        sources: filters.sources,
-        distance_min: filters.distance_min,
-        distance_max: filters.distance_max,
-        duration_min: filters.duration_min,
-        duration_max: filters.duration_max,
-        pace_min: filters.pace_min,
-        pace_max: filters.pace_max,
-        notes_contains: filters.notes_contains,
-        title_contains: filters.title_contains,
-      }),
-    enabled,
-    staleTime: 60_000,
-    placeholderData: keepPreviousData,
   })
 }
 
