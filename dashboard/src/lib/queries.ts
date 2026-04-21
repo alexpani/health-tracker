@@ -5,6 +5,8 @@ import type {
   BlacklistEntry,
   CategorySample,
   CorrelatedSample,
+  DiarioDailyTotal,
+  DiarioPlan,
   IngestRule,
   LatestSampleResponse,
   PendingWrite,
@@ -289,6 +291,25 @@ export function useWorkoutRecords(filters: { years?: number[]; sources?: string[
     }),
     staleTime: 10 * 60_000,
     placeholderData: keepPreviousData,
+  })
+}
+
+// --- Diario Alimentare (proxied) ---
+
+export function useDiarioActivePlan() {
+  return useQuery({
+    queryKey: ["diarioPlan"],
+    queryFn: () => apiGet<DiarioPlan>("/api/v1/diario/active-plan"),
+    staleTime: 5 * 60_000,
+    retry: 0,
+  })
+}
+
+export function useDiarioDailyTotals(from: string, to: string) {
+  return useQuery({
+    queryKey: ["diarioDaily", from, to],
+    queryFn: () => apiGet<DiarioDailyTotal[]>("/api/v1/diario/daily-totals", { from, to }),
+    staleTime: 60_000,
   })
 }
 

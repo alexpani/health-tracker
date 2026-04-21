@@ -296,6 +296,27 @@ export interface AdvancedFilters {
   value_max?: number
 }
 
+export interface DiarioPlan {
+  name: string
+  kcal_target: number
+  protein_pct: number
+  fat_pct: number
+  carbs_pct: number
+  protein_g: number
+  fat_g: number
+  carbs_g: number
+  updated_at: string | null
+}
+
+export interface DiarioDailyTotal {
+  date: string
+  kcal: number
+  protein_g: number
+  fat_g: number
+  carbs_g: number
+  kcal_target: number | null
+}
+
 export interface BodyFilters {
   start?: string
   end?: string

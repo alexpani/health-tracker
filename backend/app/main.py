@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import blacklist, delete as delete_router, ingest, query, rules, write
+from app.routers import blacklist, delete as delete_router, diario, ingest, query, rules, write
 
 
 @asynccontextmanager
@@ -32,6 +32,7 @@ app.include_router(write.router)
 app.include_router(delete_router.router)
 app.include_router(blacklist.router)
 app.include_router(rules.router)
+app.include_router(diario.router)
 
 
 @app.get("/health")

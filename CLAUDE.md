@@ -174,6 +174,11 @@ Ordered history (most recent last):
 - `POST /api/v1/blacklist/purge-and-blacklist` — delete matching samples AND blacklist their UUIDs
 - `DELETE /api/v1/blacklist/{id}`
 
+**Diario Alimentare proxy** (read-only, forwards to `alexpani/diario-alimentare`)
+- Base URL of the upstream diario configured via env `DIARIO_BASE_URL` (default `http://192.168.68.173:3000`)
+- `GET /api/v1/diario/active-plan` → proxies `GET /api/external/active-plan`. Returns the active nutrition plan (`name, kcal_target, protein_pct/g, fat_pct/g, carbs_pct/g, updated_at`). 404 `no_active_plan` bubbles through; 502 on network error.
+- `GET /api/v1/diario/daily-totals?from=YYYY-MM-DD&to=YYYY-MM-DD` → proxies the equivalent upstream endpoint. Returns `[{date, kcal, protein_g, fat_g, carbs_g, kcal_target}]`, one entry per day that has at least one diary record. `kcal_target` is the snapshot of the plan in effect that day.
+
 ### Ingest Rules semantics
 
 Applied in this order:
@@ -294,7 +299,7 @@ docker compose up -d --build   # → http://192.168.68.190
 - `/workouts` — **main Workouts page** with **left sidebar filters** (year, activity, source, datetime, distance km, duration min, pace slider + presets, title search, notes search), summary cards, workouts-per-period chart with click-to-drilldown, **sortable** list table (click headers to sort asc/desc) with **title**, pace and truncated notes columns, row-level delete with 8s undo toast
 - `/workouts/:uuid` — **Apple Fitness-style detail**: page heading uses the custom title (fallback to activity name), metrics (duration, distance, calories, avg pace, avg/max HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), per-km splits table, **Intervalli** card (shown when `workout.activities` is present — rows colored grey for rest, shows start time / duration / distance / pace / avg+max HR / kcal per interval), time-series charts (HR, running speed, power, cadence), **editable title + notes** cards
 - `/records` — **Personal Records (running-only)**: dedicated page, intentionally independent from `/workouts` filters so the two UIs don't intersect. Own left sidebar with year chips (counts from running history), source chips, Outdoor/Indoor chips; all-time by default. Per `effective_type` (`type_37` outdoor + `treadmill_run` indoor) a card with: overall (longest distance, longest duration, fastest pace, most calories), "Record per distanza" (5K/10K/mezza/maratona when available, +10% tolerance), "Miglior km ever" (fastest reconstructed 1-km split, top-5 candidates, 3:00/km floor to reject GPS artifacts). Every record clickable → workout detail. Filters persisted in `sessionStorage` (`records_filters_v1`). Backed by `/api/v1/workouts/records` + `/records/facets`.
-- `/nutrition` — calories, macros, water, caffeine
+- `/nutrition` — top section: **Diario alimentare** integration (piano attivo con kcal/protein/fat/carbs target, card "Oggi" con 4 progress bar consumato vs target, trend 7/30/90 giorni con area chart kcal consumate + linea tratteggiata target + tabella). Bottom section: HealthKit nutrition (calories, macros, water, caffeine) via TypeBrowser. Dati diario fetched via proxy `/api/v1/diario/*` (vedi sotto).
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - `/explore` — universal browser: pick any sample type with full filter bar + chart + raw table
 - `/insert` — form to queue body/nutrition writes for Apple Health
