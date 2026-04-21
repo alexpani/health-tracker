@@ -411,8 +411,8 @@ export default function WorkoutDetail() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[80px]">Tipo</TableHead>
-                  <TableHead>Nome</TableHead>
+                  <TableHead className="w-[50px]">#</TableHead>
+                  <TableHead>Attivita</TableHead>
                   <TableHead>Inizio</TableHead>
                   <TableHead className="text-right">Durata</TableHead>
                   <TableHead className="text-right">Distanza</TableHead>
@@ -426,12 +426,42 @@ export default function WorkoutDetail() {
                 {workout.activities.map((a, i) => {
                   const isRest = a.kind === "rest"
                   const startTime = new Date(a.start).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                  // Primary label: prefer the explicit per-interval name the source
+                  // app provides (e.g. Intervals Pro's "Camminata" / "Corsa"), then
+                  // the sub-activity HealthKit type, then a generic marker.
+                  const activityLabel =
+                    a.name
+                    ?? (a.activity_type != null ? workoutName(a.activity_type) : null)
+                    ?? (a.kind === "work" ? "Intervallo" : a.kind)
+                  // Optional per-interval color provided by the source app.
+                  const dotColor = a.metadata?.["Interval Color"] ?? null
+                  // Show the HealthKit sub-activity type as subtitle only when
+                  // the source app did NOT provide an explicit interval name
+                  // (otherwise the sub-type is usually the same as the parent
+                  // workout, which would be redundant, e.g. "Corsa" under every
+                  // "Camminata"/"Corsa" row of an Intervals Pro program).
+                  const typeSubtitle = !a.name && a.activity_type != null && workoutName(a.activity_type) !== activityLabel
+                    ? workoutName(a.activity_type)
+                    : null
                   return (
                     <TableRow key={i} className={isRest ? "bg-muted/40" : ""}>
-                      <TableCell className="font-medium capitalize">
-                        {a.kind === "work" ? `#${a.n}` : a.kind}
+                      <TableCell className="font-medium tabular-nums">{a.n}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {dotColor && (
+                            <span
+                              className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+                              style={{ background: dotColor }}
+                            />
+                          )}
+                          <div className="flex flex-col">
+                            <span>{activityLabel}</span>
+                            {typeSubtitle && (
+                              <span className="text-[11px] text-muted-foreground">{typeSubtitle}</span>
+                            )}
+                          </div>
+                        </div>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{a.name ?? "-"}</TableCell>
                       <TableCell className="tabular-nums text-muted-foreground">{startTime}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatDuration(a.duration_s)}</TableCell>
                       <TableCell className="text-right tabular-nums">

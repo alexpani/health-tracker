@@ -47,6 +47,8 @@ export interface WorkoutActivity {
   n: number
   kind: "work" | "rest" | "lap" | "segment" | "pause"
   name: string | null
+  activity_type: number | null  // HKWorkoutActivityType.rawValue of the sub-activity
+  activity_name: string | null  // display name, e.g. "Running", "Walking"
   start: string
   end: string
   duration_s: number
@@ -55,6 +57,7 @@ export interface WorkoutActivity {
   max_hr: number | null
   kcal: number | null
   pace_s_per_km: number | null
+  metadata: Record<string, string> | null
 }
 
 export interface WorkoutDetail {

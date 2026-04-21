@@ -453,15 +453,14 @@ actor HealthKitManager {
 
         return activities.map { act -> WorkoutActivityPayload in
             let start = act.startDate
-            // HKWorkoutActivity.endDate is optional (activity might still be open);
-            // fall back to startDate + duration, then to workout.endDate.
-            let end = act.endDate
-                ?? start.addingTimeInterval(act.duration)
+            let end = act.endDate ?? start.addingTimeInterval(act.duration)
             let durationS = act.duration > 0 ? act.duration : end.timeIntervalSince(start)
+
+            let subType = act.workoutConfiguration.activityType
 
             // Distance — pick the unit matching the activity type.
             let distanceType: HKQuantityType = {
-                switch act.workoutConfiguration.activityType {
+                switch subType {
                 case .cycling, .handCycling: return HKQuantityType(.distanceCycling)
                 case .swimming:              return HKQuantityType(.distanceSwimming)
                 case .wheelchairRunPace, .wheelchairWalkPace:
@@ -471,47 +470,61 @@ actor HealthKitManager {
             }()
             let distanceM = act.statistics(for: distanceType)?.sumQuantity()?.doubleValue(for: .meter())
 
-            // Heart rate
             let hrType = HKQuantityType(.heartRate)
             let bpm = HKUnit.count().unitDivided(by: .minute())
             let avgHr = act.statistics(for: hrType)?.averageQuantity()?.doubleValue(for: bpm)
             let maxHr = act.statistics(for: hrType)?.maximumQuantity()?.doubleValue(for: bpm)
 
-            // Energy
             let kcal = act.statistics(for: HKQuantityType(.activeEnergyBurned))?
                 .sumQuantity()?
                 .doubleValue(for: .kilocalorie())
 
-            // Name — try common metadata keys used by third-party apps.
-            let name = (act.metadata?["workout name"] as? String)
+            // Prefer the per-interval label the source app provides. Intervals Pro
+            // writes "Interval Name" (e.g. "Camminata ", "Corsa ") and the app's
+            // color in "Interval Color"/"Interval Color Name". These keys are the
+            // only authoritative way to distinguish walk vs run inside Intervals
+            // Pro's "Corsa Livello N" programs — the workoutConfiguration.activityType
+            // stays Running for every interval.
+            let explicitNameRaw = (act.metadata?["Interval Name"] as? String)
+                ?? (act.metadata?["workout name"] as? String)
                 ?? (act.metadata?["HKWorkoutName"] as? String)
                 ?? (act.metadata?["name"] as? String)
+            let explicitName = explicitNameRaw?.trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty
 
-            // Kind detection
-            let lowerName = name?.lowercased() ?? ""
+            // Kind detection — only from data the source app explicitly provides.
+            // No heuristics based on sub-activity type: if Intervals Pro (or any
+            // other app) wants an interval to show as "rest", it has to say so
+            // in metadata or in the interval name.
+            let lowerName = explicitName?.lowercased() ?? ""
             let metaKind = (act.metadata?["Intervals Pro Activity Type"] as? String)?.lowercased()
                 ?? (act.metadata?["kind"] as? String)?.lowercased()
-            let isRest = restNames.contains(lowerName) || metaKind == "rest" || metaKind == "recovery"
+            let isRestByMeta = metaKind == "rest" || metaKind == "recovery"
+            let isRestByName = restNames.contains(lowerName)
+            let isRest = isRestByMeta || isRestByName
             let kind = isRest ? "rest" : "work"
 
             let n: Int
-            if isRest {
-                restCounter += 1; n = restCounter
-            } else if kind == "work" {
-                workCounter += 1; n = workCounter
-            } else {
-                otherCounter += 1; n = otherCounter
-            }
+            if isRest { restCounter += 1; n = restCounter }
+            else if kind == "work" { workCounter += 1; n = workCounter }
+            else { otherCounter += 1; n = otherCounter }
 
             let pace: Double? = {
                 guard let d = distanceM, d > 0, durationS > 0 else { return nil }
                 return durationS / (d / 1000.0)
             }()
 
+            // Display name for the sub-activity type (e.g., "Running", "Walking").
+            // Prefer the explicit metadata name over the generic activity type name.
+            let activityDisplayName = subType.displayName
+            let name = explicitName ?? activityDisplayName
+
             return WorkoutActivityPayload(
                 n: n,
                 kind: kind,
                 name: name,
+                activityType: Int(subType.rawValue),
+                activityName: activityDisplayName,
                 start: formatter.string(from: start),
                 end: formatter.string(from: end),
                 durationS: durationS,
@@ -519,7 +532,8 @@ actor HealthKitManager {
                 avgHr: avgHr,
                 maxHr: maxHr,
                 kcal: kcal,
-                paceSPerKm: pace
+                paceSPerKm: pace,
+                metadata: act.metadata?.compactMapValues { "\($0)" }
             )
         }
     }
@@ -557,6 +571,8 @@ actor HealthKitManager {
                 n: n,
                 kind: kind,
                 name: name,
+                activityType: nil,
+                activityName: nil,
                 start: formatter.string(from: prevStart),
                 end: formatter.string(from: endOfInterval),
                 durationS: durationS,
@@ -564,7 +580,8 @@ actor HealthKitManager {
                 avgHr: nil,
                 maxHr: nil,
                 kcal: nil,
-                paceSPerKm: nil
+                paceSPerKm: nil,
+                metadata: event.metadata?.compactMapValues { "\($0)" }
             ))
             prevStart = endOfInterval
         }
@@ -577,6 +594,8 @@ actor HealthKitManager {
                 n: lapCounter,
                 kind: "lap",
                 name: nil,
+                activityType: nil,
+                activityName: nil,
                 start: formatter.string(from: prevStart),
                 end: formatter.string(from: closingBoundary),
                 durationS: durationS,
@@ -584,7 +603,8 @@ actor HealthKitManager {
                 avgHr: nil,
                 maxHr: nil,
                 kcal: nil,
-                paceSPerKm: nil
+                paceSPerKm: nil,
+                metadata: nil
             ))
         }
 
@@ -723,4 +743,8 @@ extension HKWorkoutActivityType {
         default: return "Workout (\(self.rawValue))"
         }
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

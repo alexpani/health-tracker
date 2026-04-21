@@ -56,6 +56,8 @@ struct WorkoutActivityPayload {
     let n: Int
     let kind: String       // "work" | "rest" | "lap" | "segment" | "pause"
     let name: String?
+    let activityType: Int?    // HKWorkoutActivityType.rawValue of this sub-activity
+    let activityName: String? // display name of the activityType (e.g., "Corsa", "Camminata")
     let start: String
     let end: String
     let durationS: Double
@@ -64,6 +66,7 @@ struct WorkoutActivityPayload {
     let maxHr: Double?
     let kcal: Double?
     let paceSPerKm: Double?
+    let metadata: [String: String]?  // raw per-interval HKWorkoutActivity / HKWorkoutEvent metadata
 
     func toDict() -> [String: Any] {
         var d: [String: Any] = [
@@ -74,11 +77,14 @@ struct WorkoutActivityPayload {
             "duration_s": durationS,
         ]
         if let v = name { d["name"] = v }
+        if let v = activityType { d["activity_type"] = v }
+        if let v = activityName { d["activity_name"] = v }
         if let v = distanceM { d["distance_m"] = v }
         if let v = avgHr { d["avg_hr"] = v }
         if let v = maxHr { d["max_hr"] = v }
         if let v = kcal { d["kcal"] = v }
         if let v = paceSPerKm { d["pace_s_per_km"] = v }
+        if let v = metadata, !v.isEmpty { d["metadata"] = v }
         return d
     }
 }
