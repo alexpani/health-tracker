@@ -245,13 +245,23 @@ export default function BodyBrowser() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTypes, filters.weight_min, filters.weight_max, q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
 
-  // Per-type count cards
-  const perTypeCount = useMemo(() => {
-    const counts: Record<string, number> = {}
+  // Per-type overview cards: most recent value + sample count in the
+  // currently filtered window.
+  const perTypeOverview = useMemo(() => {
+    const out: Record<string, { count: number; lastValue: number | null; lastDate: string | null }> = {}
     selectedTypes.forEach(t => {
-      counts[t] = rawFor(t).filter(s => passesWeight(t, s.value)).length
+      const samples = rawFor(t).filter(s => passesWeight(t, s.value))
+      let last: Sample | null = null
+      for (const s of samples) {
+        if (!last || s.start_date > last.start_date) last = s
+      }
+      out[t] = {
+        count: samples.length,
+        lastValue: last ? last.value : null,
+        lastDate: last ? last.start_date : null,
+      }
     })
-    return counts
+    return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTypes, filters.weight_min, filters.weight_max, q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
 
@@ -460,6 +470,15 @@ export default function BodyBrowser() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {selectedTypes.map(t => {
             const meta = getMeta(t)
+            const ov = perTypeOverview[t]
+            const displayValue = ov?.lastValue != null
+              ? (meta.formatValue
+                  ? meta.formatValue(ov.lastValue * meta.unitMultiplier)
+                  : (ov.lastValue * meta.unitMultiplier).toLocaleString("it-IT", { maximumFractionDigits: 2 }))
+              : null
+            const dateStr = ov?.lastDate
+              ? new Date(ov.lastDate).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "2-digit" })
+              : null
             return (
               <Card key={t}>
                 <CardContent className="p-3">
@@ -467,7 +486,17 @@ export default function BodyBrowser() {
                     <span className="inline-block w-2 h-2 rounded-full" style={{ background: meta.color }} />
                     {meta.label}
                   </p>
-                  <p className="text-xl font-semibold tabular-nums">{perTypeCount[t] ?? 0}</p>
+                  {displayValue ? (
+                    <p className="text-xl font-semibold tabular-nums">
+                      {displayValue}
+                      {meta.displayUnit && <span className="text-sm text-muted-foreground font-normal ml-1">{meta.displayUnit}</span>}
+                    </p>
+                  ) : (
+                    <p className="text-xl font-semibold text-muted-foreground">—</p>
+                  )}
+                  <p className="text-[11px] text-muted-foreground tabular-nums mt-0.5">
+                    {ov?.count ?? 0} campioni{dateStr ? ` · ${dateStr}` : ""}
+                  </p>
                 </CardContent>
               </Card>
             )
