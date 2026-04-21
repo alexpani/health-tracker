@@ -1,7 +1,7 @@
 import uuid as uuid_mod
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Double, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Double, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -172,4 +172,32 @@ class SyncLog(Base):
     sample_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class DiarioHkSync(Base):
+    """Mapping of (diary day, dietary type) → HKSample UUID written via our
+    pending-write queue. Used for idempotent diario-alimentare → Apple Health
+    sync: when a day's total changes we delete+recreate; when unchanged we skip.
+    """
+    __tablename__ = "diario_hk_sync"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    date: Mapped[datetime] = mapped_column(Date, nullable=False)
+    type: Mapped[str] = mapped_column(String(100), nullable=False)  # HKQuantityTypeIdentifier*
+    value: Mapped[float] = mapped_column(Double, nullable=False)
+    hk_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(UUID(as_uuid=True))
+    pending_write_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("pending_writes.id", ondelete="SET NULL")
+    )
+    posted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("date", "type", name="uq_diario_hk_sync_date_type"),
+        Index("idx_diario_hk_sync_pending", "pending_write_id"),
     )

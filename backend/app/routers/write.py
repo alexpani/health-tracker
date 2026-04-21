@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import PendingWrite
+from app.models import DiarioHkSync, PendingWrite
 from app.schemas import ConfirmIn, FailIn, PendingWriteOut, WriteIn
 
 router = APIRouter(prefix="/api/v1/write", tags=["write"])
@@ -85,6 +85,14 @@ async def confirm_write(write_id: int, body: ConfirmIn, db: AsyncSession = Depen
     row.status = "written"
     row.written_at = datetime.now(timezone.utc)
     row.hk_uuid = body.hk_uuid
+
+    # Backfill the diario→HK tracking row with the HK-assigned UUID so a
+    # future sync-to-hk can delete this sample when the day's total changes.
+    tracking_stmt = select(DiarioHkSync).where(DiarioHkSync.pending_write_id == row.id)
+    tracking = (await db.execute(tracking_stmt)).scalar_one_or_none()
+    if tracking is not None:
+        tracking.hk_uuid = body.hk_uuid
+
     await db.commit()
     await db.refresh(row)
     return row

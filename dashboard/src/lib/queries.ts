@@ -313,6 +313,19 @@ export function useDiarioDailyTotals(from: string, to: string) {
   })
 }
 
+export interface DiarioSyncResult {
+  queued_writes: number
+  queued_deletions: number
+  unchanged: number
+  days_considered: number
+}
+
+export function useDiarioSyncToHK() {
+  return useMutation({
+    mutationFn: () => apiPost<DiarioSyncResult>("/api/v1/diario/sync-to-hk", {}),
+  })
+}
+
 export function useWorkoutRecordsFacets() {
   return useQuery({
     queryKey: ["workoutRecordsFacets"],

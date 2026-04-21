@@ -87,6 +87,7 @@ Alembic revision migrations folder is mounted as a volume so migrations persist 
 - `IngestRule` — configurable filters (rule_type: `value_range` or `blocked_source`; optional type_identifier/source_name; value_min/max; active bool; hits_count, last_hit_at).
 - `IngestBlacklist` — UUIDs never to insert; auto-populated by trigger on DELETE from `health_samples`.
 - `SyncLog` — per-batch sync audit entries (device_id, sample_count, synced_at).
+- `DiarioHkSync` — mapping `(date, dietary_type) → hk_uuid + value + pending_write_id`. Tracks which daily diario totals have been mirrored to Apple Salute so the reconciler can detect changes (delete old HK sample + write new one) while skipping unchanged days.
 
 ### Alembic Migrations
 
@@ -101,6 +102,7 @@ Ordered history (most recent last):
 8. workout_title (adds `workouts.title` String 200)
 9. workout_blacklist_trigger (`alembic/versions/a1b2c3d4e5f6_workout_blacklist_trigger.py`) — creates `fn_blacklist_on_workout_delete()` function + `trg_blacklist_on_workout_delete` trigger on `workouts`.
 10. workout_activities (`alembic/versions/871fe89fe31f_workout_activities.py`) — adds `workouts.activities` JSONB for per-interval lap/segment data extracted from `HKWorkoutActivity`/`HKWorkoutEvent`.
+11. diario_hk_sync (`alembic/versions/6677af61441c_diario_hk_sync.py`) — adds `diario_hk_sync` table mapping `(date, dietary_type)` to the HK sample UUID written via the pending-write queue, for idempotent diario→Apple Salute reconciliation.
 
 ### Routers
 
@@ -178,6 +180,7 @@ Ordered history (most recent last):
 - Base URL of the upstream diario configured via env `DIARIO_BASE_URL` (default `http://192.168.68.173:3000`)
 - `GET /api/v1/diario/active-plan` → proxies `GET /api/external/active-plan`. Returns the active nutrition plan (`name, kcal_target, protein_pct/g, fat_pct/g, carbs_pct/g, updated_at`). 404 `no_active_plan` bubbles through; 502 on network error.
 - `GET /api/v1/diario/daily-totals?from=YYYY-MM-DD&to=YYYY-MM-DD` → proxies the equivalent upstream endpoint. Returns `[{date, kcal, protein_g, fat_g, carbs_g, kcal_target}]`, one entry per day that has at least one diary record. `kcal_target` is the snapshot of the plan in effect that day.
+- `POST /api/v1/diario/sync-to-hk[?from=&to=]` — idempotent reconciler that pushes the diario daily totals into Apple Health via the existing `PendingWrite`/`PendingDeletion` queues. For every (day, dietary type) pair whose diario value differs from what's tracked in the `diario_hk_sync` table, enqueues a delete of the old HK sample (if any) and a write of the new one. The iOS app processes these through `processPendingWrites`/`processPendingDeletions` at the next Sync Now. Returns `{queued_writes, queued_deletions, unchanged, days_considered}`. No cron on the backend — sync travels on the same loop as body-metric writes. Confirming a `PendingWrite` also backfills `diario_hk_sync.hk_uuid` so the next reconcile can delete it if the day's total changes.
 
 ### Ingest Rules semantics
 
