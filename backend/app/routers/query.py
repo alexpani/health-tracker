@@ -7,7 +7,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import CategorySample, HealthSample, SyncLog, Workout
+from app.models import CategorySample, HealthSample, PendingDeletion, SyncLog, Workout
 from app.schemas import (
     AggregatedPoint,
     CategorySampleOut,
@@ -668,16 +668,35 @@ class BulkDeleteIn(BaseModel):
 @router.post("/samples/bulk-delete")
 async def bulk_delete_samples(body: BulkDeleteIn, db: AsyncSession = Depends(get_db)):
     """
-    Deletes samples by id. The trg_blacklist_on_delete trigger automatically
-    adds their UUIDs to ingest_blacklist so they won't re-appear on future syncs.
+    Deletes samples by id and enqueues PendingDeletion rows so the iOS app
+    will attempt to delete the same samples from Apple Health on its next
+    sync. HealthKit only lets apps delete samples they created themselves,
+    so delete attempts for third-party samples (e.g., Withings) will fail
+    on iOS and the HKSample will stay in Apple Salute; the sample is still
+    removed from the backend DB and blacklisted (via trg_blacklist_on_delete)
+    so it won't re-appear on future syncs.
     """
     if not body.ids:
         return {"deleted": 0}
     from sqlalchemy import delete
+
+    # Fetch uuid/type/id before deleting so we can enqueue the HK deletion.
+    fetch_stmt = select(HealthSample.id, HealthSample.uuid, HealthSample.type).where(
+        HealthSample.id.in_(body.ids)
+    )
+    rows = (await db.execute(fetch_stmt)).all()
+    for r in rows:
+        db.add(PendingDeletion(
+            hk_uuid=r.uuid,
+            type=r.type,
+            source_sample_id=r.id,
+            status="pending",
+        ))
+
     stmt = delete(HealthSample).where(HealthSample.id.in_(body.ids))
     result = await db.execute(stmt)
     await db.commit()
-    return {"deleted": result.rowcount}
+    return {"deleted": result.rowcount, "hk_deletion_enqueued": len(rows)}
 
 
 @router.get("/sync/sessions")
