@@ -464,17 +464,29 @@ final class SyncService {
         }
     }
 
-    /// Body-metric quantity types that are synced via HKAnchoredObjectQuery
-    /// instead of the plain windowed HKSampleQuery. These types are written
-    /// retroactively into HealthKit by sources like Withings (startDate in the
-    /// past, creationDate later), which the windowed path silently misses.
+    /// Quantity types synced via HKAnchoredObjectQuery instead of the plain
+    /// windowed HKSampleQuery. These types are often written retroactively
+    /// into HealthKit by third-party sources (Withings for weight; Lifesum,
+    /// MyFitnessPal etc. for dietary) — i.e. startDate in the past but the
+    /// sample arrives in HealthKit after our windowed lastSyncDate has
+    /// already advanced, so the windowed path silently misses them.
+    /// Anchored queries track HealthKit insertion order (HKObjectID), so
+    /// late-arriving samples are never lost.
     static let anchoredQuantityTypes: [(HKQuantityTypeIdentifier, HKUnit)] = [
+        // Body metrics
         (.bodyMass,            .gramUnit(with: .kilo)),
         (.bodyMassIndex,       .count()),
         (.bodyFatPercentage,   .percent()),
         (.leanBodyMass,        .gramUnit(with: .kilo)),
         (.height,              .meter()),
         (.waistCircumference,  .meter()),
+        // Dietary (Lifesum, MyFitnessPal etc. write per-meal samples with
+        // startDate of the meal and creationDate at sync time — anchored
+        // is the only reliable way to pick them up).
+        (.dietaryEnergyConsumed, .kilocalorie()),
+        (.dietaryCarbohydrates,  .gram()),
+        (.dietaryFatTotal,       .gram()),
+        (.dietaryProtein,        .gram()),
     ]
 
     static var anchoredQuantityIds: Set<String> {
