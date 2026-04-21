@@ -193,13 +193,26 @@ async def ingest_workouts(batch: WorkoutBatchIn, db: AsyncSession = Depends(get_
             "metadata": w.metadata,
             "title": w.title or ((w.metadata or {}).get("workout name") if isinstance(w.metadata, dict) else None),
             "notes": w.notes,
+            "activities": w.activities,
         }
         for w in workouts_in
     ]
 
-    stmt = insert(Workout.__table__).values(values).on_conflict_do_nothing(index_elements=["uuid"])
+    # ON CONFLICT: insert new rows; for existing rows, only fill in `activities`
+    # when the incoming batch has something (so iOS can backfill intervals without
+    # wiping user-edited title/notes on already-stored workouts).
+    # RETURNING (xmax = 0) distinguishes brand-new inserts from on-conflict updates
+    # so the reported `inserted` count stays accurate.
+    stmt = insert(Workout.__table__).values(values)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["uuid"],
+        set_={"activities": stmt.excluded.activities},
+        where=(stmt.excluded.activities.isnot(None)),
+    )
+    stmt = stmt.returning(text("(xmax = 0) AS is_new"))
     result = await db.execute(stmt)
-    inserted = result.rowcount
+    rows = result.all()
+    inserted = sum(1 for r in rows if r.is_new)
 
     await db.execute(
         insert(SyncLog.__table__).values(device_id=batch.device_id, sample_count=inserted)

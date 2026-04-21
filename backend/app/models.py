@@ -72,6 +72,7 @@ class Workout(Base):
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB)
     title: Mapped[str | None] = mapped_column(String(200))
     notes: Mapped[str | None] = mapped_column(Text)
+    activities_: Mapped[list | None] = mapped_column("activities", JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

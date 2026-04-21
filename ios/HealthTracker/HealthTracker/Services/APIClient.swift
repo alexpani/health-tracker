@@ -52,7 +52,38 @@ struct CategoryPayload: Codable {
     }
 }
 
-struct WorkoutPayload: Codable {
+struct WorkoutActivityPayload {
+    let n: Int
+    let kind: String       // "work" | "rest" | "lap" | "segment" | "pause"
+    let name: String?
+    let start: String
+    let end: String
+    let durationS: Double
+    let distanceM: Double?
+    let avgHr: Double?
+    let maxHr: Double?
+    let kcal: Double?
+    let paceSPerKm: Double?
+
+    func toDict() -> [String: Any] {
+        var d: [String: Any] = [
+            "n": n,
+            "kind": kind,
+            "start": start,
+            "end": end,
+            "duration_s": durationS,
+        ]
+        if let v = name { d["name"] = v }
+        if let v = distanceM { d["distance_m"] = v }
+        if let v = avgHr { d["avg_hr"] = v }
+        if let v = maxHr { d["max_hr"] = v }
+        if let v = kcal { d["kcal"] = v }
+        if let v = paceSPerKm { d["pace_s_per_km"] = v }
+        return d
+    }
+}
+
+struct WorkoutPayload {
     let uuid: String
     let activityType: Int
     let activityName: String?
@@ -64,20 +95,7 @@ struct WorkoutPayload: Codable {
     let sourceName: String?
     let metadata: [String: String]?
     let title: String?
-
-    enum CodingKeys: String, CodingKey {
-        case uuid
-        case activityType = "activity_type"
-        case activityName = "activity_name"
-        case duration
-        case totalEnergyBurned = "total_energy_burned"
-        case totalDistance = "total_distance"
-        case startDate = "start_date"
-        case endDate = "end_date"
-        case sourceName = "source_name"
-        case metadata
-        case title
-    }
+    let activities: [WorkoutActivityPayload]?
 }
 
 actor APIClient {
@@ -166,6 +184,9 @@ actor APIClient {
                 if let v = w.sourceName { dict["source_name"] = v }
                 if let v = w.metadata { dict["metadata"] = v }
                 if let v = w.title { dict["title"] = v }
+                if let acts = w.activities, !acts.isEmpty {
+                    dict["activities"] = acts.map { $0.toDict() }
+                }
                 return dict
             }
         ]

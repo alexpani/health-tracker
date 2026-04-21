@@ -54,6 +54,7 @@ class WorkoutIn(BaseModel):
     metadata: dict | None = None
     title: str | None = None
     notes: str | None = None
+    activities: list[dict] | None = None
 
 
 class WorkoutBatchIn(BaseModel):
@@ -123,6 +124,7 @@ class WorkoutOut(BaseModel):
     title: str | None = None
     notes: str | None = None
     metadata: dict | None = Field(None, validation_alias="metadata_")
+    activities: list[dict] | None = Field(None, validation_alias="activities_")
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 

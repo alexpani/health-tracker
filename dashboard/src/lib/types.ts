@@ -43,6 +43,20 @@ export interface WorkoutFilters {
   title_contains?: string
 }
 
+export interface WorkoutActivity {
+  n: number
+  kind: "work" | "rest" | "lap" | "segment" | "pause"
+  name: string | null
+  start: string
+  end: string
+  duration_s: number
+  distance_m: number | null
+  avg_hr: number | null
+  max_hr: number | null
+  kcal: number | null
+  pace_s_per_km: number | null
+}
+
 export interface WorkoutDetail {
   id: number
   uuid: string
@@ -57,6 +71,7 @@ export interface WorkoutDetail {
   metadata: Record<string, unknown> | null
   title: string | null
   notes: string | null
+  activities: WorkoutActivity[] | null
 }
 
 export interface WorkoutSplit {

@@ -400,7 +400,8 @@ actor HealthKitManager {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
         let payloads = added.map { workout -> WorkoutPayload in
-            WorkoutPayload(
+            let activities = Self.extractWorkoutActivities(workout, formatter: formatter)
+            return WorkoutPayload(
                 uuid: workout.uuid.uuidString,
                 activityType: Int(workout.workoutActivityType.rawValue),
                 activityName: workout.workoutActivityType.displayName,
@@ -411,12 +412,183 @@ actor HealthKitManager {
                 endDate: formatter.string(from: workout.endDate),
                 sourceName: workout.sourceRevision.source.name,
                 metadata: workout.metadata?.compactMapValues { "\($0)" },
-                title: workout.metadata?["workout name"] as? String
+                title: workout.metadata?["workout name"] as? String,
+                activities: activities
             )
         }
 
         let deletedUUIDs = deleted.map { $0.uuid }
         return (payloads, deletedUUIDs, newAnchor)
+    }
+
+    // MARK: - Workout intervals extraction
+
+    /// Builds the normalized `activities` payload for a workout, preferring
+    /// `HKWorkoutActivity` (iOS 17+, rich per-interval statistics) and falling
+    /// back to `HKWorkoutEvent` lap/segment markers when activities are absent.
+    /// Returns `nil` if neither is present so the backend keeps any existing
+    /// value intact (upsert-friendly).
+    private static func extractWorkoutActivities(
+        _ workout: HKWorkout,
+        formatter: ISO8601DateFormatter
+    ) -> [WorkoutActivityPayload]? {
+        let fromActivities = encodeWorkoutActivities(workout, formatter: formatter)
+        if !fromActivities.isEmpty { return fromActivities }
+        let fromEvents = encodeWorkoutEventsAsLaps(workout, formatter: formatter)
+        return fromEvents.isEmpty ? nil : fromEvents
+    }
+
+    private static let restNames: Set<String> = ["rest", "recovery", "recupero", "pausa", "riposo"]
+
+    private static func encodeWorkoutActivities(
+        _ workout: HKWorkout,
+        formatter: ISO8601DateFormatter
+    ) -> [WorkoutActivityPayload] {
+        let activities = workout.workoutActivities
+        if activities.isEmpty { return [] }
+
+        var workCounter = 0
+        var restCounter = 0
+        var otherCounter = 0
+
+        return activities.map { act -> WorkoutActivityPayload in
+            let start = act.startDate
+            // HKWorkoutActivity.endDate is optional (activity might still be open);
+            // fall back to startDate + duration, then to workout.endDate.
+            let end = act.endDate
+                ?? start.addingTimeInterval(act.duration)
+            let durationS = act.duration > 0 ? act.duration : end.timeIntervalSince(start)
+
+            // Distance — pick the unit matching the activity type.
+            let distanceType: HKQuantityType = {
+                switch act.workoutConfiguration.activityType {
+                case .cycling, .handCycling: return HKQuantityType(.distanceCycling)
+                case .swimming:              return HKQuantityType(.distanceSwimming)
+                case .wheelchairRunPace, .wheelchairWalkPace:
+                    return HKQuantityType(.distanceWheelchair)
+                default:                     return HKQuantityType(.distanceWalkingRunning)
+                }
+            }()
+            let distanceM = act.statistics(for: distanceType)?.sumQuantity()?.doubleValue(for: .meter())
+
+            // Heart rate
+            let hrType = HKQuantityType(.heartRate)
+            let bpm = HKUnit.count().unitDivided(by: .minute())
+            let avgHr = act.statistics(for: hrType)?.averageQuantity()?.doubleValue(for: bpm)
+            let maxHr = act.statistics(for: hrType)?.maximumQuantity()?.doubleValue(for: bpm)
+
+            // Energy
+            let kcal = act.statistics(for: HKQuantityType(.activeEnergyBurned))?
+                .sumQuantity()?
+                .doubleValue(for: .kilocalorie())
+
+            // Name — try common metadata keys used by third-party apps.
+            let name = (act.metadata?["workout name"] as? String)
+                ?? (act.metadata?["HKWorkoutName"] as? String)
+                ?? (act.metadata?["name"] as? String)
+
+            // Kind detection
+            let lowerName = name?.lowercased() ?? ""
+            let metaKind = (act.metadata?["Intervals Pro Activity Type"] as? String)?.lowercased()
+                ?? (act.metadata?["kind"] as? String)?.lowercased()
+            let isRest = restNames.contains(lowerName) || metaKind == "rest" || metaKind == "recovery"
+            let kind = isRest ? "rest" : "work"
+
+            let n: Int
+            if isRest {
+                restCounter += 1; n = restCounter
+            } else if kind == "work" {
+                workCounter += 1; n = workCounter
+            } else {
+                otherCounter += 1; n = otherCounter
+            }
+
+            let pace: Double? = {
+                guard let d = distanceM, d > 0, durationS > 0 else { return nil }
+                return durationS / (d / 1000.0)
+            }()
+
+            return WorkoutActivityPayload(
+                n: n,
+                kind: kind,
+                name: name,
+                start: formatter.string(from: start),
+                end: formatter.string(from: end),
+                durationS: durationS,
+                distanceM: distanceM,
+                avgHr: avgHr,
+                maxHr: maxHr,
+                kcal: kcal,
+                paceSPerKm: pace
+            )
+        }
+    }
+
+    private static func encodeWorkoutEventsAsLaps(
+        _ workout: HKWorkout,
+        formatter: ISO8601DateFormatter
+    ) -> [WorkoutActivityPayload] {
+        let events = (workout.workoutEvents ?? []).filter {
+            $0.type == .lap || $0.type == .segment
+        }
+        if events.isEmpty { return [] }
+
+        var result: [WorkoutActivityPayload] = []
+        var prevStart = workout.startDate
+        var lapCounter = 0
+        var segmentCounter = 0
+
+        // Each event's dateInterval.start marks the end of the previous lap
+        // (and the start of the next). Close the last entry at workout.endDate.
+        let closingBoundary = workout.endDate
+        for event in events {
+            let endOfInterval = event.dateInterval.start
+            let durationS = endOfInterval.timeIntervalSince(prevStart)
+            guard durationS > 0 else { prevStart = endOfInterval; continue }
+
+            let kind = (event.type == .segment) ? "segment" : "lap"
+            let n: Int
+            if kind == "segment" { segmentCounter += 1; n = segmentCounter }
+            else { lapCounter += 1; n = lapCounter }
+
+            let name = event.metadata?[HKMetadataKeyWorkoutBrandName] as? String
+
+            result.append(WorkoutActivityPayload(
+                n: n,
+                kind: kind,
+                name: name,
+                start: formatter.string(from: prevStart),
+                end: formatter.string(from: endOfInterval),
+                durationS: durationS,
+                distanceM: nil,
+                avgHr: nil,
+                maxHr: nil,
+                kcal: nil,
+                paceSPerKm: nil
+            ))
+            prevStart = endOfInterval
+        }
+
+        // Trailing segment from last event → workout end
+        if prevStart < closingBoundary {
+            let durationS = closingBoundary.timeIntervalSince(prevStart)
+            lapCounter += 1
+            result.append(WorkoutActivityPayload(
+                n: lapCounter,
+                kind: "lap",
+                name: nil,
+                start: formatter.string(from: prevStart),
+                end: formatter.string(from: closingBoundary),
+                durationS: durationS,
+                distanceM: nil,
+                avgHr: nil,
+                maxHr: nil,
+                kcal: nil,
+                paceSPerKm: nil
+            ))
+        }
+
+        return result
     }
 
     /// Fetches quantity samples of the given type via an anchored query.
@@ -505,7 +677,8 @@ actor HealthKitManager {
                 endDate: formatter.string(from: workout.endDate),
                 sourceName: workout.sourceRevision.source.name,
                 metadata: workout.metadata?.compactMapValues { "\($0)" },
-                title: workout.metadata?["workout name"] as? String
+                title: workout.metadata?["workout name"] as? String,
+                activities: Self.extractWorkoutActivities(workout, formatter: formatter)
             )
         }
     }

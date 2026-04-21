@@ -271,6 +271,7 @@ async def workout_by_uuid(workout_uuid: str, db: AsyncSession = Depends(get_db))
         "metadata": row.metadata_,
         "title": row.title,
         "notes": row.notes,
+        "activities": row.activities_,
     }
 
 
@@ -575,6 +576,7 @@ async def delete_workout(workout_uuid: str, db: AsyncSession = Depends(get_db)):
         "metadata": row.metadata_,
         "title": row.title,
         "notes": row.notes,
+        "activities": row.activities_,
     }
     await db.execute(sqldelete(Workout).where(Workout.id == row.id))
     await db.commit()

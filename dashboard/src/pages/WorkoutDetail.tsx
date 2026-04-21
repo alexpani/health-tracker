@@ -397,6 +397,65 @@ export default function WorkoutDetail() {
         </Card>
       )}
 
+      {workout.activities && workout.activities.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Intervalli
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {workout.activities.length} entry · da HealthKit (HKWorkoutActivity / workoutEvents)
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[80px]">Tipo</TableHead>
+                  <TableHead>Nome</TableHead>
+                  <TableHead>Inizio</TableHead>
+                  <TableHead className="text-right">Durata</TableHead>
+                  <TableHead className="text-right">Distanza</TableHead>
+                  <TableHead className="text-right">Ritmo</TableHead>
+                  <TableHead className="text-right">HR medio</TableHead>
+                  <TableHead className="text-right">HR max</TableHead>
+                  <TableHead className="text-right">Kcal</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {workout.activities.map((a, i) => {
+                  const isRest = a.kind === "rest"
+                  const startTime = new Date(a.start).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                  return (
+                    <TableRow key={i} className={isRest ? "bg-muted/40" : ""}>
+                      <TableCell className="font-medium capitalize">
+                        {a.kind === "work" ? `#${a.n}` : a.kind}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{a.name ?? "-"}</TableCell>
+                      <TableCell className="tabular-nums text-muted-foreground">{startTime}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatDuration(a.duration_s)}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {a.distance_m ? `${(a.distance_m / 1000).toFixed(2)} km` : "-"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{formatPace(a.pace_s_per_km)}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {a.avg_hr !== null ? `${Math.round(a.avg_hr)} bpm` : "-"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {a.max_hr !== null ? `${Math.round(a.max_hr)} bpm` : "-"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {a.kcal !== null ? Math.round(a.kcal) : "-"}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
       {hrChartData.length > 0 && (
         <Card>
           <CardHeader><CardTitle>Frequenza cardiaca</CardTitle></CardHeader>

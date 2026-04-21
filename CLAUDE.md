@@ -81,7 +81,7 @@ Alembic revision migrations folder is mounted as a volume so migrations persist 
 
 - `HealthSample` — quantity samples (steps, heart rate, weight, ...). Columns: id, uuid (unique), type, value, unit, start_date, end_date, source_name, source_bundle_id, device, metadata JSONB.
 - `CategorySample` — category samples (sleep, stand hour, etc.). Similar shape with integer value (enum).
-- `Workout` — workouts (activity_type, duration seconds, total_distance meters, total_energy_burned kcal, start/end, source, metadata JSONB, **user-editable `title` + `notes`** columns). `title` is auto-populated at ingest from `metadata["workout name"]` when present (used by third-party apps like Intervals Pro).
+- `Workout` — workouts (activity_type, duration seconds, total_distance meters, total_energy_burned kcal, start/end, source, metadata JSONB, **user-editable `title` + `notes`** columns, **`activities` JSONB** with per-interval lap/segment data). `title` is auto-populated at ingest from `metadata["workout name"]` when present. `activities` is a normalized array of interval entries (`kind`, `n`, `start/end`, `duration_s`, `distance_m`, `avg_hr`, `max_hr`, `kcal`, `pace_s_per_km`) extracted from `HKWorkoutActivity` (iOS 17+) and `HKWorkoutEvent` (lap/segment markers) by the iOS app. App-agnostic: works with Intervals Pro, Apple Workout structured, Strava, HealthFit, Peloton, Runkeeper and any source that writes standard HealthKit interval data.
 - `PendingWrite` — web → HealthKit write queue (type, value, unit, start/end, status: pending/written/failed, hk_uuid after confirm).
 - `PendingDeletion` — web → HealthKit delete queue (hk_uuid, type, source_sample_id, status).
 - `IngestRule` — configurable filters (rule_type: `value_range` or `blocked_source`; optional type_identifier/source_name; value_min/max; active bool; hits_count, last_hit_at).
@@ -100,6 +100,7 @@ Ordered history (most recent last):
 7. workout_notes (adds `workouts.notes` TEXT)
 8. workout_title (adds `workouts.title` String 200)
 9. workout_blacklist_trigger (`alembic/versions/a1b2c3d4e5f6_workout_blacklist_trigger.py`) — creates `fn_blacklist_on_workout_delete()` function + `trg_blacklist_on_workout_delete` trigger on `workouts`.
+10. workout_activities (`alembic/versions/871fe89fe31f_workout_activities.py`) — adds `workouts.activities` JSONB for per-interval lap/segment data extracted from `HKWorkoutActivity`/`HKWorkoutEvent`.
 
 ### Routers
 
@@ -117,7 +118,7 @@ Ordered history (most recent last):
 
 **Ingest**
 - `POST /api/v1/samples/batch` — ingest quantity samples (filtered by rules + blacklist)
-- `POST /api/v1/categories/batch`, `POST /api/v1/workouts/batch` (workouts accept `notes`)
+- `POST /api/v1/categories/batch`, `POST /api/v1/workouts/batch` (workouts accept `notes` + `activities`). Workouts use `ON CONFLICT DO UPDATE` on `activities` only, so re-syncing an existing workout backfills intervals without overwriting user-edited `title`/`notes`.
 
 **Query samples**
 - `GET /api/v1/samples?type=&start=&end=&aggregation=none|hourly|daily|weekly|monthly&sources=&devices=&value_min=&value_max=&limit=&offset=`
@@ -289,7 +290,7 @@ docker compose up -d --build   # → http://192.168.68.190
 - `/body` — weight, BMI, body fat, lean mass, height, waist. **Left sidebar filters** (metriche chips, aggregazione grafico, periodo preciso con preset 7g/30g/90g/1a/Tutto **+ chip anno** 2001→oggi derivati da `/samples/facets` — click imposta 1 gen/31 dic di quell'anno; sources chips, range peso). **Multi-line chart** con tooltip multi-metrica e `ReferenceArea` di **drag-to-select**: trascina orizzontalmente per far apparire un popover con il delta (`first → last`, segnato, colorato) per ogni metrica attiva nell'intervallo selezionato. **Tabella con tutti i campioni** paginata (50/pagina). **Card variazione peso** in alto (ultimo mese / ultimo anno / tutto / periodo selezionato). Row-level delete con conferma dei dati correlati (±5 min). Filtri persistiti in `sessionStorage` (`body_filters_v3`). I chip Anno e Sorgente del sidebar mostrano sempre l'intero range storico (sono popolati da `/samples/facets` non filtrato nel tempo, non dai dati della vista corrente).
 - `/sleep` — sleep analysis, stacked bar per night
 - `/workouts` — **main Workouts page** with **left sidebar filters** (year, activity, source, datetime, distance km, duration min, pace slider + presets, title search, notes search), summary cards, workouts-per-period chart with click-to-drilldown, **sortable** list table (click headers to sort asc/desc) with **title**, pace and truncated notes columns, row-level delete with 8s undo toast
-- `/workouts/:uuid` — **Apple Fitness-style detail**: page heading uses the custom title (fallback to activity name), metrics (duration, distance, calories, avg pace, avg/max HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), per-km splits table, time-series charts (HR, running speed, power, cadence), **editable title + notes** cards
+- `/workouts/:uuid` — **Apple Fitness-style detail**: page heading uses the custom title (fallback to activity name), metrics (duration, distance, calories, avg pace, avg/max HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), per-km splits table, **Intervalli** card (shown when `workout.activities` is present — rows colored grey for rest, shows start time / duration / distance / pace / avg+max HR / kcal per interval), time-series charts (HR, running speed, power, cadence), **editable title + notes** cards
 - `/nutrition` — calories, macros, water, caffeine
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - `/explore` — universal browser: pick any sample type with full filter bar + chart + raw table
