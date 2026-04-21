@@ -125,8 +125,6 @@ export default function BodyBrowser() {
   const selectedTypes = filters.types && filters.types.length > 0 ? filters.types : ["HKQuantityTypeIdentifierBodyMass"]
   const aggregation = filters.aggregation ?? "none"
 
-  // Year filter: applied client-side on top of start/end
-  const yearSet = useMemo(() => new Set(filters.years ?? []), [filters.years])
 
   // All-time BodyMass samples (ignoring time filter) — used to compute
   // the "variazione peso" cards (ultimo mese / anno / tutto). Respects
@@ -163,9 +161,6 @@ export default function BodyBrowser() {
     if (!d || d.length === 0) return []
     return d as Sample[]
   }
-
-  const passesYear = (iso: string) =>
-    yearSet.size === 0 || yearSet.has(new Date(iso).getFullYear())
 
   // Weight range applies only to BodyMass samples (in kg — BodyMass source unit is already kg)
   const passesWeight = (type: string, value: number) => {
@@ -208,7 +203,6 @@ export default function BodyBrowser() {
     selectedTypes.forEach(type => {
       const meta = getMeta(type)
       rawFor(type).forEach(s => {
-        if (!passesYear(s.start_date)) return
         if (!passesWeight(type, s.value)) return
         const t0 = new Date(s.start_date).getTime()
         const bucketT = aggregation === "none" ? t0 : bucketFloor(t0, aggregation)
@@ -228,14 +222,13 @@ export default function BodyBrowser() {
         return obj
       })
     return out
-  }, [selectedTypes, aggregation, yearSet, filters.weight_min, filters.weight_max, q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
+  }, [selectedTypes, aggregation, filters.weight_min, filters.weight_max, q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
 
   // Table: ALL raw samples for selected types (respecting year filter), sorted desc
   const tableRows = useMemo<MergedRow[]>(() => {
     const rows: MergedRow[] = []
     selectedTypes.forEach(type => {
       rawFor(type).forEach(s => {
-        if (!passesYear(s.start_date)) return
         if (!passesWeight(type, s.value)) return
         rows.push({
           id: s.id,
@@ -250,17 +243,17 @@ export default function BodyBrowser() {
     rows.sort((a, b) => b.start_date.localeCompare(a.start_date))
     return rows
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTypes, yearSet, filters.weight_min, filters.weight_max, q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
+  }, [selectedTypes, filters.weight_min, filters.weight_max, q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
 
   // Per-type count cards
   const perTypeCount = useMemo(() => {
     const counts: Record<string, number> = {}
     selectedTypes.forEach(t => {
-      counts[t] = rawFor(t).filter(s => passesYear(s.start_date) && passesWeight(t, s.value)).length
+      counts[t] = rawFor(t).filter(s => passesWeight(t, s.value)).length
     })
     return counts
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTypes, yearSet, filters.weight_min, filters.weight_max, q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
+  }, [selectedTypes, filters.weight_min, filters.weight_max, q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
 
   // Weight variation stats (last month / last year / all / selected period)
   const weightStats = useMemo(() => {
@@ -276,17 +269,11 @@ export default function BodyBrowser() {
     const sorted = [...filtered].sort((a, b) => a.start_date.localeCompare(b.start_date))
     const now = Date.now()
 
-    const deltaInRange = (
-      startMs: number | null,
-      endMs: number | null,
-      yearFilter?: Set<number>,
-    ) => {
+    const deltaInRange = (startMs: number | null, endMs: number | null) => {
       const slice = sorted.filter(s => {
-        const d = new Date(s.start_date)
-        const t = d.getTime()
+        const t = new Date(s.start_date).getTime()
         if (startMs !== null && t < startMs) return false
         if (endMs !== null && t > endMs) return false
-        if (yearFilter && yearFilter.size > 0 && !yearFilter.has(d.getFullYear())) return false
         return true
       })
       if (slice.length === 0) return null
@@ -302,19 +289,17 @@ export default function BodyBrowser() {
       }
     }
 
-    // "Periodo selezionato" = datetime from/to (se presenti) ∩ anni selezionati.
     const selStart = filters.start ? new Date(filters.start).getTime() : null
     const selEnd = filters.end ? new Date(filters.end).getTime() : null
-    const yearFilter = filters.years && filters.years.length > 0 ? new Set(filters.years) : undefined
-    const hasSelected = selStart !== null || selEnd !== null || (yearFilter && yearFilter.size > 0)
+    const hasSelected = selStart !== null || selEnd !== null
 
     return {
       month:    deltaInRange(now - 30 * 86400_000, null),
       year:     deltaInRange(now - 365 * 86400_000, null),
       all:      deltaInRange(null, null),
-      selected: hasSelected ? deltaInRange(selStart, selEnd, yearFilter) : null,
+      selected: hasSelected ? deltaInRange(selStart, selEnd) : null,
     }
-  }, [allBodyMassQ.data, filters.start, filters.end, filters.years, filters.weight_min, filters.weight_max])
+  }, [allBodyMassQ.data, filters.start, filters.end, filters.weight_min, filters.weight_max])
 
   const showWeightStats = selectedTypes.includes("HKQuantityTypeIdentifierBodyMass")
 
@@ -398,7 +383,6 @@ export default function BodyBrowser() {
     filters.start, filters.end,
     filters.types?.length && filters.types.length < BODY_TYPES.length ? 1 : undefined,
     filters.sources?.length,
-    filters.years?.length,
     filters.weight_min !== undefined ? 1 : undefined,
     filters.weight_max !== undefined ? 1 : undefined,
   ].filter(Boolean).length
@@ -427,7 +411,6 @@ export default function BodyBrowser() {
       const meta = getMeta(type)
       const samples = rawFor(type)
         .filter(s => {
-          if (!passesYear(s.start_date)) return false
           if (!passesWeight(type, s.value)) return false
           return s.start_date >= lo && s.start_date <= hi
         })
@@ -444,7 +427,7 @@ export default function BodyBrowser() {
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selStart, selEnd, selectedTypes, yearSet, filters.weight_min, filters.weight_max,
+  }, [selStart, selEnd, selectedTypes, filters.weight_min, filters.weight_max,
       q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
 
   return (

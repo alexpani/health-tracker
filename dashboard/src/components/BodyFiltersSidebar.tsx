@@ -118,15 +118,23 @@ export function BodyFiltersSidebar({ value, onChange, availableSources, availabl
     value.start, value.end,
     value.types?.length && value.types.length < BODY_TYPES.length ? 1 : undefined,
     value.sources?.length,
-    value.years?.length,
     value.weight_min !== undefined ? 1 : undefined,
     value.weight_max !== undefined ? 1 : undefined,
   ].filter(Boolean).length
 
-  const toggleYear = (y: number) => {
-    const arr = value.years ?? []
-    const next = arr.includes(y) ? arr.filter(x => x !== y) : [...arr, y]
-    set("years", next.length ? next : undefined)
+  const applyYear = (year: number) => {
+    const start = new Date(year, 0, 1, 0, 0, 0, 0).toISOString()
+    const end = new Date(year, 11, 31, 23, 59, 59, 999).toISOString()
+    onChange({ ...value, start, end, years: undefined })
+  }
+
+  // Is a given year currently selected? (start/end exactly span Jan 1 – Dec 31)
+  const isYearActive = (year: number) => {
+    if (!value.start || !value.end) return false
+    const s = new Date(value.start)
+    const e = new Date(value.end)
+    return s.getFullYear() === year && s.getMonth() === 0 && s.getDate() === 1
+        && e.getFullYear() === year && e.getMonth() === 11 && e.getDate() === 31
   }
 
   return (
@@ -146,30 +154,6 @@ export function BodyFiltersSidebar({ value, onChange, availableSources, availabl
           )}
         </div>
       </div>
-
-      {/* Anno */}
-      {availableYears.length > 0 && (
-        <section className="space-y-2">
-          <Label className="text-xs font-medium">Anno</Label>
-          <div className="flex flex-wrap gap-1">
-            {availableYears.map(y => {
-              const sel = value.years?.includes(y) ?? false
-              return (
-                <button
-                  key={y}
-                  type="button"
-                  onClick={() => toggleYear(y)}
-                  className={`text-xs px-2 py-1 rounded-md border ${
-                    sel ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-accent"
-                  }`}
-                >
-                  {y}
-                </button>
-              )
-            })}
-          </div>
-        </section>
-      )}
 
       {/* Tipi */}
       <section className="space-y-2">
@@ -243,6 +227,27 @@ export function BodyFiltersSidebar({ value, onChange, availableSources, availabl
             </button>
           ))}
         </div>
+        {availableYears.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {availableYears.map(y => {
+              const active = isYearActive(y)
+              return (
+                <button
+                  key={y}
+                  type="button"
+                  onClick={() => applyYear(y)}
+                  className={`text-xs px-2 py-1 rounded-md border ${
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-background hover:bg-accent"
+                  }`}
+                >
+                  {y}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </section>
 
       {/* Peso range (solo BodyMass) */}
