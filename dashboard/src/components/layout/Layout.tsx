@@ -14,7 +14,7 @@ export default function Layout() {
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(true)} aria-label="Menu">
           <Menu className="h-5 w-5" />
         </Button>
-        <span className="text-sm font-semibold">Ealth Dashboard</span>
+        <span className="text-sm font-semibold">Health Dashboard</span>
       </header>
 
       {/* Main content full-width */}
