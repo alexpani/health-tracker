@@ -146,8 +146,10 @@ async def query_samples(
 @router.get("/samples/facets")
 async def sample_facets(type: str, db: AsyncSession = Depends(get_db)):
     """
-    Returns distinct source_name, device values and min/max for a type.
-    Used by the dashboard to populate filter selects.
+    Returns distinct source_name, device values, min/max, and per-year
+    counts for a type. Used by the dashboard to populate filter selects —
+    deliberately NOT filtered by time so the chips always show the full
+    historical span regardless of the current date-range filter.
     """
     sources_stmt = (
         select(HealthSample.source_name)
@@ -166,16 +168,27 @@ async def sample_facets(type: str, db: AsyncSession = Depends(get_db)):
         )
         .where(HealthSample.type == type)
     )
+    years_stmt = (
+        select(
+            func.extract("year", HealthSample.start_date).label("y"),
+            func.count().label("c"),
+        )
+        .where(HealthSample.type == type)
+        .group_by("y")
+        .order_by("y")
+    )
 
     sources = [r[0] for r in (await db.execute(sources_stmt)).all() if r[0] is not None]
     devices = [r[0] for r in (await db.execute(devices_stmt)).all() if r[0] is not None]
     rng_row = (await db.execute(range_stmt)).first()
+    years = [{"year": int(r.y), "count": r.c} for r in (await db.execute(years_stmt)).all()]
 
     return {
         "sources": sorted(sources),
         "devices": sorted(devices),
         "value_min": float(rng_row.min) if rng_row and rng_row.min is not None else None,
         "value_max": float(rng_row.max) if rng_row and rng_row.max is not None else None,
+        "years": years,
     }
 
 

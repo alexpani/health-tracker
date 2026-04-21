@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { BodyFiltersSidebar } from "@/components/BodyFiltersSidebar"
-import { fetchCorrelated, useBulkDeleteSamples, useSamples } from "@/lib/queries"
+import { fetchCorrelated, useBulkDeleteSamples, useSampleFacets, useSamples } from "@/lib/queries"
 import { CATEGORIES, getMeta } from "@/lib/healthkit"
 import { formatDateTime } from "@/lib/utils"
 import type { BodyFilters, CorrelatedSample, Sample } from "@/lib/types"
@@ -175,21 +175,30 @@ export default function BodyBrowser() {
     return true
   }
 
-  // Sources chip list: union across all fetched data
+  // Facets (sources + years) are fetched per body type from /samples/facets
+  // which is NOT filtered by time — so the sidebar chips show the full
+  // historical span regardless of the current "Periodo preciso" selection.
+  const facetBodyMass    = useSampleFacets("HKQuantityTypeIdentifierBodyMass")
+  const facetBodyMassIdx = useSampleFacets("HKQuantityTypeIdentifierBodyMassIndex")
+  const facetBodyFat     = useSampleFacets("HKQuantityTypeIdentifierBodyFatPercentage")
+  const facetLean        = useSampleFacets("HKQuantityTypeIdentifierLeanBodyMass")
+  const facetHeight      = useSampleFacets("HKQuantityTypeIdentifierHeight")
+  const facetWaist       = useSampleFacets("HKQuantityTypeIdentifierWaistCircumference")
+  const bodyFacets = [facetBodyMass, facetBodyMassIdx, facetBodyFat, facetLean, facetHeight, facetWaist]
+
   const availableSources = useMemo(() => {
     const set = new Set<string>()
-    BODY_TYPES.forEach(t => rawFor(t).forEach(s => s.source_name && set.add(s.source_name)))
+    bodyFacets.forEach(f => f.data?.sources?.forEach(s => s && set.add(s)))
     return Array.from(set).sort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
+  }, [facetBodyMass.data, facetBodyMassIdx.data, facetBodyFat.data, facetLean.data, facetHeight.data, facetWaist.data])
 
-  // Years available (union across all fetched data)
   const availableYears = useMemo(() => {
     const set = new Set<number>()
-    BODY_TYPES.forEach(t => rawFor(t).forEach(s => set.add(new Date(s.start_date).getFullYear())))
+    bodyFacets.forEach(f => f.data?.years?.forEach(y => set.add(y.year)))
     return Array.from(set).sort((a, b) => b - a)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
+  }, [facetBodyMass.data, facetBodyMassIdx.data, facetBodyFat.data, facetLean.data, facetHeight.data, facetWaist.data])
 
   // Build chart data: time-indexed points, one key per selected type (client-side aggregation if requested)
   const chartData = useMemo(() => {

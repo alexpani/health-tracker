@@ -213,6 +213,7 @@ export interface SampleFacets {
   devices: string[]
   value_min: number | null
   value_max: number | null
+  years: { year: number; count: number }[]
 }
 
 export interface AdvancedFilters {
