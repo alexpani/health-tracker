@@ -501,6 +501,270 @@ async def query_workouts(
     return result.scalars().all()
 
 
+_RUN_WALK_ACTIVITY_TYPES = {37, 52}
+_DISTANCE_TARGETS_KM = [5.0, 10.0, 21.097, 42.195]
+_DISTANCE_TARGET_TOL = 0.10
+
+
+def _workout_row_to_record(row) -> dict | None:
+    """Shape a Workout ORM row into a RecordEntry dict."""
+    if row is None:
+        return None
+    pace = None
+    if row.duration and row.total_distance and row.total_distance > 100:
+        pace = row.duration * 1000.0 / row.total_distance
+    return {
+        "uuid": str(row.uuid),
+        "start_date": row.start_date.isoformat(),
+        "total_distance": float(row.total_distance) if row.total_distance is not None else None,
+        "duration": float(row.duration) if row.duration is not None else None,
+        "total_energy_burned": float(row.total_energy_burned) if row.total_energy_burned is not None else None,
+        "pace_s_per_km": pace,
+    }
+
+
+async def _splits_for_range(db: AsyncSession, workout_start, workout_end) -> list[dict]:
+    """Same algorithm as /workouts/by-uuid/{uuid}/splits but usable in-process
+    for the records endpoint without going through the HTTP layer. Returns
+    1-km splits; does not include total_distance (we don't need it here)."""
+    dist_stmt = (
+        select(HealthSample.start_date, HealthSample.end_date, HealthSample.value)
+        .where(HealthSample.type == "HKQuantityTypeIdentifierDistanceWalkingRunning")
+        .where(HealthSample.start_date >= workout_start)
+        .where(HealthSample.end_date <= workout_end)
+        .order_by(HealthSample.start_date)
+    )
+    dist_rows = (await db.execute(dist_stmt)).all()
+    if not dist_rows:
+        return []
+    hr_stmt = (
+        select(HealthSample.start_date, HealthSample.value)
+        .where(HealthSample.type == "HKQuantityTypeIdentifierHeartRate")
+        .where(HealthSample.start_date >= workout_start)
+        .where(HealthSample.start_date <= workout_end)
+        .order_by(HealthSample.start_date)
+    )
+    hr_rows = (await db.execute(hr_stmt)).all()
+
+    split_meters = 1000.0
+    splits: list[dict] = []
+    cumulative = 0.0
+    split_num = 1
+    split_start = workout_start
+    split_start_distance = 0.0
+
+    for r in dist_rows:
+        cumulative += r.value
+        while cumulative - split_start_distance >= split_meters:
+            split_end = r.end_date
+            duration = (split_end - split_start).total_seconds()
+            hr_in_split = [h.value for h in hr_rows if split_start <= h.start_date <= split_end]
+            avg_hr = sum(hr_in_split) / len(hr_in_split) if hr_in_split else None
+            pace_sec_per_km = duration if duration > 0 else None
+            splits.append({
+                "n": split_num,
+                "pace_sec_per_km": pace_sec_per_km,
+                "avg_heart_rate": round(avg_hr, 1) if avg_hr else None,
+            })
+            split_start_distance += split_meters
+            split_start = split_end
+            split_num += 1
+    return splits
+
+
+@router.get("/workouts/records")
+async def workout_records(
+    years: list[int] | None = Query(None),
+    sources: list[str] | None = Query(None),
+    indoor: bool | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Personal Records for RUNNING activities (activity_type = 37), with
+    optional filters by year, source and indoor/outdoor. Returns the two
+    effective_types `type_37` (outdoor running) and `treadmill_run`
+    (indoor), filtered.
+
+    For each returns:
+      - overall: longest_distance / longest_duration / fastest_pace / most_calories
+      - at_distance: best time at ~5K / 10K / half / full marathon (+10% tolerance)
+      - best_single_km: fastest 1-km split reconstructed from DistanceWalkingRunning
+        samples, sampled from the top-10 candidates by average pace. Paces below
+        3:00/km are rejected as GPS-trace artifacts.
+    """
+    base_q = select(Workout.id).where(Workout.activity_type == 37)
+    if years:
+        base_q = base_q.where(func.extract("year", Workout.start_date).in_(years))
+    if sources:
+        base_q = base_q.where(Workout.source_name.in_(sources))
+    if indoor is not None:
+        if indoor:
+            base_q = base_q.where(Workout.metadata_["HKIndoorWorkout"].astext == "1")
+        else:
+            base_q = base_q.where(
+                (Workout.metadata_["HKIndoorWorkout"].astext != "1")
+                | Workout.metadata_["HKIndoorWorkout"].is_(None)
+            )
+    base_ids = [r[0] for r in (await db.execute(base_q)).all()]
+    if not base_ids:
+        return {"by_effective_type": []}
+
+    et_stmt = text(f"""
+        SELECT {EFFECTIVE_TYPE_SQL} AS effective_type,
+               MIN(activity_type) AS activity_type,
+               MIN(activity_name) AS activity_name,
+               COUNT(*) AS count
+        FROM workouts
+        WHERE id = ANY(:ids)
+        GROUP BY effective_type
+        ORDER BY count DESC
+    """).bindparams(ids=base_ids)
+    et_rows = (await db.execute(et_stmt)).all()
+
+    bucket_stmt = text(f"""
+        SELECT id, {EFFECTIVE_TYPE_SQL} AS effective_type
+        FROM workouts
+        WHERE id = ANY(:ids)
+    """).bindparams(ids=base_ids)
+    buckets: dict[str, list[int]] = {}
+    for r in (await db.execute(bucket_stmt)).all():
+        buckets.setdefault(r.effective_type, []).append(r.id)
+
+    pace_expr = Workout.duration * 1000.0 / Workout.total_distance
+
+    async def _best(ids, order_expr, require_non_null=None):
+        q = select(Workout).where(Workout.id.in_(ids))
+        if require_non_null is not None:
+            q = q.where(require_non_null.is_not(None)).where(require_non_null > 0)
+        q = q.order_by(order_expr).limit(1)
+        row = (await db.execute(q)).scalar_one_or_none()
+        return _workout_row_to_record(row)
+
+    async def _best_at(ids, target_km: float):
+        target_m = target_km * 1000.0
+        q = (
+            select(Workout)
+            .where(Workout.id.in_(ids))
+            .where(Workout.total_distance >= target_m)
+            .where(Workout.total_distance <= target_m * (1.0 + _DISTANCE_TARGET_TOL))
+            .where(Workout.duration.is_not(None))
+            .where(Workout.duration > 0)
+            .order_by(Workout.duration.asc())
+            .limit(1)
+        )
+        row = (await db.execute(q)).scalar_one_or_none()
+        rec = _workout_row_to_record(row)
+        if rec:
+            rec["target_km"] = target_km
+        return rec
+
+    async def _best_km(ids) -> dict | None:
+        cand_stmt = (
+            select(Workout)
+            .where(Workout.id.in_(ids))
+            .where(Workout.total_distance > 1000)
+            .where(Workout.duration.is_not(None))
+            .where(Workout.duration > 0)
+            .order_by(pace_expr.asc())
+            .limit(5)
+        )
+        candidates = (await db.execute(cand_stmt)).scalars().all()
+        PACE_FLOOR = 180.0  # 3:00/km — below is always a GPS artifact
+        best: dict | None = None
+        for w in candidates:
+            for s in await _splits_for_range(db, w.start_date, w.end_date):
+                pace = s.get("pace_sec_per_km")
+                if pace is None or pace < PACE_FLOOR:
+                    continue
+                if best is None or pace < best["pace_s_per_km"]:
+                    best = {
+                        "uuid": str(w.uuid),
+                        "start_date": w.start_date.isoformat(),
+                        "n": s["n"],
+                        "pace_s_per_km": pace,
+                        "avg_heart_rate": s.get("avg_heart_rate"),
+                    }
+        return best
+
+    result = []
+    for et in et_rows:
+        ids = buckets.get(et.effective_type, [])
+        if not ids:
+            continue
+        overall = {
+            "longest_distance": await _best(ids, Workout.total_distance.desc(), Workout.total_distance),
+            "longest_duration": await _best(ids, Workout.duration.desc(), Workout.duration),
+            "fastest_pace": await _best(
+                ids,
+                pace_expr.asc(),
+                Workout.total_distance,
+            ) if True else None,
+            "most_calories": await _best(ids, Workout.total_energy_burned.desc(), Workout.total_energy_burned),
+        }
+        # The fastest_pace query also needs a minimum distance guard; rerun
+        # with an explicit clause to avoid picking noise workouts (<100m).
+        fp_stmt = (
+            select(Workout)
+            .where(Workout.id.in_(ids))
+            .where(Workout.total_distance > 100)
+            .where(Workout.duration.is_not(None))
+            .where(Workout.duration > 0)
+            .order_by(pace_expr.asc())
+            .limit(1)
+        )
+        overall["fastest_pace"] = _workout_row_to_record((await db.execute(fp_stmt)).scalar_one_or_none())
+
+        at_distance = []
+        for target in _DISTANCE_TARGETS_KM:
+            rec = await _best_at(ids, target)
+            if rec:
+                at_distance.append(rec)
+
+        best_km = await _best_km(ids)
+
+        result.append({
+            "effective_type": et.effective_type,
+            "activity_type": et.activity_type,
+            "activity_name": et.activity_name,
+            "count": et.count,
+            "overall": overall,
+            "at_distance": at_distance,
+            "best_single_km": best_km,
+        })
+
+    return {"by_effective_type": result}
+
+
+@router.get("/workouts/records/facets")
+async def workout_records_facets(db: AsyncSession = Depends(get_db)):
+    """Facets for the /records page filter sidebar: years, sources, and
+    whether both outdoor/indoor running variants exist. Only running
+    (activity_type=37) is considered."""
+    base_clause = "WHERE activity_type = 37"
+    years_rows = (await db.execute(text(f"""
+        SELECT EXTRACT(YEAR FROM start_date)::int AS y, COUNT(*) AS c
+        FROM workouts {base_clause}
+        GROUP BY y ORDER BY y
+    """))).all()
+    source_rows = (await db.execute(text(f"""
+        SELECT source_name, COUNT(*) AS c
+        FROM workouts {base_clause} AND source_name IS NOT NULL
+        GROUP BY source_name ORDER BY c DESC
+    """))).all()
+    indoor_rows = (await db.execute(text(f"""
+        SELECT COALESCE(metadata->>'HKIndoorWorkout','0') AS ind, COUNT(*) AS c
+        FROM workouts {base_clause}
+        GROUP BY ind
+    """))).all()
+    indoor_counts = {r.ind: r.c for r in indoor_rows}
+    return {
+        "years": [{"year": r.y, "count": r.c} for r in years_rows],
+        "sources": [{"name": r.source_name, "count": r.c} for r in source_rows],
+        "indoor_count": indoor_counts.get("1", 0),
+        "outdoor_count": sum(v for k, v in indoor_counts.items() if k != "1"),
+    }
+
+
 @router.get("/workouts/facets")
 async def workout_facets(db: AsyncSession = Depends(get_db)):
     """

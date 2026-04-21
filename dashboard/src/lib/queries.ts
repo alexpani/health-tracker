@@ -18,6 +18,8 @@ import type {
   WorkoutDetail,
   WorkoutFacets,
   WorkoutFilters,
+  WorkoutRecords,
+  WorkoutRecordsFacets,
   WorkoutSplits,
   WriteInput,
 } from "./types"
@@ -274,6 +276,27 @@ export function useWorkoutFacets() {
     queryKey: ["workoutFacets"],
     queryFn: () => apiGet<WorkoutFacets>("/api/v1/workouts/facets"),
     staleTime: 5 * 60_000,
+  })
+}
+
+export function useWorkoutRecords(filters: { years?: number[]; sources?: string[]; indoor?: boolean } = {}) {
+  return useQuery({
+    queryKey: ["workoutRecords", filters],
+    queryFn: () => apiGet<WorkoutRecords>("/api/v1/workouts/records", {
+      years: filters.years as any,
+      sources: filters.sources,
+      indoor: filters.indoor !== undefined ? (filters.indoor ? "true" : "false") : undefined,
+    }),
+    staleTime: 10 * 60_000,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useWorkoutRecordsFacets() {
+  return useQuery({
+    queryKey: ["workoutRecordsFacets"],
+    queryFn: () => apiGet<WorkoutRecordsFacets>("/api/v1/workouts/records/facets"),
+    staleTime: 10 * 60_000,
   })
 }
 

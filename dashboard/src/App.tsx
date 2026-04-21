@@ -7,6 +7,7 @@ import Body from "@/pages/Body"
 import Sleep from "@/pages/Sleep"
 import Workouts from "@/pages/Workouts"
 import WorkoutDetail from "@/pages/WorkoutDetail"
+import Records from "@/pages/Records"
 import Nutrition from "@/pages/Nutrition"
 import Explore from "@/pages/Explore"
 import Fitness from "@/pages/Fitness"
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/sleep" element={<Sleep />} />
         <Route path="/workouts" element={<Workouts />} />
         <Route path="/workouts/:uuid" element={<WorkoutDetail />} />
+        <Route path="/records" element={<Records />} />
         <Route path="/fitness" element={<Fitness />} />
         <Route path="/nutrition" element={<Nutrition />} />
         <Route path="/explore" element={<Explore />} />

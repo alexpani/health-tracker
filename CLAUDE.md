@@ -136,6 +136,8 @@ Ordered history (most recent last):
   - `notes_contains`, `title_contains` (ILIKE %x%)
   - `limit` (max 10000), `offset`
 - `GET /api/v1/workouts/facets` — for filter sidebar: `effective_types` with counts, `sources`, `years` with counts, `distance_min/max`, `duration_min/max`
+- `GET /api/v1/workouts/records?years[]=&sources[]=&indoor=` — Personal records for RUNNING only (`activity_type=37`), with optional filters. Returns per-effective-type: `overall` (longest_distance/duration, fastest_pace, most_calories), `at_distance` (best time at ~5K/10K/21K/42K with +10% tolerance), `best_single_km` (fastest 1-km split reconstructed from DistanceWalkingRunning samples, top-5 candidates by average pace, paces < 3:00/km rejected as GPS artifacts). Completely decoupled from `/workouts` filters.
+- `GET /api/v1/workouts/records/facets` — year counts, source counts, indoor/outdoor counts for the running-only Records page sidebar.
 - `GET /api/v1/workouts/by-uuid/{uuid}` — single workout detail (includes notes + metadata)
 - `GET /api/v1/workouts/by-uuid/{uuid}/splits?distance_km=1.0` — per-km splits with duration, pace, avg HR
 - `DELETE /api/v1/workouts/by-uuid/{uuid}` — returns full snapshot for undo
@@ -291,6 +293,7 @@ docker compose up -d --build   # → http://192.168.68.190
 - `/sleep` — sleep analysis, stacked bar per night
 - `/workouts` — **main Workouts page** with **left sidebar filters** (year, activity, source, datetime, distance km, duration min, pace slider + presets, title search, notes search), summary cards, workouts-per-period chart with click-to-drilldown, **sortable** list table (click headers to sort asc/desc) with **title**, pace and truncated notes columns, row-level delete with 8s undo toast
 - `/workouts/:uuid` — **Apple Fitness-style detail**: page heading uses the custom title (fallback to activity name), metrics (duration, distance, calories, avg pace, avg/max HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), per-km splits table, **Intervalli** card (shown when `workout.activities` is present — rows colored grey for rest, shows start time / duration / distance / pace / avg+max HR / kcal per interval), time-series charts (HR, running speed, power, cadence), **editable title + notes** cards
+- `/records` — **Personal Records (running-only)**: dedicated page, intentionally independent from `/workouts` filters so the two UIs don't intersect. Own left sidebar with year chips (counts from running history), source chips, Outdoor/Indoor chips; all-time by default. Per `effective_type` (`type_37` outdoor + `treadmill_run` indoor) a card with: overall (longest distance, longest duration, fastest pace, most calories), "Record per distanza" (5K/10K/mezza/maratona when available, +10% tolerance), "Miglior km ever" (fastest reconstructed 1-km split, top-5 candidates, 3:00/km floor to reject GPS artifacts). Every record clickable → workout detail. Filters persisted in `sessionStorage` (`records_filters_v1`). Backed by `/api/v1/workouts/records` + `/records/facets`.
 - `/nutrition` — calories, macros, water, caffeine
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - `/explore` — universal browser: pick any sample type with full filter bar + chart + raw table

@@ -27,6 +27,59 @@ export interface WorkoutFacets {
   duration_max: number | null
 }
 
+export interface RecordEntry {
+  uuid: string
+  start_date: string
+  total_distance: number | null
+  duration: number | null
+  total_energy_burned?: number | null
+  pace_s_per_km?: number | null
+}
+
+export interface AtDistanceRecord extends RecordEntry {
+  target_km: number
+}
+
+export interface BestSingleKm {
+  uuid: string
+  start_date: string
+  n: number
+  pace_s_per_km: number
+  avg_heart_rate: number | null
+}
+
+export interface EffectiveTypeRecords {
+  effective_type: string
+  activity_type: number
+  activity_name: string | null
+  count: number
+  overall: {
+    longest_distance: RecordEntry | null
+    longest_duration: RecordEntry | null
+    fastest_pace: RecordEntry | null
+    most_calories: RecordEntry | null
+  }
+  at_distance: AtDistanceRecord[]
+  best_single_km: BestSingleKm | null
+}
+
+export interface WorkoutRecords {
+  by_effective_type: EffectiveTypeRecords[]
+}
+
+export interface WorkoutRecordsFacets {
+  years: { year: number; count: number }[]
+  sources: { name: string; count: number }[]
+  indoor_count: number
+  outdoor_count: number
+}
+
+export interface RecordsFilters {
+  years?: number[]
+  sources?: string[]
+  indoor?: boolean
+}
+
 export interface WorkoutFilters {
   start?: string
   end?: string
