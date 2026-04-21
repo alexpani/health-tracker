@@ -13,9 +13,21 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { useDiarioActivePlan, useDiarioDailyTotals, useDiarioSyncToHK } from "@/lib/queries"
-import type { DiarioDailyTotal, NutritionFilters } from "@/lib/types"
+import { useDiarioActivePlan, useDiarioDailyTotals, useDiarioSyncToHK, useSamples } from "@/lib/queries"
+import type { DiarioDailyTotal, NutritionFilters, Sample } from "@/lib/types"
 import { RefreshCw } from "lucide-react"
+
+// HealthKit dietary types we consolidate with the diario
+const HK_DIETARY_MAP = [
+  { key: "kcal",      type: "HKQuantityTypeIdentifierDietaryEnergyConsumed" },
+  { key: "protein_g", type: "HKQuantityTypeIdentifierDietaryProtein" },
+  { key: "fat_g",     type: "HKQuantityTypeIdentifierDietaryFatTotal" },
+  { key: "carbs_g",   type: "HKQuantityTypeIdentifierDietaryCarbohydrates" },
+] as const
+
+// Our own write source — excluded from consolidation to avoid double counting
+// (the diario total is already represented by our write into HealthKit).
+const OUR_WRITE_SOURCE = "Health Tracker"
 
 interface Props {
   filters: NutritionFilters
@@ -71,12 +83,84 @@ export function DiarioSection({ filters }: Props) {
   const today = todayLocalISO()
   const todayEntry = (allDaily ?? []).find(d => d.date === today) ?? null
 
+  // Fetch ALL-TIME dietary samples from HealthKit, once per type.
+  // Cached 1 min via useSamples default. We aggregate + consolidate client-side.
+  const hkKcal    = useSamples({ type: HK_DIETARY_MAP[0].type, aggregation: "none", limit: 10000 })
+  const hkProtein = useSamples({ type: HK_DIETARY_MAP[1].type, aggregation: "none", limit: 10000 })
+  const hkFat     = useSamples({ type: HK_DIETARY_MAP[2].type, aggregation: "none", limit: 10000 })
+  const hkCarbs   = useSamples({ type: HK_DIETARY_MAP[3].type, aggregation: "none", limit: 10000 })
+
+  // Build per-day, per-type sum of external-source (i.e. NOT our own write)
+  // dietary samples, keyed by local-date string.
+  const hkExternalByDay = useMemo(() => {
+    const map: Record<string, { kcal: number; protein_g: number; fat_g: number; carbs_g: number }> = {}
+    const accumulate = (samples: Sample[] | undefined, key: "kcal" | "protein_g" | "fat_g" | "carbs_g") => {
+      if (!samples) return
+      for (const s of samples) {
+        if ((s.source_name ?? "") === OUR_WRITE_SOURCE) continue
+        const d = new Date(s.start_date)
+        const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+        if (!map[localDate]) map[localDate] = { kcal: 0, protein_g: 0, fat_g: 0, carbs_g: 0 }
+        map[localDate][key] += s.value
+      }
+    }
+    accumulate(hkKcal.data?.data as Sample[] | undefined, "kcal")
+    accumulate(hkProtein.data?.data as Sample[] | undefined, "protein_g")
+    accumulate(hkFat.data?.data as Sample[] | undefined, "fat_g")
+    accumulate(hkCarbs.data?.data as Sample[] | undefined, "carbs_g")
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hkKcal.data, hkProtein.data, hkFat.data, hkCarbs.data])
+
+  const todayHkExternal = hkExternalByDay[today] ?? { kcal: 0, protein_g: 0, fat_g: 0, carbs_g: 0 }
+  const todayHasExternal = todayHkExternal.kcal > 0 || todayHkExternal.protein_g > 0 ||
+    todayHkExternal.fat_g > 0 || todayHkExternal.carbs_g > 0
+  // Consolidated today values = diario + external HK
+  const todayConsolidated = todayEntry ? {
+    kcal: todayEntry.kcal + todayHkExternal.kcal,
+    protein_g: todayEntry.protein_g + todayHkExternal.protein_g,
+    fat_g: todayEntry.fat_g + todayHkExternal.fat_g,
+    carbs_g: todayEntry.carbs_g + todayHkExternal.carbs_g,
+  } : todayHasExternal ? {
+    kcal: todayHkExternal.kcal,
+    protein_g: todayHkExternal.protein_g,
+    fat_g: todayHkExternal.fat_g,
+    carbs_g: todayHkExternal.carbs_g,
+  } : null
+
+  // Consolidate diario + external HK into a single day-indexed list.
+  // Days with only diario, only HK-external, or both are all included.
+  const consolidatedDaily = useMemo<DiarioDailyTotal[]>(() => {
+    const byDate = new Map<string, DiarioDailyTotal>()
+    for (const d of (allDaily ?? [])) {
+      byDate.set(d.date, { ...d })
+    }
+    for (const [date, hk] of Object.entries(hkExternalByDay)) {
+      const existing = byDate.get(date)
+      if (existing) {
+        existing.kcal += hk.kcal
+        existing.protein_g += hk.protein_g
+        existing.fat_g += hk.fat_g
+        existing.carbs_g += hk.carbs_g
+      } else {
+        byDate.set(date, {
+          date,
+          kcal: hk.kcal,
+          protein_g: hk.protein_g,
+          fat_g: hk.fat_g,
+          carbs_g: hk.carbs_g,
+          kcal_target: null,
+        })
+      }
+    }
+    return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
+  }, [allDaily, hkExternalByDay])
+
   // Apply filters to the history card (not to plan or today).
   const filtered = useMemo<DiarioDailyTotal[]>(() => {
-    if (!allDaily) return []
     const startMs = filters.start ? new Date(filters.start).getTime() : null
     const endMs = filters.end ? new Date(filters.end).getTime() : null
-    return allDaily.filter(d => {
+    return consolidatedDaily.filter(d => {
       const t = new Date(d.date + "T12:00:00").getTime()
       if (startMs !== null && t < startMs) return false
       if (endMs !== null && t > endMs) return false
@@ -88,12 +172,11 @@ export function DiarioSection({ filters }: Props) {
         if (filters.adherence === "over" && ratio <= 1.1) return false
         if (filters.adherence === "on_target" && (ratio < 0.9 || ratio > 1.1)) return false
       } else if (filters.adherence && !d.kcal_target) {
-        // No target → can't classify; exclude from strict adherence filters
         return false
       }
       return true
     })
-  }, [allDaily, filters.start, filters.end, filters.kcal_min, filters.kcal_max, filters.adherence])
+  }, [consolidatedDaily, filters.start, filters.end, filters.kcal_min, filters.kcal_max, filters.adherence])
 
   const stats = useMemo(() => {
     if (filtered.length === 0) return null
@@ -192,32 +275,44 @@ export function DiarioSection({ filters }: Props) {
         </CardContent>
       </Card>
 
-      {/* Oggi */}
+      {/* Oggi — consolidato (diario + sorgenti HealthKit esterne) */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle>Oggi</CardTitle>
+          <CardTitle className="flex items-center justify-between">
+            <span>Oggi</span>
+            {todayHasExternal && (
+              <span className="text-xs font-normal text-muted-foreground">
+                Consolidato (diario + HealthKit)
+              </span>
+            )}
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          {!todayEntry && (
-            <p className="text-sm text-muted-foreground">Nessun pasto registrato oggi sul diario.</p>
+          {!todayConsolidated && (
+            <p className="text-sm text-muted-foreground">Nessun dato alimentare registrato oggi.</p>
           )}
-          {todayEntry && (
+          {todayConsolidated && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <ProgressBar value={todayEntry.kcal} target={plan?.kcal_target ?? todayEntry.kcal_target}
+                <ProgressBar value={todayConsolidated.kcal} target={plan?.kcal_target ?? todayEntry?.kcal_target}
                   unit="kcal" label="Calorie" color="#8b5cf6" />
-                <ProgressBar value={todayEntry.protein_g} target={plan?.protein_g}
+                <ProgressBar value={todayConsolidated.protein_g} target={plan?.protein_g}
                   unit="g" label="Proteine" color="#10b981" />
-                <ProgressBar value={todayEntry.fat_g} target={plan?.fat_g}
+                <ProgressBar value={todayConsolidated.fat_g} target={plan?.fat_g}
                   unit="g" label="Grassi" color="#f59e0b" />
-                <ProgressBar value={todayEntry.carbs_g} target={plan?.carbs_g}
+                <ProgressBar value={todayConsolidated.carbs_g} target={plan?.carbs_g}
                   unit="g" label="Carboidrati" color="#ef4444" />
               </div>
+              {todayHasExternal && (
+                <p className="text-xs text-muted-foreground mt-3 tabular-nums">
+                  Diario {todayEntry?.kcal ?? 0} + HealthKit esterne {Math.round(todayHkExternal.kcal)} = {Math.round(todayConsolidated.kcal)} kcal
+                </p>
+              )}
               {plan?.kcal_target && (
-                <p className="text-xs text-muted-foreground mt-4 tabular-nums">
-                  {todayEntry.kcal > plan.kcal_target
-                    ? <>+{todayEntry.kcal - plan.kcal_target} kcal sopra il target</>
-                    : <>-{plan.kcal_target - todayEntry.kcal} kcal sotto il target</>}
+                <p className="text-xs text-muted-foreground mt-1 tabular-nums">
+                  {todayConsolidated.kcal > plan.kcal_target
+                    ? <>+{Math.round(todayConsolidated.kcal - plan.kcal_target)} kcal sopra il target</>
+                    : <>-{Math.round(plan.kcal_target - todayConsolidated.kcal)} kcal sotto il target</>}
                 </p>
               )}
             </>

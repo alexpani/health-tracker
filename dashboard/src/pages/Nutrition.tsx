@@ -5,7 +5,7 @@ import { DiarioSection } from "@/components/DiarioSection"
 import { NutritionFiltersSidebar } from "@/components/NutritionFiltersSidebar"
 import { TypeBrowser } from "@/components/TypeBrowser"
 import { CATEGORIES } from "@/lib/healthkit"
-import { useDiarioDailyTotals } from "@/lib/queries"
+import { useDiarioDailyTotals, useSampleFacets } from "@/lib/queries"
 import type { NutritionFilters } from "@/lib/types"
 
 const STORAGE_KEY = "nutrition_filters_v1"
@@ -32,13 +32,17 @@ export default function Nutrition() {
     try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ filters })) } catch {}
   }, [filters])
 
-  // Year chips: derive from all-time daily totals (same query DiarioSection uses, cached)
+  // Year chips: derive from the union of (a) diario daily-totals and (b)
+  // HealthKit dietary facets — so a year with ONLY Lifesum samples (e.g.
+  // 2015, before the diario existed) still shows up as a filter chip.
   const { data: allDaily } = useDiarioDailyTotals("2010-01-01", todayLocalISO())
+  const { data: facetKcal } = useSampleFacets("HKQuantityTypeIdentifierDietaryEnergyConsumed")
   const availableYears = useMemo(() => {
     const set = new Set<number>()
     ;(allDaily ?? []).forEach(d => set.add(Number(d.date.slice(0, 4))))
+    ;(facetKcal?.years ?? []).forEach(y => set.add(y.year))
     return Array.from(set).sort((a, b) => b - a)
-  }, [allDaily])
+  }, [allDaily, facetKcal])
 
   const activeFiltersCount = [
     filters.start, filters.end,
