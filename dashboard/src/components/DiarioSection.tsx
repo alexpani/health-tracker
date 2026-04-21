@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import {
   Bar,
   CartesianGrid,
@@ -11,10 +11,13 @@ import {
   YAxis,
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useDiarioActivePlan, useDiarioDailyTotals } from "@/lib/queries"
-import type { DiarioDailyTotal } from "@/lib/types"
+import type { DiarioDailyTotal, NutritionFilters } from "@/lib/types"
+
+interface Props {
+  filters: NutritionFilters
+}
 
 function formatDateShort(iso: string): string {
   const d = new Date(iso + "T00:00:00")
@@ -23,12 +26,6 @@ function formatDateShort(iso: string): string {
 
 function todayLocalISO(): string {
   const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-}
-
-function daysAgoLocalISO(days: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - days)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
@@ -47,13 +44,11 @@ function ProgressBar({ value, target, unit, label, color }: {
         </span>
       </div>
       <div className="h-2 bg-muted rounded overflow-hidden">
-        <div
-          className="h-full transition-all"
+        <div className="h-full transition-all"
           style={{
             width: `${capped}%`,
             background: pct > 110 ? "#ef4444" : pct > 100 ? "#f59e0b" : color,
-          }}
-        />
+          }} />
       </div>
       <p className="text-xs tabular-nums">
         <span className="font-medium">{value.toLocaleString("it-IT", { maximumFractionDigits: 1 })}</span>
@@ -63,25 +58,59 @@ function ProgressBar({ value, target, unit, label, color }: {
   )
 }
 
-export function DiarioSection() {
-  const [rangeDays, setRangeDays] = useState(30)
-
+export function DiarioSection({ filters }: Props) {
   const { data: plan, isLoading: planLoading, isError: planError, error: planErr } = useDiarioActivePlan()
 
-  const from = daysAgoLocalISO(rangeDays - 1)
-  const to = todayLocalISO()
-  const { data: daily, isError: dailyError, error: dailyErr } = useDiarioDailyTotals(from, to)
-
-  const dailyByDate = useMemo(() => {
-    const m = new Map<string, DiarioDailyTotal>()
-    ;(daily ?? []).forEach(d => m.set(d.date, d))
-    return m
-  }, [daily])
+  // Fetch ALL daily totals once (all-time), then filter client-side. The table
+  // is ~one row per day so 10 years ≈ 3650 entries — trivial.
+  const { data: allDaily, isError: dailyError, error: dailyErr } =
+    useDiarioDailyTotals("2010-01-01", todayLocalISO())
 
   const today = todayLocalISO()
-  const todayEntry = dailyByDate.get(today) ?? null
+  const todayEntry = (allDaily ?? []).find(d => d.date === today) ?? null
 
-  // Error states
+  // Apply filters to the history card (not to plan or today).
+  const filtered = useMemo<DiarioDailyTotal[]>(() => {
+    if (!allDaily) return []
+    const startMs = filters.start ? new Date(filters.start).getTime() : null
+    const endMs = filters.end ? new Date(filters.end).getTime() : null
+    return allDaily.filter(d => {
+      const t = new Date(d.date + "T12:00:00").getTime()
+      if (startMs !== null && t < startMs) return false
+      if (endMs !== null && t > endMs) return false
+      if (filters.kcal_min !== undefined && d.kcal < filters.kcal_min) return false
+      if (filters.kcal_max !== undefined && d.kcal > filters.kcal_max) return false
+      if (filters.adherence && d.kcal_target) {
+        const ratio = d.kcal / d.kcal_target
+        if (filters.adherence === "under" && ratio >= 0.9) return false
+        if (filters.adherence === "over" && ratio <= 1.1) return false
+        if (filters.adherence === "on_target" && (ratio < 0.9 || ratio > 1.1)) return false
+      } else if (filters.adherence && !d.kcal_target) {
+        // No target → can't classify; exclude from strict adherence filters
+        return false
+      }
+      return true
+    })
+  }, [allDaily, filters.start, filters.end, filters.kcal_min, filters.kcal_max, filters.adherence])
+
+  const stats = useMemo(() => {
+    if (filtered.length === 0) return null
+    const n = filtered.length
+    const sum = filtered.reduce((acc, d) => ({
+      kcal: acc.kcal + d.kcal,
+      protein: acc.protein + d.protein_g,
+      fat: acc.fat + d.fat_g,
+      carbs: acc.carbs + d.carbs_g,
+    }), { kcal: 0, protein: 0, fat: 0, carbs: 0 })
+    return {
+      count: n,
+      avgKcal: sum.kcal / n,
+      avgProtein: sum.protein / n,
+      avgFat: sum.fat / n,
+      avgCarbs: sum.carbs / n,
+    }
+  }, [filtered])
+
   const planMissing = planError && (planErr as any)?.message?.includes("404")
 
   return (
@@ -166,34 +195,50 @@ export function DiarioSection() {
         </CardContent>
       </Card>
 
-      {/* Trend */}
+      {/* Storico filtrato */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center justify-between">
             <span>Storico</span>
-            <div className="flex gap-1">
-              {[7, 30, 90].map(d => (
-                <Button key={d} size="sm"
-                  variant={rangeDays === d ? "default" : "outline"}
-                  className="h-7 px-2 text-xs"
-                  onClick={() => setRangeDays(d)}>
-                  {d}g
-                </Button>
-              ))}
-            </div>
+            {stats && (
+              <span className="text-xs font-normal text-muted-foreground tabular-nums">
+                {stats.count} giorni · media {Math.round(stats.avgKcal)} kcal
+              </span>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
           {dailyError && (
             <p className="text-sm text-destructive">Errore caricamento storico: {(dailyErr as Error)?.message}</p>
           )}
-          {daily && daily.length === 0 && (
-            <p className="text-sm text-muted-foreground py-8">Nessuna voce nel periodo.</p>
+          {!dailyError && filtered.length === 0 && (
+            <p className="text-sm text-muted-foreground py-8">Nessun giorno corrisponde ai filtri correnti.</p>
           )}
-          {daily && daily.length > 0 && (
+          {filtered.length > 0 && (
             <>
+              {stats && (
+                <div className="grid grid-cols-4 gap-3 mb-4">
+                  <div className="p-2 rounded-md border text-center">
+                    <p className="text-[11px] text-muted-foreground">Media kcal</p>
+                    <p className="text-lg font-semibold tabular-nums">{Math.round(stats.avgKcal)}</p>
+                  </div>
+                  <div className="p-2 rounded-md border text-center">
+                    <p className="text-[11px] text-muted-foreground">Media proteine</p>
+                    <p className="text-lg font-semibold tabular-nums">{stats.avgProtein.toFixed(1)}<span className="text-xs text-muted-foreground font-normal ml-0.5">g</span></p>
+                  </div>
+                  <div className="p-2 rounded-md border text-center">
+                    <p className="text-[11px] text-muted-foreground">Media grassi</p>
+                    <p className="text-lg font-semibold tabular-nums">{stats.avgFat.toFixed(1)}<span className="text-xs text-muted-foreground font-normal ml-0.5">g</span></p>
+                  </div>
+                  <div className="p-2 rounded-md border text-center">
+                    <p className="text-[11px] text-muted-foreground">Media carbs</p>
+                    <p className="text-lg font-semibold tabular-nums">{stats.avgCarbs.toFixed(1)}<span className="text-xs text-muted-foreground font-normal ml-0.5">g</span></p>
+                  </div>
+                </div>
+              )}
+
               <ResponsiveContainer width="100%" height={260}>
-                <ComposedChart data={daily}>
+                <ComposedChart data={filtered}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }}
                     tickFormatter={s => new Date(s + "T00:00:00").toLocaleDateString("it-IT", { day: "2-digit", month: "short" })}
@@ -204,8 +249,7 @@ export function DiarioSection() {
                     formatter={(v: any, name: any) => [
                       typeof v === "number" ? v.toLocaleString("it-IT") : v,
                       name === "kcal" ? "Consumato" : "Target",
-                    ]}
-                  />
+                    ]} />
                   <Legend formatter={(v) => v === "kcal" ? "Consumato (kcal)" : "Target (kcal)"} />
                   <Bar dataKey="kcal" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
                   <Line type="monotone" dataKey="kcal_target" stroke="#f59e0b" strokeDasharray="5 5" strokeWidth={1.5} dot={false} />
@@ -225,7 +269,7 @@ export function DiarioSection() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {[...daily].reverse().slice(0, 10).map(d => {
+                    {[...filtered].reverse().slice(0, 15).map(d => {
                       const delta = d.kcal_target != null ? d.kcal - d.kcal_target : null
                       const deltaColor = delta == null ? "text-muted-foreground"
                         : Math.abs(delta) < 50 ? "text-muted-foreground"
@@ -246,9 +290,9 @@ export function DiarioSection() {
                     })}
                   </TableBody>
                 </Table>
-                {daily.length > 10 && (
+                {filtered.length > 15 && (
                   <p className="text-xs text-muted-foreground mt-2">
-                    Mostrati ultimi 10 giorni (totali {daily.length})
+                    Mostrati ultimi 15 giorni filtrati (totali {filtered.length})
                   </p>
                 )}
               </div>

@@ -317,6 +317,15 @@ export interface DiarioDailyTotal {
   kcal_target: number | null
 }
 
+export interface NutritionFilters {
+  start?: string  // ISO date or datetime
+  end?: string
+  years?: number[]
+  kcal_min?: number
+  kcal_max?: number
+  adherence?: "under" | "on_target" | "over"  // ±10% tolerance for on_target
+}
+
 export interface BodyFilters {
   start?: string
   end?: string
