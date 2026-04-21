@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react"
 import {
-  Area,
-  AreaChart,
+  Bar,
   CartesianGrid,
+  ComposedChart,
   Legend,
   Line,
   ResponsiveContainer,
@@ -193,13 +193,7 @@ export function DiarioSection() {
           {daily && daily.length > 0 && (
             <>
               <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={daily}>
-                  <defs>
-                    <linearGradient id="kcalGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
+                <ComposedChart data={daily}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }}
                     tickFormatter={s => new Date(s + "T00:00:00").toLocaleDateString("it-IT", { day: "2-digit", month: "short" })}
@@ -213,9 +207,9 @@ export function DiarioSection() {
                     ]}
                   />
                   <Legend formatter={(v) => v === "kcal" ? "Consumato (kcal)" : "Target (kcal)"} />
-                  <Area type="monotone" dataKey="kcal" stroke="#8b5cf6" strokeWidth={2} fill="url(#kcalGrad)" />
+                  <Bar dataKey="kcal" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
                   <Line type="monotone" dataKey="kcal_target" stroke="#f59e0b" strokeDasharray="5 5" strokeWidth={1.5} dot={false} />
-                </AreaChart>
+                </ComposedChart>
               </ResponsiveContainer>
 
               <div className="mt-4 overflow-x-auto">
