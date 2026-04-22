@@ -115,6 +115,8 @@ Ordered history (most recent last):
 - `delete.py` — `/api/v1/delete/*` workflow for bulk deletion via iOS.
 - `rules.py` — `/api/v1/rules` CRUD + summary + reset-stats.
 - `blacklist.py` — `/api/v1/blacklist` list/add/remove + `purge-and-blacklist` (atomic delete + blacklist).
+- `diario.py` — read-only proxy to `diario-alimentare` + `/sync-to-hk` reconciler (see Diario section below).
+- `stretching.py` — read-only proxy to `alexpani/stretching` (`/sessions`, `/sessions/{id}`, `/routines`, `/exercises`). No writes, no HK sync.
 
 ### Main API Endpoints
 
@@ -285,8 +287,8 @@ docker compose up -d --build   # → http://192.168.68.190
 ### Key Files
 
 - `src/lib/api.ts` — `apiGet` / `apiPost` / `apiPatch` / `apiDelete`, with array query-param support
-- `src/lib/queries.ts` — TanStack Query hooks: samples, facets, correlated, bulk-delete, writes, rules, blacklist, workouts, workout detail, splits, delete/update/restore workout, sync sessions/status, write allowed types
-- `src/lib/types.ts` — TypeScript types matching backend schemas (Sample, AggregatedPoint, SamplesResponse, Workout, WorkoutDetail, WorkoutFilters, WorkoutFacets, EffectiveTypeFacet, IngestRule, RulesSummary, BlacklistEntry, PendingWrite, SyncSession, SyncStatus, CorrelatedSample, ...)
+- `src/lib/queries.ts` — TanStack Query hooks: samples, facets, correlated, bulk-delete, writes, rules, blacklist, workouts, workout detail, splits, delete/update/restore workout, sync sessions/status, write allowed types, diario (`useDiarioActivePlan`/`useDiarioDailyTotals`/`useDiarioSyncToHK`), stretching (`useStretchingSessions`/`useStretchingRoutines`)
+- `src/lib/types.ts` — TypeScript types matching backend schemas (Sample, AggregatedPoint, SamplesResponse, Workout, WorkoutDetail, WorkoutFilters, WorkoutFacets, EffectiveTypeFacet, IngestRule, RulesSummary, BlacklistEntry, PendingWrite, SyncSession, SyncStatus, CorrelatedSample, DiarioPlan, DiarioDailyTotal, StretchingSession, StretchingRoutine, ...)
 - `src/lib/healthkit.ts` — master HK type → label/unit/color/multiplier mapping (`TYPE_META`), categories (`CATEGORIES`: activity, vitals, body, nutrition, fitness, other), sleep stages, workout activity type names (`WORKOUT_NAMES` — full HKWorkoutActivityType table), `workoutName(type, metadata)` with indoor + swim-location detection, `effectiveTypeLabel(slug, activityType)`, `extractWorkoutMetadata()` (parses HKIndoorWorkout, HKSwimmingLocationType, HKLapLength, elevation, METs, weather, brand, notes)
 - `src/lib/utils.ts` — cn(), formatNumber, formatDate, formatDateTime
 - `src/components/ui/` — shadcn components: button (variants incl. destructive), card, tabs, select, table, input, label, textarea, **slider** (Radix-based)
