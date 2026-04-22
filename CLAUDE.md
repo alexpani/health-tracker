@@ -182,6 +182,14 @@ Ordered history (most recent last):
 - `GET /api/v1/diario/daily-totals?from=YYYY-MM-DD&to=YYYY-MM-DD` → proxies the equivalent upstream endpoint. Returns `[{date, kcal, protein_g, fat_g, carbs_g, kcal_target}]`, one entry per day that has at least one diary record. `kcal_target` is the snapshot of the plan in effect that day.
 - `POST /api/v1/diario/sync-to-hk[?from=&to=]` — idempotent reconciler that pushes the diario daily totals into Apple Health via the existing `PendingWrite`/`PendingDeletion` queues. For every (day, dietary type) pair whose diario value differs from what's tracked in the `diario_hk_sync` table, enqueues a delete of the old HK sample (if any) and a write of the new one. The iOS app processes these through `processPendingWrites`/`processPendingDeletions` at the next Sync Now. Returns `{queued_writes, queued_deletions, unchanged, days_considered}`. No cron on the backend — sync travels on the same loop as body-metric writes. Confirming a `PendingWrite` also backfills `diario_hk_sync.hk_uuid` so the next reconcile can delete it if the day's total changes.
 
+**Stretching proxy** (read-only, forwards to `alexpani/stretching`)
+- Base URL of the upstream stretching service configured via env `STRETCHING_BASE_URL` (default `http://192.168.68.150:3100`)
+- `GET /api/v1/stretching/sessions?from=YYYY-MM-DD&to=YYYY-MM-DD` → proxies `GET /api/external/sessions`. Returns `[{id, routine_id, routine_name, started_at, ended_at, duration_sec, items_total, items_skipped, notes, workout_activity_type:"flexibility"}]`.
+- `GET /api/v1/stretching/sessions/{id}` → single session detail.
+- `GET /api/v1/stretching/routines` → list of available routines.
+- `GET /api/v1/stretching/exercises` → list of exercises.
+- No writes, no HealthKit sync (for now). The dashboard just visualizes what the stretching PWA records; cancellations are done in the PWA itself.
+
 ### Ingest Rules semantics
 
 Applied in this order:
@@ -303,6 +311,7 @@ docker compose up -d --build   # → http://192.168.68.190
 - `/workouts/:uuid` — **Apple Fitness-style detail**: page heading uses the custom title (fallback to activity name), metrics (duration, distance, calories, avg pace, avg/max HR), "Informazioni aggiuntive" card (indoor/outdoor, swim location, lap length, elevation, METs, weather, brand), per-km splits table, **Intervalli** card (shown when `workout.activities` is present — rows colored grey for rest, shows start time / duration / distance / pace / avg+max HR / kcal per interval), time-series charts (HR, running speed, power, cadence), **editable title + notes** cards
 - `/records` — **Personal Records (running-only)**: dedicated page, intentionally independent from `/workouts` filters so the two UIs don't intersect. Own left sidebar with year chips (counts from running history), source chips, Outdoor/Indoor chips; all-time by default. Per `effective_type` (`type_37` outdoor + `treadmill_run` indoor) a card with: overall (longest distance, longest duration, fastest pace, most calories), "Record per distanza" (5K/10K/mezza/maratona when available, +10% tolerance), "Miglior km ever" (fastest reconstructed 1-km split, top-5 candidates, 3:00/km floor to reject GPS artifacts). Every record clickable → workout detail. Filters persisted in `sessionStorage` (`records_filters_v1`). Backed by `/api/v1/workouts/records` + `/records/facets`.
 - `/nutrition` — top section: **Diario alimentare** integration (piano attivo con kcal/protein/fat/carbs target, card "Oggi" con 4 progress bar consumato vs target, trend 7/30/90 giorni con area chart kcal consumate + linea tratteggiata target + tabella). Bottom section: HealthKit nutrition (calories, macros, water, caffeine) via TypeBrowser. Dati diario fetched via proxy `/api/v1/diario/*` (vedi sotto).
+- `/stretching` — visualizzazione read-only delle sessioni stretching registrate dall'app PWA (`alexpani/stretching`). Selettore periodo (default ultimi 30 gg), 4 card stats (sessioni, tempo totale, streak corrente, streak max su giorni locali), **BarChart minuti/giorno** con gap-fill dei giorni vuoti, tabella sessioni ordinata per `started_at` desc con routine, durata, completati/totali, note. Nessuna scrittura né sync HealthKit — i dati vivono nel DB della PWA, questa pagina li proxya via `/api/v1/stretching/*` (cache TanStack Query 30s).
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - `/explore` — universal browser: pick any sample type with full filter bar + chart + raw table
 - `/insert` — form to queue body/nutrition writes for Apple Health
