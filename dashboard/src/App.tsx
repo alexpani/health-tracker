@@ -9,6 +9,7 @@ import Workouts from "@/pages/Workouts"
 import WorkoutDetail from "@/pages/WorkoutDetail"
 import Records from "@/pages/Records"
 import Nutrition from "@/pages/Nutrition"
+import Stretching from "@/pages/Stretching"
 import Explore from "@/pages/Explore"
 import Fitness from "@/pages/Fitness"
 import Insert from "@/pages/Insert"
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/records" element={<Records />} />
         <Route path="/fitness" element={<Fitness />} />
         <Route path="/nutrition" element={<Nutrition />} />
+        <Route path="/stretching" element={<Stretching />} />
         <Route path="/explore" element={<Explore />} />
         <Route path="/insert" element={<Insert />} />
         <Route path="/settings" element={<Settings />} />

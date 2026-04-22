@@ -317,6 +317,27 @@ export interface DiarioDailyTotal {
   kcal_target: number | null
 }
 
+export interface StretchingSession {
+  id: number | string
+  routine_id: number | string | null
+  routine_name: string
+  started_at: string       // ISO UTC
+  ended_at: string         // ISO UTC
+  duration_sec: number
+  items_total: number
+  items_skipped: number
+  notes: string | null
+  workout_activity_type: "flexibility"
+}
+
+export interface StretchingRoutine {
+  id: number | string
+  name: string
+  description: string | null
+  items_total: number
+  duration_sec: number
+}
+
 export interface NutritionFilters {
   start?: string  // ISO date or datetime
   end?: string

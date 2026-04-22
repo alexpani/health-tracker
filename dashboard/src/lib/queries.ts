@@ -7,6 +7,8 @@ import type {
   CorrelatedSample,
   DiarioDailyTotal,
   DiarioPlan,
+  StretchingRoutine,
+  StretchingSession,
   IngestRule,
   LatestSampleResponse,
   PendingWrite,
@@ -323,6 +325,22 @@ export interface DiarioSyncResult {
 export function useDiarioSyncToHK() {
   return useMutation({
     mutationFn: () => apiPost<DiarioSyncResult>("/api/v1/diario/sync-to-hk", {}),
+  })
+}
+
+export function useStretchingSessions(from: string, to: string) {
+  return useQuery({
+    queryKey: ["stretchingSessions", from, to],
+    queryFn: () => apiGet<StretchingSession[]>("/api/v1/stretching/sessions", { from, to }),
+    staleTime: 30_000,
+  })
+}
+
+export function useStretchingRoutines() {
+  return useQuery({
+    queryKey: ["stretchingRoutines"],
+    queryFn: () => apiGet<StretchingRoutine[]>("/api/v1/stretching/routines"),
+    staleTime: 5 * 60_000,
   })
 }
 

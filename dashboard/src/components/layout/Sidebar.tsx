@@ -10,7 +10,9 @@ import {
   PlusCircle,
   Scale,
   Settings as SettingsIcon,
+  StretchHorizontal,
   Trophy,
+
   Zap,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -25,6 +27,7 @@ const navItems = [
   { to: "/records", label: "Record", icon: Trophy },
   { to: "/fitness", label: "Fitness", icon: Zap },
   { to: "/nutrition", label: "Nutrizione", icon: Apple },
+  { to: "/stretching", label: "Stretching", icon: StretchHorizontal },
   { to: "/explore", label: "Esplora", icon: Compass },
   { to: "/insert", label: "Inserisci", icon: PlusCircle },
   { to: "/settings", label: "Impostazioni", icon: SettingsIcon },
