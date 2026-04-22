@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -88,6 +89,38 @@ function computeStats(sessions: StretchingSession[]): Stats {
   return { count, totalSec, currentStreak, maxStreak }
 }
 
+interface DailyPoint {
+  date: string       // YYYY-MM-DD local
+  minutes: number    // rounded to 1 decimal
+  sessions: number
+}
+
+// Build a day-by-day series across [from, to] inclusive, filling gaps with 0.
+function buildDailySeries(sessions: StretchingSession[], from: string, to: string): DailyPoint[] {
+  const byDay = new Map<string, { sec: number; count: number }>()
+  for (const s of sessions) {
+    const key = localDayKey(s.started_at)
+    const cur = byDay.get(key) ?? { sec: 0, count: 0 }
+    cur.sec += s.duration_sec || 0
+    cur.count += 1
+    byDay.set(key, cur)
+  }
+  const out: DailyPoint[] = []
+  const start = new Date(from + "T00:00:00")
+  const end = new Date(to + "T00:00:00")
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return out
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+    const v = byDay.get(key)
+    out.push({
+      date: key,
+      minutes: v ? Math.round((v.sec / 60) * 10) / 10 : 0,
+      sessions: v ? v.count : 0,
+    })
+  }
+  return out
+}
+
 function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <Card>
@@ -108,6 +141,7 @@ export default function Stretching() {
   const sessions = useMemo(() => data ?? [], [data])
 
   const stats = useMemo(() => computeStats(sessions), [sessions])
+  const dailySeries = useMemo(() => buildDailySeries(sessions, from, to), [sessions, from, to])
 
   const sorted = useMemo(
     () => [...sessions].sort((a, b) => b.started_at.localeCompare(a.started_at)),
@@ -145,6 +179,45 @@ export default function Stretching() {
         <StatCard label="Streak corrente" value={`${stats.currentStreak} gg`} hint="giorni consecutivi fino a oggi" />
         <StatCard label="Streak max" value={`${stats.maxStreak} gg`} hint="nel periodo selezionato" />
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Minuti per giorno</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {dailySeries.length === 0 ? (
+            <p className="text-muted-foreground">Range non valido.</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={dailySeries}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={s => new Date(s + "T00:00:00").toLocaleDateString("it-IT", { day: "2-digit", month: "short" })}
+                  minTickGap={30}
+                />
+                <YAxis tick={{ fontSize: 11 }} label={{ value: "min", angle: -90, position: "insideLeft", fontSize: 11 }} />
+                <Tooltip
+                  labelFormatter={(label) =>
+                    new Date((label as string) + "T00:00:00").toLocaleDateString("it-IT", {
+                      weekday: "short", day: "2-digit", month: "short", year: "numeric",
+                    })
+                  }
+                  formatter={(v: any, name: any, entry: any) => {
+                    if (name === "minutes") {
+                      const sessCount = entry?.payload?.sessions ?? 0
+                      return [`${v} min (${sessCount} ses.)`, "Stretching"]
+                    }
+                    return [v, name]
+                  }}
+                />
+                <Bar dataKey="minutes" fill="#10b981" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
