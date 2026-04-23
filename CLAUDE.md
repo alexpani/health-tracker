@@ -318,6 +318,8 @@ docker compose up -d --build   # → http://192.168.68.190
 - `/lab/panels/:id/review` — Review screen: link al PDF originale via `API_URL/api/v1/lab/documents/{doc_id}/file`, tabella editabile dei `lab_results` con datalist di autocomplete dal catalogo analiti, pulsante "salva alias" per imparare il nome grezzo. Sticky bottom bar con "Conferma referto" (disabled finché ogni riga ha un `analyte_id`). Se confermato: modalità read-only, nessuna sticky bar. Badge per riga: "da rivedere" (amber) / "fuori range" (red) / "ok" (green).
 - Tab **Matrice** (PR #4): `components/LabMatrix.tsx`. Tabella sticky analiti × date (più recente a sinistra). Righe raggruppate per `category` con header collassabile. Celle colorate rosso se `out_of_range=true`, ambra se `needs_review=true`. Click data colonna → dettaglio panel. Click nome analita → jump a tab Andamenti pre-selezionato.
 - Tab **Andamenti** (PR #4): `components/LabTrends.tsx`. Sidebar sinistra con preset temporali (12m/3y/5y/tutto) + chip analiti per categoria (multi-select, max 5 contemporanei). Per ogni analita una Recharts `LineChart` con banda di riferimento (`ReferenceArea` fra `ref_low`/`ref_high`), dot rosso più grande sui valori `out_of_range=true`. Colori per-serie fissi (rosso/blu/verde/ambra/viola).
+- Card **"Peso al prelievo"** (PR #6) in `/lab/panels/:id/review`: fetch HKBodyMass più recente con `start_date <= test_date` entro 3 giorni. Solo visualizzazione, nessuna scrittura nel panel.
+- Widget **"Analisi fuori range recenti"** (PR #6) in Home: `components/LabRecentOorCard.tsx`. Fetch `/api/v1/lab/recent-out-of-range?limit=10`. Si auto-nasconde se non ci sono valori fuori range. Ogni riga è un link alla review del panel.
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - `/explore` — universal browser: pick any sample type with full filter bar + chart + raw table
 - `/insert` — form to queue body/nutrition writes for Apple Health
@@ -403,6 +405,10 @@ Dominio separato dal mondo HealthKit: referti di laboratorio. Spec completa in `
 - `GET /analytes` — catalogo read-only, filtri `specimen`, `category`.
 - `GET /matrix` — vista sparsa analiti × date per la tab Matrice (solo `confirmed`). Ritorna `{analytes, panels, cells}` dove `cells[analyte_id][panel_id] = {value_numeric, value_text, unit, out_of_range, needs_review}`. Filtri: `start`, `end`, `specimen`, `category`.
 - `GET /timeseries?analyte_slug=...&start=...&end=...` — serie temporale di un singolo analita su panel `confirmed`. Ritorna `{analyte, points[]}` con `ref_low/high` per la banda di riferimento del chart.
+- `GET /recent-out-of-range?limit=N` (PR #6) — ultimi result `out_of_range=True` da panel `confirmed`, ordinati per data DESC. Usato dal widget Home.
+
+### Extension dell'endpoint samples/latest (PR #6)
+`GET /api/v1/samples/latest?type=X&before=<ISO>&window_days=N` — oltre al comportamento originale (ultimo sample del tipo), supporta `before` (ritorna il più recente con `start_date <= before`) e `window_days` (limita a `start_date >= before - N giorni`). Usato dalla card "Peso al prelievo" su `/lab/panels/:id/review` per agganciare il peso HK più vicino al prelievo (default finestra 3 giorni).
 
 ### Unit matching (confirm, §5.3)
 - `app/services/lab_units.py`: `normalize_unit` (lowercase, strip, `µ→u`), `units_equivalent` (tabella di sinonimi: `ng/ml ≡ µg/l`, `U/l ≡ IU/l`, …), `numeric_out_of_range`, `qualitative_out_of_range`.

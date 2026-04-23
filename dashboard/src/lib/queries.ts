@@ -14,6 +14,7 @@ import type {
   LabMatrixResponse,
   LabPanelDetail,
   LabPanelListResponse,
+  LabRecentOutOfRange,
   LabResultPatch,
   LabTimeseriesResponse,
   StretchingRoutine,
@@ -501,5 +502,32 @@ export function useLabTimeseries(
         ...(opts ?? {}),
       }),
     enabled: !!analyteSlug,
+  })
+}
+
+export function useLabRecentOutOfRange(limit = 10) {
+  return useQuery({
+    queryKey: ["labRecentOor", limit],
+    queryFn: () => apiGet<LabRecentOutOfRange[]>("/api/v1/lab/recent-out-of-range", { limit }),
+    staleTime: 60_000,
+  })
+}
+
+export function useLatestWeightBefore(
+  testDate: string | null | undefined,
+  windowDays = 3
+) {
+  return useQuery({
+    queryKey: ["latestWeight", testDate, windowDays],
+    queryFn: () =>
+      apiGet<{ type: string; data: { value: number; unit: string; start_date: string } | null }>(
+        "/api/v1/samples/latest",
+        {
+          type: "HKQuantityTypeIdentifierBodyMass",
+          before: testDate ? `${testDate}T23:59:59Z` : undefined,
+          window_days: windowDays,
+        }
+      ),
+    enabled: !!testDate,
   })
 }

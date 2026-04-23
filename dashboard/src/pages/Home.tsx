@@ -2,6 +2,7 @@ import { Activity, Flame, Footprints, Heart, Moon } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { MetricCard } from "@/components/charts/MetricCard"
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart"
+import LabRecentOorCard from "@/components/LabRecentOorCard"
 import { useLatest, useSamples, useSyncSessions, useSyncStatus, useWorkouts } from "@/lib/queries"
 import { getMeta, workoutDisplayTitle } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
@@ -55,6 +56,8 @@ export default function Home() {
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground">Panoramica dei tuoi dati di salute</p>
       </div>
+
+      <LabRecentOorCard />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
