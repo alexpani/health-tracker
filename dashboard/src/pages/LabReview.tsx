@@ -20,6 +20,7 @@ import {
   useLabCreateAlias,
   useLabPanel,
   useLabPatchResult,
+  useLatestWeightBefore,
 } from "@/lib/queries"
 import type { LabAnalyte, LabResult } from "@/lib/types"
 
@@ -112,6 +113,8 @@ export default function LabReview() {
           Completa tutte le righe prima di confermare.
         </div>
       )}
+
+      <WeightAtSamplingCard testDate={panel.test_date} />
 
       <Card>
         <CardHeader>
@@ -286,5 +289,31 @@ function ResultRow({
         )}
       </TableCell>
     </TableRow>
+  )
+}
+
+function WeightAtSamplingCard({ testDate }: { testDate: string }) {
+  const { data, isLoading } = useLatestWeightBefore(testDate, 3)
+  if (isLoading) return null
+  if (!data?.data) {
+    return (
+      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        Peso al prelievo: nessun valore HK entro 3 giorni prima del {formatDate(testDate)}.
+      </div>
+    )
+  }
+  const sampleDate = data.data.start_date.slice(0, 10)
+  return (
+    <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm flex items-center justify-between">
+      <span>
+        <span className="font-medium">Peso al prelievo:</span>{" "}
+        <span className="font-mono">
+          {data.data.value.toFixed(1)} {data.data.unit}
+        </span>
+      </span>
+      <span className="text-xs text-muted-foreground">
+        rilevato il {formatDate(sampleDate)} (Apple Health)
+      </span>
+    </div>
   )
 }

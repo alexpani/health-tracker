@@ -495,3 +495,17 @@ export interface LabTimeseriesResponse {
   analyte: LabAnalyte
   points: LabTimeseriesPoint[]
 }
+
+export interface LabRecentOutOfRange {
+  result_id: number
+  panel_id: number
+  test_date: string
+  analyte_slug: string | null
+  display_name: string
+  raw_name: string
+  value_numeric: number | null
+  value_text: string | null
+  unit: string | null
+  ref_low: number | null
+  ref_high: number | null
+}

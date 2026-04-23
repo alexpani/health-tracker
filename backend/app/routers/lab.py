@@ -792,3 +792,58 @@ async def get_timeseries(
         },
         "points": points,
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /recent-out-of-range — widget Home
+# ---------------------------------------------------------------------------
+
+@router.get("/recent-out-of-range")
+async def recent_out_of_range(
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Ultimi result `out_of_range=True` da panel confermati, ordinati per
+    data panel DESC. Usato dal widget Home."""
+    stmt = (
+        select(
+            LabResult.id,
+            LabResult.raw_name,
+            LabResult.value_numeric,
+            LabResult.value_text,
+            LabResult.unit_normalized,
+            LabResult.unit_raw,
+            LabPanel.id.label("panel_id"),
+            LabPanel.test_date,
+            LabAnalyte.slug,
+            LabAnalyte.display_name_it,
+            LabAnalyte.ref_low,
+            LabAnalyte.ref_high,
+            LabAnalyte.unit_canonical,
+        )
+        .join(LabPanel, LabResult.panel_id == LabPanel.id)
+        .outerjoin(LabAnalyte, LabResult.analyte_id == LabAnalyte.id)
+        .where(
+            LabResult.out_of_range.is_(True),
+            LabPanel.status == "confirmed",
+        )
+        .order_by(LabPanel.test_date.desc(), LabPanel.id.desc(), LabResult.id.asc())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            "result_id": r.id,
+            "panel_id": r.panel_id,
+            "test_date": r.test_date.isoformat(),
+            "analyte_slug": r.slug,
+            "display_name": r.display_name_it or r.raw_name,
+            "raw_name": r.raw_name,
+            "value_numeric": float(r.value_numeric) if r.value_numeric is not None else None,
+            "value_text": r.value_text,
+            "unit": r.unit_normalized or r.unit_raw or r.unit_canonical,
+            "ref_low": float(r.ref_low) if r.ref_low is not None else None,
+            "ref_high": float(r.ref_high) if r.ref_high is not None else None,
+        }
+        for r in rows
+    ]

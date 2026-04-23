@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -205,13 +205,23 @@ async def list_sample_types(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/samples/latest")
-async def latest_sample(type: str, db: AsyncSession = Depends(get_db)):
-    stmt = (
-        select(HealthSample)
-        .where(HealthSample.type == type)
-        .order_by(HealthSample.start_date.desc(), HealthSample.id.desc())
-        .limit(1)
-    )
+async def latest_sample(
+    type: str,
+    before: datetime | None = Query(None, description="Most recent sample with start_date <= this timestamp (ISO)"),
+    window_days: int | None = Query(None, ge=1, le=3650, description="Se con `before`: limita la ricerca agli ultimi N giorni prima di `before`"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ritorna il sample più recente del `type` dato.
+    Con `before` trova il più recente con `start_date <= before`.
+    Con `window_days` limita anche a `start_date >= before - window_days`.
+    Usato dal modulo Lab per cross-ref peso al prelievo (§7.7)."""
+    stmt = select(HealthSample).where(HealthSample.type == type)
+    if before is not None:
+        stmt = stmt.where(HealthSample.start_date <= before)
+        if window_days is not None:
+            lower = before - timedelta(days=window_days)
+            stmt = stmt.where(HealthSample.start_date >= lower)
+    stmt = stmt.order_by(HealthSample.start_date.desc(), HealthSample.id.desc()).limit(1)
     result = await db.execute(stmt)
     row = result.scalar_one_or_none()
     if not row:
