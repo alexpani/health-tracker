@@ -1,10 +1,36 @@
 import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { ChevronDown, ChevronRight } from "lucide-react"
-import { useLabMatrix } from "@/lib/queries"
+import { ChevronDown, ChevronRight, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { useLabAnalytes, useLabMatrix } from "@/lib/queries"
 import type { LabAnalyte, LabMatrixCell, LabMatrixResponse } from "@/lib/types"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
+
+interface MatrixFilters {
+  start: string
+  end: string
+  specimen: "" | "blood" | "urine"
+  category: string
+  onlyOutOfRange: boolean
+}
+
+const EMPTY_FILTERS: MatrixFilters = {
+  start: "",
+  end: "",
+  specimen: "",
+  category: "",
+  onlyOutOfRange: false,
+}
 
 function cellClassName(cell: LabMatrixCell | undefined): string {
   if (!cell) return ""
@@ -25,10 +51,44 @@ export default function LabMatrix({
 }: {
   onJumpToTrends?: (slug: string) => void
 }) {
-  const { data, isLoading, error } = useLabMatrix()
+  const [filters, setFilters] = useState<MatrixFilters>(EMPTY_FILTERS)
+  const { data: analytesAll } = useLabAnalytes()
+  const queryParams = useMemo(
+    () => ({
+      start: filters.start || undefined,
+      end: filters.end || undefined,
+      specimen: filters.specimen || undefined,
+      category: filters.category || undefined,
+    }),
+    [filters]
+  )
+  const { data: rawData, isLoading, error } = useLabMatrix(queryParams)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
+  // Applica il filtro "solo fuori range" lato client (post-fetch).
+  const data = useMemo<LabMatrixResponse | undefined>(() => {
+    if (!rawData) return rawData
+    if (!filters.onlyOutOfRange) return rawData
+    const filteredAnalytes = rawData.analytes.filter(a => {
+      const byPanel = rawData.cells[String(a.id)] ?? {}
+      return Object.values(byPanel).some(cell => cell.out_of_range === true)
+    })
+    return { ...rawData, analytes: filteredAnalytes }
+  }, [rawData, filters.onlyOutOfRange])
+
+  const categories = useMemo(() => {
+    const set = new Set<string>()
+    analytesAll?.forEach(a => set.add(a.category))
+    return Array.from(set).sort()
+  }, [analytesAll])
+
   const grouped = useMemo(() => groupByCategory(data), [data])
+  const filtersActive =
+    filters.start ||
+    filters.end ||
+    filters.specimen ||
+    filters.category ||
+    filters.onlyOutOfRange
 
   function toggleCategory(cat: string) {
     setCollapsed(prev => {
@@ -39,17 +99,118 @@ export default function LabMatrix({
     })
   }
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Caricamento…</p>
-  if (error) return <p className="text-sm text-red-600">Errore: {String(error)}</p>
+  const filterBar = (
+    <div className="flex flex-wrap items-end gap-3 mb-3">
+      <div>
+        <Label className="text-xs">Dal</Label>
+        <Input
+          type="date"
+          value={filters.start}
+          onChange={e => setFilters(f => ({ ...f, start: e.target.value }))}
+          className="h-8 text-sm w-40"
+        />
+      </div>
+      <div>
+        <Label className="text-xs">Al</Label>
+        <Input
+          type="date"
+          value={filters.end}
+          onChange={e => setFilters(f => ({ ...f, end: e.target.value }))}
+          className="h-8 text-sm w-40"
+        />
+      </div>
+      <div>
+        <Label className="text-xs">Campione</Label>
+        <Select
+          value={filters.specimen || "all"}
+          onValueChange={v =>
+            setFilters(f => ({ ...f, specimen: v === "all" ? "" : (v as "blood" | "urine") }))
+          }
+        >
+          <SelectTrigger className="h-8 w-32 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">tutti</SelectItem>
+            <SelectItem value="blood">blood</SelectItem>
+            <SelectItem value="urine">urine</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label className="text-xs">Categoria</Label>
+        <Select
+          value={filters.category || "all"}
+          onValueChange={v =>
+            setFilters(f => ({ ...f, category: v === "all" ? "" : v }))
+          }
+        >
+          <SelectTrigger className="h-8 w-48 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">tutte</SelectItem>
+            {categories.map(c => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <label className="flex items-center gap-2 text-sm pb-1">
+        <input
+          type="checkbox"
+          checked={filters.onlyOutOfRange}
+          onChange={e =>
+            setFilters(f => ({ ...f, onlyOutOfRange: e.target.checked }))
+          }
+        />
+        Solo fuori range
+      </label>
+      {filtersActive && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setFilters(EMPTY_FILTERS)}
+        >
+          <X className="h-3.5 w-3.5 mr-1" />
+          Reset
+        </Button>
+      )}
+    </div>
+  )
+
+  if (isLoading)
+    return (
+      <>
+        {filterBar}
+        <p className="text-sm text-muted-foreground">Caricamento…</p>
+      </>
+    )
+  if (error)
+    return (
+      <>
+        {filterBar}
+        <p className="text-sm text-red-600">Errore: {String(error)}</p>
+      </>
+    )
   if (!data || data.panels.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Nessun referto confermato. Carica un PDF e conferma la review.
-      </p>
+      <>
+        {filterBar}
+        <p className="text-sm text-muted-foreground">
+          {filtersActive
+            ? "Nessun risultato coi filtri correnti."
+            : "Nessun referto confermato. Carica un PDF e conferma la review."}
+        </p>
+      </>
     )
   }
 
   return (
+    <>
+    {filterBar}
     <div className="overflow-x-auto border rounded-md">
       <table className="text-xs min-w-max">
         <thead className="sticky top-0 z-10 bg-background">
@@ -89,6 +250,7 @@ export default function LabMatrix({
         </tbody>
       </table>
     </div>
+    </>
   )
 }
 
