@@ -46,10 +46,8 @@ export default function LabReview() {
   const confirm = useLabConfirmPanel()
   const createAlias = useLabCreateAlias()
   const [showNewAnalyteForm, setShowNewAnalyteForm] = useState(false)
-  const [newAnalytePrefill, setNewAnalytePrefill] = useState<{
-    displayName: string
-    alias: string
-  } | null>(null)
+  // ID della riga da cui stiamo creando un analita al volo (form inline).
+  const [createFromRowId, setCreateFromRowId] = useState<number | null>(null)
 
   const analyteById = useMemo(() => {
     const m = new Map<number, LabAnalyte>()
@@ -153,29 +151,22 @@ export default function LabReview() {
       <WeightAtSamplingCard testDate={panel.test_date} />
 
       {!isConfirmed && (
-        <div id="new-analyte-form">
+        <div>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              setNewAnalytePrefill(null)
-              setShowNewAnalyteForm(v => !v)
-            }}
+            onClick={() => setShowNewAnalyteForm(v => !v)}
           >
             <FlaskConical className="h-4 w-4 mr-1" />
-            {showNewAnalyteForm ? "Chiudi" : "Nuovo analita"}
+            {showNewAnalyteForm ? "Chiudi" : "Nuovo analita (generico)"}
           </Button>
           {showNewAnalyteForm && (
             <div className="mt-3">
               <NewAnalyteForm
-                key={newAnalytePrefill?.alias ?? "blank"}
                 defaultSpecimen={panel.specimen_types[0] === "urine" ? "urine" : "blood"}
-                defaultDisplayName={newAnalytePrefill?.displayName ?? ""}
-                defaultAlias={newAnalytePrefill?.alias ?? null}
-                onCreated={() => {
-                  setShowNewAnalyteForm(false)
-                  setNewAnalytePrefill(null)
-                }}
+                defaultDisplayName=""
+                defaultAlias={null}
+                onCreated={() => setShowNewAnalyteForm(false)}
               />
             </div>
           )}
@@ -207,7 +198,7 @@ export default function LabReview() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {panel.results.map(r => (
+              {panel.results.flatMap(r => [
                 <ResultRow
                   key={r.id}
                   result={r}
@@ -224,19 +215,10 @@ export default function LabReview() {
                       alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
                     }
                   }}
-                  onCreateFromRow={rawName => {
-                    setNewAnalytePrefill({
-                      displayName: prettifyRawName(rawName),
-                      alias: rawName,
-                    })
-                    setShowNewAnalyteForm(true)
-                    // scroll alla form in alto
-                    setTimeout(() => {
-                      document
-                        .getElementById("new-analyte-form")
-                        ?.scrollIntoView({ behavior: "smooth", block: "start" })
-                    }, 0)
-                  }}
+                  onCreateFromRow={() =>
+                    setCreateFromRowId(createFromRowId === r.id ? null : r.id)
+                  }
+                  creatingFromRow={createFromRowId === r.id}
                   onSaveAlias={async (analyteId, alias) => {
                     try {
                       await createAlias.mutateAsync({
@@ -252,8 +234,26 @@ export default function LabReview() {
                       }
                     }
                   }}
-                />
-              ))}
+                />,
+                createFromRowId === r.id && !isConfirmed ? (
+                  <TableRow key={`${r.id}-create`}>
+                    <TableCell colSpan={8} className="bg-amber-50/40">
+                      <div className="mb-2 text-xs font-medium text-amber-900">
+                        Crea un nuovo analita a partire da "{r.raw_name}"
+                      </div>
+                      <NewAnalyteForm
+                        key={r.id}
+                        defaultSpecimen={
+                          panel.specimen_types[0] === "urine" ? "urine" : "blood"
+                        }
+                        defaultDisplayName={prettifyRawName(r.raw_name)}
+                        defaultAlias={r.raw_name}
+                        onCreated={() => setCreateFromRowId(null)}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ) : null,
+              ])}
             </TableBody>
           </Table>
         </CardContent>
@@ -282,6 +282,7 @@ function ResultRow({
   onDelete,
   onSaveAlias,
   onCreateFromRow,
+  creatingFromRow,
 }: {
   result: LabResult
   analytes: LabAnalyte[]
@@ -289,7 +290,8 @@ function ResultRow({
   onPatch: (resultId: number, patch: { analyte_id?: number | null }) => Promise<void>
   onDelete: (resultId: number) => Promise<void>
   onSaveAlias: (analyteId: number, alias: string) => Promise<void>
-  onCreateFromRow: (rawName: string) => void
+  onCreateFromRow: () => void
+  creatingFromRow: boolean
 }) {
   const current = result.analyte_id != null ? analyteById.get(result.analyte_id) : undefined
   const [nameInput, setNameInput] = useState(current?.display_name_it ?? "")
@@ -371,15 +373,17 @@ function ResultRow({
               type="button"
               variant="outline"
               size="sm"
-              // Evita che il click rubi focus all'Input prima di partire
-              // (onBlur dell'Input interferiva con l'apertura della form).
               onMouseDown={e => e.preventDefault()}
-              onClick={() => onCreateFromRow(result.raw_name)}
+              onClick={onCreateFromRow}
               title={`Crea un nuovo analita a partire da "${result.raw_name}"`}
-              className="shrink-0 border-amber-400 text-amber-700 hover:bg-amber-50"
+              className={`shrink-0 border-amber-400 ${
+                creatingFromRow
+                  ? "bg-amber-200 text-amber-900"
+                  : "text-amber-700 hover:bg-amber-50"
+              }`}
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
-              crea
+              {creatingFromRow ? "chiudi" : "crea"}
             </Button>
           )}
         </div>
