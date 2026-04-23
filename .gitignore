@@ -28,3 +28,6 @@ DerivedData/
 
 # PostgreSQL data (if local)
 pgdata/
+
+# Lab documents (PDF referti — mai committarli)
+backend/data/lab_documents/
