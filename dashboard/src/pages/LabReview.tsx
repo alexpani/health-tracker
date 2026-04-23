@@ -248,6 +248,14 @@ export default function LabReview() {
                         }
                         defaultDisplayName={prettifyRawName(r.raw_name)}
                         defaultAlias={r.raw_name}
+                        defaultUnit={r.unit_raw ?? ""}
+                        defaultRefLow={
+                          r.ref_low_raw != null ? String(r.ref_low_raw) : ""
+                        }
+                        defaultRefHigh={
+                          r.ref_high_raw != null ? String(r.ref_high_raw) : ""
+                        }
+                        defaultRefText={r.ref_text_raw ?? ""}
                         onCreated={() => setCreateFromRowId(null)}
                       />
                     </TableCell>
@@ -505,11 +513,19 @@ function NewAnalyteForm({
   defaultSpecimen,
   defaultDisplayName,
   defaultAlias,
+  defaultUnit = "",
+  defaultRefLow = "",
+  defaultRefHigh = "",
+  defaultRefText = "",
   onCreated,
 }: {
   defaultSpecimen: "blood" | "urine"
   defaultDisplayName: string
   defaultAlias: string | null
+  defaultUnit?: string
+  defaultRefLow?: string
+  defaultRefHigh?: string
+  defaultRefText?: string
   onCreated: (slug: string) => void
 }) {
   const create = useLabCreateAnalyte()
@@ -526,10 +542,10 @@ function NewAnalyteForm({
   const [specimen, setSpecimen] = useState<"blood" | "urine" | "other">(defaultSpecimen)
   const [valueType, setValueType] =
     useState<"numeric" | "semi_quantitative" | "qualitative" | "textual">("numeric")
-  const [unitCanonical, setUnitCanonical] = useState("")
-  const [refLow, setRefLow] = useState("")
-  const [refHigh, setRefHigh] = useState("")
-  const [refText, setRefText] = useState("")
+  const [unitCanonical, setUnitCanonical] = useState(defaultUnit)
+  const [refLow, setRefLow] = useState(defaultRefLow)
+  const [refHigh, setRefHigh] = useState(defaultRefHigh)
+  const [refText, setRefText] = useState(defaultRefText)
   const [aliases, setAliases] = useState(defaultAlias ?? "")
 
   function onNameChange(v: string) {
