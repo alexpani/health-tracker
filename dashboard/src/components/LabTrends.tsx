@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { X } from "lucide-react"
+import { RotateCcw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useLabAnalytes, useLabTimeseries } from "@/lib/queries"
 import type { LabAnalyte, LabTimeseriesResponse } from "@/lib/types"
@@ -50,9 +50,34 @@ export default function LabTrends({ initialSlug }: { initialSlug?: string | null
     })
   }
 
+  const isDefaultState = selected.length === 0 && presetIdx === 0
+
+  function resetFilters() {
+    setSelected([])
+    setPresetIdx(0)
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[260px,1fr] gap-4">
       <aside className="space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-muted-foreground">Periodo</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={resetFilters}
+            disabled={isDefaultState}
+            title={
+              isDefaultState
+                ? "Nessun filtro attivo"
+                : "Pulisci analiti + torna al preset 12 mesi"
+            }
+            className="h-6 text-xs"
+          >
+            <RotateCcw className="h-3 w-3 mr-1" />
+            Reset
+          </Button>
+        </div>
         <div className="flex flex-wrap gap-2">
           {PRESETS.map((p, i) => (
             <button
@@ -71,7 +96,9 @@ export default function LabTrends({ initialSlug }: { initialSlug?: string | null
         </div>
 
         <div className="text-xs text-muted-foreground">
-          Seleziona fino a {MAX_SERIES} analiti.
+          {selected.length > 0
+            ? `${selected.length} / ${MAX_SERIES} analiti selezionati`
+            : `Seleziona fino a ${MAX_SERIES} analiti.`}
         </div>
 
         <div className="space-y-2 max-h-[60vh] overflow-y-auto">
