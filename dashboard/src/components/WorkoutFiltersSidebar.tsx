@@ -49,7 +49,7 @@ const DURATION_PRESETS: { label: string; min?: number; max?: number }[] = [
 ]
 
 export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
-  const { data: facets } = useWorkoutFacets()
+  const { data: facets } = useWorkoutFacets(value)
 
   const set = <K extends keyof WorkoutFilters>(k: K, v: WorkoutFilters[K]) =>
     onChange({ ...value, [k]: v })

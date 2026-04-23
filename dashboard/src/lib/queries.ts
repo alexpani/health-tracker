@@ -285,11 +285,27 @@ export function useWorkouts(filters: WorkoutFilters = {}) {
   })
 }
 
-export function useWorkoutFacets() {
+export function useWorkoutFacets(filters: WorkoutFilters = {}) {
   return useQuery({
-    queryKey: ["workoutFacets"],
-    queryFn: () => apiGet<WorkoutFacets>("/api/v1/workouts/facets"),
-    staleTime: 5 * 60_000,
+    queryKey: ["workoutFacets", filters],
+    queryFn: () =>
+      apiGet<WorkoutFacets>("/api/v1/workouts/facets", {
+        start: filters.start,
+        end: filters.end,
+        years: filters.years as any,
+        effective_types: filters.effective_types,
+        sources: filters.sources,
+        distance_min: filters.distance_min,
+        distance_max: filters.distance_max,
+        duration_min: filters.duration_min,
+        duration_max: filters.duration_max,
+        pace_min: filters.pace_min,
+        pace_max: filters.pace_max,
+        notes_contains: filters.notes_contains,
+        title_contains: filters.title_contains,
+      }),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 }
 
