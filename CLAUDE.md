@@ -389,8 +389,19 @@ Dominio separato dal mondo HealthKit: referti di laboratorio. Spec completa in `
 - `POST /ingest` — multipart PDF. Ritorna `{panel_id, status, test_date, lab_name, specimen_types, analytes_count, unmatched_count, parsing_failed, document_id}`. Panel creato in `draft`.
 - `GET /panels` — lista paginata con filtri `status`, `year`, `specimen`, `lab_name`.
 - `GET /panels/{id}` — dettaglio + array di `results` con valori e range.
+- `PATCH /panels/{id}` — edit `test_date`, `lab_name`, `notes`, `specimen_types` (funziona anche su panel confermati).
+- `DELETE /panels/{id}?delete_document=true` — cancella panel (cascade sui result) + documento + PDF su disco.
+- `POST /panels/{id}/confirm` — draft→confirmed. Applica conversione unità (match o equivalente) + calcolo `out_of_range` per ogni result. Rifiuta 400 se anche un solo result ha `analyte_id=NULL`.
+- `PATCH /results/{id}` — edit singolo result (`analyte_id`, `value_numeric`, `value_text`, `unit_raw`, `notes`). Resetta `needs_review=True` + `out_of_range=None` + `unit_normalized=None`: il prossimo confirm rifà il check.
+- `POST /aliases` `{analyte_id, alias}` — learning dalla review; 409 su duplicato.
+- `POST /analytes` `{slug, display_name_it, category, specimen?, value_type?, unit_canonical?, ref_low?, ref_high?, ref_text?, aliases?}` — crea analita custom; gli alias duplicati vengono contati in `aliases_skipped`.
 - `GET /documents/{id}/file` — stream del PDF originale.
 - `GET /analytes` — catalogo read-only, filtri `specimen`, `category`.
+
+### Unit matching (confirm, §5.3)
+- `app/services/lab_units.py`: `normalize_unit` (lowercase, strip, `µ→u`), `units_equivalent` (tabella di sinonimi: `ng/ml ≡ µg/l`, `U/l ≡ IU/l`, …), `numeric_out_of_range`, `qualitative_out_of_range`.
+- Il confirm **non** effettua conversioni numeriche fra unità diverse (es. `mg/dl ↔ mmol/l`): in quel caso lascia `needs_review=True` con hint su range raw. L'utente risolve in review (cambia unit_raw o mappa l'analita giusto).
+- Qualitativi (urine): `out_of_range=True` se `ref_text` indica assenza e `value_text` è un marker positivo (`+`, `++`, `tracce`, `positivo`, …).
 
 ### Volume Docker
 - `backend/docker-compose.yml` monta `./data/lab_documents` su `/app/data/lab_documents`. Variabile `LAB_DOCUMENTS_DIR` nel container.
