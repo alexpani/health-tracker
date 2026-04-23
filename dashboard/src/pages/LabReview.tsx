@@ -46,6 +46,10 @@ export default function LabReview() {
   const confirm = useLabConfirmPanel()
   const createAlias = useLabCreateAlias()
   const [showNewAnalyteForm, setShowNewAnalyteForm] = useState(false)
+  const [newAnalytePrefill, setNewAnalytePrefill] = useState<{
+    displayName: string
+    alias: string
+  } | null>(null)
 
   const analyteById = useMemo(() => {
     const m = new Map<number, LabAnalyte>()
@@ -149,11 +153,14 @@ export default function LabReview() {
       <WeightAtSamplingCard testDate={panel.test_date} />
 
       {!isConfirmed && (
-        <div>
+        <div id="new-analyte-form">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setShowNewAnalyteForm(v => !v)}
+            onClick={() => {
+              setNewAnalytePrefill(null)
+              setShowNewAnalyteForm(v => !v)
+            }}
           >
             <FlaskConical className="h-4 w-4 mr-1" />
             {showNewAnalyteForm ? "Chiudi" : "Nuovo analita"}
@@ -161,9 +168,14 @@ export default function LabReview() {
           {showNewAnalyteForm && (
             <div className="mt-3">
               <NewAnalyteForm
+                key={newAnalytePrefill?.alias ?? "blank"}
                 defaultSpecimen={panel.specimen_types[0] === "urine" ? "urine" : "blood"}
-                defaultAlias={null}
-                onCreated={() => setShowNewAnalyteForm(false)}
+                defaultDisplayName={newAnalytePrefill?.displayName ?? ""}
+                defaultAlias={newAnalytePrefill?.alias ?? null}
+                onCreated={() => {
+                  setShowNewAnalyteForm(false)
+                  setNewAnalytePrefill(null)
+                }}
               />
             </div>
           )}
@@ -212,6 +224,19 @@ export default function LabReview() {
                       alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
                     }
                   }}
+                  onCreateFromRow={rawName => {
+                    setNewAnalytePrefill({
+                      displayName: prettifyRawName(rawName),
+                      alias: rawName,
+                    })
+                    setShowNewAnalyteForm(true)
+                    // scroll alla form in alto
+                    setTimeout(() => {
+                      document
+                        .getElementById("new-analyte-form")
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    }, 0)
+                  }}
                   onSaveAlias={async (analyteId, alias) => {
                     try {
                       await createAlias.mutateAsync({
@@ -256,6 +281,7 @@ function ResultRow({
   onPatch,
   onDelete,
   onSaveAlias,
+  onCreateFromRow,
 }: {
   result: LabResult
   analytes: LabAnalyte[]
@@ -263,6 +289,7 @@ function ResultRow({
   onPatch: (resultId: number, patch: { analyte_id?: number | null }) => Promise<void>
   onDelete: (resultId: number) => Promise<void>
   onSaveAlias: (analyteId: number, alias: string) => Promise<void>
+  onCreateFromRow: (rawName: string) => void
 }) {
   const current = result.analyte_id != null ? analyteById.get(result.analyte_id) : undefined
   const [nameInput, setNameInput] = useState(current?.display_name_it ?? "")
@@ -330,14 +357,28 @@ function ResultRow({
     <TableRow>
       <TableCell className="font-mono text-xs">{result.raw_name}</TableCell>
       <TableCell>
-        <Input
-          list="lab-analytes-list"
-          value={nameInput}
-          onChange={e => setNameInput(e.target.value)}
-          onBlur={commitAnalyte}
-          placeholder="Cerca analita…"
-          className="h-8 text-sm"
-        />
+        <div className="flex items-center gap-1">
+          <Input
+            list="lab-analytes-list"
+            value={nameInput}
+            onChange={e => setNameInput(e.target.value)}
+            onBlur={commitAnalyte}
+            placeholder="Cerca analita…"
+            className="h-8 text-sm"
+          />
+          {result.analyte_id == null && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onCreateFromRow(result.raw_name)}
+              title={`Crea un nuovo analita a partire da "${result.raw_name}"`}
+              className="shrink-0"
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              crea
+            </Button>
+          )}
+        </div>
       </TableCell>
       <TableCell className="font-mono">{valueDisplay}</TableCell>
       <TableCell>{result.unit_raw ?? "—"}</TableCell>
@@ -429,6 +470,19 @@ function WeightAtSamplingCard({ testDate }: { testDate: string }) {
   )
 }
 
+function prettifyRawName(raw: string): string {
+  // Converte "GLICEMIA a digiuno" → "Glicemia a digiuno"
+  // e "VIT.D (25OH VITD)" → "Vit.D (25OH VITD)" (mantiene maiuscole dentro parentesi)
+  const trimmed = raw.trim()
+  if (!trimmed) return ""
+  // Se tutto maiuscolo, mettiamo tutto minuscolo e capitalizziamo prima lettera
+  if (trimmed === trimmed.toUpperCase()) {
+    const lowered = trimmed.toLowerCase()
+    return lowered.charAt(0).toUpperCase() + lowered.slice(1)
+  }
+  return trimmed
+}
+
 function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -441,10 +495,12 @@ function slugify(name: string): string {
 
 function NewAnalyteForm({
   defaultSpecimen,
+  defaultDisplayName,
   defaultAlias,
   onCreated,
 }: {
   defaultSpecimen: "blood" | "urine"
+  defaultDisplayName: string
   defaultAlias: string | null
   onCreated: (slug: string) => void
 }) {
@@ -455,8 +511,8 @@ function NewAnalyteForm({
     allAnalytes?.forEach(a => set.add(a.category))
     return Array.from(set).sort()
   }, [allAnalytes])
-  const [displayName, setDisplayName] = useState("")
-  const [slug, setSlug] = useState("")
+  const [displayName, setDisplayName] = useState(defaultDisplayName)
+  const [slug, setSlug] = useState(defaultDisplayName ? slugify(defaultDisplayName) : "")
   const [slugTouched, setSlugTouched] = useState(false)
   const [category, setCategory] = useState("")
   const [specimen, setSpecimen] = useState<"blood" | "urine" | "other">(defaultSpecimen)
