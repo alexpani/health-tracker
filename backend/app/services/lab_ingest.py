@@ -135,10 +135,11 @@ def call_llm(raw_text: str) -> dict[str, Any]:
     from anthropic import Anthropic
 
     client = Anthropic(api_key=settings.anthropic_api_key)
+    # N.B. `temperature` è deprecato su Opus 4.7 — lasciamo il default del modello
+    # (deterministico per definizione a temp fissa interna).
     resp = client.messages.create(
         model=settings.anthropic_model,
         max_tokens=MAX_LLM_TOKENS,
-        temperature=0,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": raw_text}],
     )

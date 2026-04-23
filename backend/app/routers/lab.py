@@ -6,10 +6,13 @@ arriveranno in PR #2b.
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
@@ -95,6 +98,7 @@ async def ingest_referto(
         payload = lab_ingest.call_llm(raw_text)
         extracted = lab_ingest.parse_extracted_panel(payload)
     except Exception:
+        logger.exception("lab/ingest: LLM parsing failed")
         parsing_failed = True
 
     # 4) Create panel + results

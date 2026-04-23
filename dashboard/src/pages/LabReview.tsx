@@ -41,6 +41,14 @@ export default function LabReview() {
     return m
   }, [analytes])
 
+  const analytesAlpha = useMemo(
+    () =>
+      [...(analytes ?? [])].sort((a, b) =>
+        a.display_name_it.localeCompare(b.display_name_it, "it")
+      ),
+    [analytes]
+  )
+
   const allMapped = useMemo(() => {
     if (!panel) return false
     return panel.results.every(r => r.analyte_id != null)
@@ -122,7 +130,7 @@ export default function LabReview() {
         </CardHeader>
         <CardContent>
           <datalist id="lab-analytes-list">
-            {analytes?.map(a => (
+            {analytesAlpha.map(a => (
               <option key={a.id} value={a.display_name_it} />
             ))}
           </datalist>
@@ -144,7 +152,7 @@ export default function LabReview() {
                 <ResultRow
                   key={r.id}
                   result={r}
-                  analytes={analytes ?? []}
+                  analytes={analytesAlpha}
                   analyteById={analyteById}
                   readOnly={isConfirmed}
                   onPatch={async (resultId, patchBody) => {
