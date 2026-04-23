@@ -235,7 +235,7 @@ export default function LabReview() {
                     }
                   }}
                 />,
-                createFromRowId === r.id && !isConfirmed ? (
+                createFromRowId === r.id ? (
                   <TableRow key={`${r.id}-create`}>
                     <TableCell colSpan={8} className="bg-amber-50/40">
                       <div className="mb-2 text-xs font-medium text-amber-900">
