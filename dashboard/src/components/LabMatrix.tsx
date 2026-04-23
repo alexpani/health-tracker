@@ -34,8 +34,11 @@ const EMPTY_FILTERS: MatrixFilters = {
 
 function cellClassName(cell: LabMatrixCell | undefined): string {
   if (!cell) return ""
-  if (cell.out_of_range === true) return "bg-red-100 text-red-900"
-  if (cell.needs_review) return "bg-amber-50 text-amber-900"
+  // Rosso = fuori range (alert medico reale).
+  // Ambra = needs_review (valore noto ma analita / unità incerto, non
+  // necessariamente fuori norma). Colori distinti a colpo d'occhio.
+  if (cell.out_of_range === true) return "bg-red-200 text-red-900 font-semibold"
+  if (cell.needs_review) return "bg-amber-100 text-amber-900"
   return ""
 }
 

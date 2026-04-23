@@ -299,16 +299,20 @@ function ResultRow({
   // speciale: il flag è normale fra ingest e confirm, non è un warning
   // per l'utente. Dopo il confirm resettiamo needs_review e compaiono i
   // badge definitivi.
+  // Colori distinti per i 3 stati:
+  //  - senza analita → ambra (caso "mancante", serve review)
+  //  - fuori range   → rosso (valore reale fuori dai limiti, alert medico)
+  //  - ok            → verde
   let stateBadge: JSX.Element
   if (result.analyte_id == null) {
     stateBadge = (
-      <span className="text-xs rounded-full bg-red-100 text-red-800 px-2 py-0.5">
+      <span className="text-xs rounded-full bg-amber-100 text-amber-900 px-2 py-0.5">
         senza analita
       </span>
     )
   } else if (result.out_of_range === true) {
     stateBadge = (
-      <span className="text-xs rounded-full bg-red-100 text-red-800 px-2 py-0.5">
+      <span className="text-xs rounded-full bg-red-200 text-red-900 px-2 py-0.5 font-medium">
         fuori range
       </span>
     )
