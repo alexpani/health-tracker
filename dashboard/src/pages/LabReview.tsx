@@ -445,6 +445,12 @@ function NewAnalyteForm({
   onCreated: (slug: string) => void
 }) {
   const create = useLabCreateAnalyte()
+  const { data: allAnalytes } = useLabAnalytes()
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>()
+    allAnalytes?.forEach(a => set.add(a.category))
+    return Array.from(set).sort()
+  }, [allAnalytes])
   const [displayName, setDisplayName] = useState("")
   const [slug, setSlug] = useState("")
   const [slugTouched, setSlugTouched] = useState(false)
@@ -524,9 +530,15 @@ function NewAnalyteForm({
         <Input
           value={category}
           onChange={e => setCategory(e.target.value)}
+          list="lab-categories-list"
           placeholder="es. metabolismo, ormoni, fegato…"
           className="h-8"
         />
+        <datalist id="lab-categories-list">
+          {categoryOptions.map(c => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
       </div>
       <div>
         <Label className="text-xs">Campione</Label>
