@@ -13,6 +13,8 @@ import Stretching from "@/pages/Stretching"
 import Explore from "@/pages/Explore"
 import Fitness from "@/pages/Fitness"
 import Insert from "@/pages/Insert"
+import Lab from "@/pages/Lab"
+import LabReview from "@/pages/LabReview"
 import Settings from "@/pages/Settings"
 
 export default function App() {
@@ -32,6 +34,8 @@ export default function App() {
         <Route path="/stretching" element={<Stretching />} />
         <Route path="/explore" element={<Explore />} />
         <Route path="/insert" element={<Insert />} />
+        <Route path="/lab" element={<Lab />} />
+        <Route path="/lab/panels/:id/review" element={<LabReview />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>

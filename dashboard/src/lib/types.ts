@@ -367,3 +367,96 @@ export interface WriteInput {
   source_name?: string
   notes?: string
 }
+
+// --- Lab Results ---
+
+export type LabSpecimen = "blood" | "urine" | "other"
+export type LabValueType = "numeric" | "semi_quantitative" | "qualitative" | "textual"
+export type LabPanelStatus = "draft" | "confirmed"
+
+export interface LabAnalyte {
+  id: number
+  slug: string
+  display_name_it: string
+  category: string
+  specimen: LabSpecimen
+  value_type: LabValueType
+  unit_canonical: string | null
+  ref_low: number | null
+  ref_high: number | null
+  ref_text: string | null
+}
+
+export interface LabPanelSummary {
+  id: number
+  test_date: string
+  lab_name: string | null
+  specimen_types: string[]
+  status: LabPanelStatus
+  notes: string | null
+  document_id: number | null
+  confirmed_at: string | null
+}
+
+export interface LabPanelListResponse {
+  total: number
+  offset: number
+  limit: number
+  items: LabPanelSummary[]
+}
+
+export interface LabResult {
+  id: number
+  analyte_id: number | null
+  raw_name: string
+  value_numeric: number | null
+  value_text: string | null
+  unit_raw: string | null
+  unit_normalized: string | null
+  ref_low_raw: number | null
+  ref_high_raw: number | null
+  ref_text_raw: string | null
+  out_of_range: boolean | null
+  needs_review: boolean
+  notes: string | null
+}
+
+export interface LabPanelDetail extends LabPanelSummary {
+  results: LabResult[]
+}
+
+export interface LabIngestResponse {
+  panel_id: number
+  status: LabPanelStatus
+  test_date: string | null
+  lab_name: string | null
+  specimen_types: string[]
+  analytes_count: number
+  unmatched_count: number
+  parsing_failed: boolean
+  document_id: number | null
+  deduplicated?: boolean
+  message?: string
+}
+
+export interface LabConfirmResponse {
+  panel_id: number
+  status: LabPanelStatus
+  confirmed_at: string
+  results_count: number
+  out_of_range_count: number
+  still_needs_review: number
+}
+
+export interface LabResultPatch {
+  analyte_id?: number | null
+  value_numeric?: number | null
+  value_text?: string | null
+  unit_raw?: string | null
+  notes?: string | null
+}
+
+export interface LabAliasIn {
+  analyte_id: number
+  alias: string
+}

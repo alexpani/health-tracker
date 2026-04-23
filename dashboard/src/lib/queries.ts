@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { apiDelete, apiGet, apiPatch, apiPost } from "./api"
+import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "./api"
 import type {
   Aggregation,
   BlacklistEntry,
@@ -7,6 +7,13 @@ import type {
   CorrelatedSample,
   DiarioDailyTotal,
   DiarioPlan,
+  LabAliasIn,
+  LabAnalyte,
+  LabConfirmResponse,
+  LabIngestResponse,
+  LabPanelDetail,
+  LabPanelListResponse,
+  LabResultPatch,
   StretchingRoutine,
   StretchingSession,
   IngestRule,
@@ -382,5 +389,87 @@ export function useRestoreWorkout() {
         workouts: [snapshot],
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["workouts"] }),
+  })
+}
+
+// --- Lab Results ---
+
+export function useLabPanels(params?: {
+  status?: "draft" | "confirmed"
+  year?: number
+  specimen?: "blood" | "urine"
+  limit?: number
+  offset?: number
+}) {
+  return useQuery({
+    queryKey: ["labPanels", params],
+    queryFn: () => apiGet<LabPanelListResponse>("/api/v1/lab/panels", params ?? {}),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  })
+}
+
+export function useLabPanel(panelId: number | null | undefined) {
+  return useQuery({
+    queryKey: ["labPanel", panelId],
+    queryFn: () => apiGet<LabPanelDetail>(`/api/v1/lab/panels/${panelId}`),
+    enabled: panelId != null,
+  })
+}
+
+export function useLabAnalytes() {
+  return useQuery({
+    queryKey: ["labAnalytes"],
+    queryFn: () => apiGet<LabAnalyte[]>("/api/v1/lab/analytes"),
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useLabIngest() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => apiUpload<LabIngestResponse>("/api/v1/lab/ingest", file),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["labPanels"] }),
+  })
+}
+
+export function useLabPatchResult() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ resultId, patch }: { resultId: number; patch: LabResultPatch }) =>
+      apiPatch<{ ok: boolean; id: number }>(`/api/v1/lab/results/${resultId}`, patch),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["labPanel"] })
+    },
+  })
+}
+
+export function useLabConfirmPanel() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (panelId: number) =>
+      apiPost<LabConfirmResponse>(`/api/v1/lab/panels/${panelId}/confirm`, {}),
+    onSuccess: (_data, panelId) => {
+      qc.invalidateQueries({ queryKey: ["labPanel", panelId] })
+      qc.invalidateQueries({ queryKey: ["labPanels"] })
+    },
+  })
+}
+
+export function useLabDeletePanel() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (panelId: number) =>
+      apiDelete<{ ok: boolean }>(`/api/v1/lab/panels/${panelId}?delete_document=true`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["labPanels"] }),
+  })
+}
+
+export function useLabCreateAlias() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: LabAliasIn) =>
+      apiPost<{ id: number; analyte_id: number; alias: string }>("/api/v1/lab/aliases", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["labAnalytes"] }),
   })
 }
