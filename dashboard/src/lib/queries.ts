@@ -11,9 +11,11 @@ import type {
   LabAnalyte,
   LabConfirmResponse,
   LabIngestResponse,
+  LabMatrixResponse,
   LabPanelDetail,
   LabPanelListResponse,
   LabResultPatch,
+  LabTimeseriesResponse,
   StretchingRoutine,
   StretchingSession,
   IngestRule,
@@ -471,5 +473,33 @@ export function useLabCreateAlias() {
     mutationFn: (body: LabAliasIn) =>
       apiPost<{ id: number; analyte_id: number; alias: string }>("/api/v1/lab/aliases", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["labAnalytes"] }),
+  })
+}
+
+export function useLabMatrix(params?: {
+  start?: string
+  end?: string
+  specimen?: "blood" | "urine"
+  category?: string
+}) {
+  return useQuery({
+    queryKey: ["labMatrix", params],
+    queryFn: () => apiGet<LabMatrixResponse>("/api/v1/lab/matrix", params ?? {}),
+    staleTime: 60_000,
+  })
+}
+
+export function useLabTimeseries(
+  analyteSlug: string | null | undefined,
+  opts?: { start?: string; end?: string }
+) {
+  return useQuery({
+    queryKey: ["labTimeseries", analyteSlug, opts],
+    queryFn: () =>
+      apiGet<LabTimeseriesResponse>("/api/v1/lab/timeseries", {
+        analyte_slug: analyteSlug ?? "",
+        ...(opts ?? {}),
+      }),
+    enabled: !!analyteSlug,
   })
 }

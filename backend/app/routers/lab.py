@@ -639,3 +639,156 @@ async def create_analyte(
         "aliases_created": created_aliases,
         "aliases_skipped": skipped_aliases,
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /matrix — tabella analiti × date (solo panel confermati)
+# ---------------------------------------------------------------------------
+
+@router.get("/matrix")
+async def get_matrix(
+    start: date | None = None,
+    end: date | None = None,
+    specimen: str | None = Query(None, pattern="^(blood|urine)$"),
+    category: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Matrice sparsa analiti × date per la pagina `/lab` tab Matrice.
+
+    - Solo panel `confirmed`.
+    - Ritorna `{analytes, dates, cells}` dove `cells` è
+      `{analyte_id: {panel_id: {value, unit, out_of_range, needs_review}}}`.
+    - Analiti filtrabili per `specimen` o `category`.
+    - Periodo opzionale via `start`/`end` (inclusivo).
+    """
+    panels_stmt = (
+        select(LabPanel.id, LabPanel.test_date, LabPanel.lab_name)
+        .where(LabPanel.status == "confirmed")
+        .order_by(LabPanel.test_date.desc(), LabPanel.id.desc())
+    )
+    if start is not None:
+        panels_stmt = panels_stmt.where(LabPanel.test_date >= start)
+    if end is not None:
+        panels_stmt = panels_stmt.where(LabPanel.test_date <= end)
+    panels_rows = (await db.execute(panels_stmt)).all()
+    panels = [
+        {"id": pid, "test_date": td.isoformat(), "lab_name": ln}
+        for pid, td, ln in panels_rows
+    ]
+
+    analytes_stmt = select(LabAnalyte).order_by(
+        LabAnalyte.category, LabAnalyte.display_name_it
+    )
+    if specimen:
+        analytes_stmt = analytes_stmt.where(LabAnalyte.specimen == specimen)
+    if category:
+        analytes_stmt = analytes_stmt.where(LabAnalyte.category == category)
+    analytes_rows = (await db.execute(analytes_stmt)).scalars().all()
+    analytes = [
+        {
+            "id": a.id,
+            "slug": a.slug,
+            "display_name_it": a.display_name_it,
+            "category": a.category,
+            "specimen": a.specimen,
+            "value_type": a.value_type,
+            "unit_canonical": a.unit_canonical,
+            "ref_low": float(a.ref_low) if a.ref_low is not None else None,
+            "ref_high": float(a.ref_high) if a.ref_high is not None else None,
+            "ref_text": a.ref_text,
+        }
+        for a in analytes_rows
+    ]
+
+    if not panels or not analytes:
+        return {"analytes": analytes, "panels": panels, "cells": {}}
+
+    analyte_ids = [a["id"] for a in analytes]
+    panel_ids = [p["id"] for p in panels]
+
+    results_stmt = select(LabResult).where(
+        LabResult.panel_id.in_(panel_ids),
+        LabResult.analyte_id.in_(analyte_ids),
+    )
+    results = (await db.execute(results_stmt)).scalars().all()
+
+    cells: dict[int, dict[int, dict[str, Any]]] = {}
+    for r in results:
+        if r.analyte_id is None:
+            continue
+        by_panel = cells.setdefault(r.analyte_id, {})
+        by_panel[r.panel_id] = {
+            "value_numeric": (
+                float(r.value_numeric) if r.value_numeric is not None else None
+            ),
+            "value_text": r.value_text,
+            "unit": r.unit_normalized or r.unit_raw,
+            "out_of_range": r.out_of_range,
+            "needs_review": r.needs_review,
+        }
+
+    return {"analytes": analytes, "panels": panels, "cells": cells}
+
+
+# ---------------------------------------------------------------------------
+# GET /timeseries — serie temporale di un singolo analita
+# ---------------------------------------------------------------------------
+
+@router.get("/timeseries")
+async def get_timeseries(
+    analyte_slug: str,
+    start: date | None = None,
+    end: date | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Serie temporale di un analita. Solo panel `confirmed`.
+    Ritorna `{analyte, points}` con `ref_low/ref_high` per banda del chart."""
+    analyte = (await db.execute(
+        select(LabAnalyte).where(LabAnalyte.slug == analyte_slug)
+    )).scalar_one_or_none()
+    if analyte is None:
+        raise HTTPException(404, f"analyte slug '{analyte_slug}' inesistente")
+
+    stmt = (
+        select(LabResult, LabPanel.test_date, LabPanel.id)
+        .join(LabPanel, LabResult.panel_id == LabPanel.id)
+        .where(
+            LabResult.analyte_id == analyte.id,
+            LabPanel.status == "confirmed",
+        )
+        .order_by(LabPanel.test_date.asc(), LabPanel.id.asc())
+    )
+    if start is not None:
+        stmt = stmt.where(LabPanel.test_date >= start)
+    if end is not None:
+        stmt = stmt.where(LabPanel.test_date <= end)
+    rows = (await db.execute(stmt)).all()
+
+    points = [
+        {
+            "panel_id": panel_id,
+            "test_date": test_date.isoformat(),
+            "value_numeric": (
+                float(r.value_numeric) if r.value_numeric is not None else None
+            ),
+            "value_text": r.value_text,
+            "unit": r.unit_normalized or r.unit_raw,
+            "out_of_range": r.out_of_range,
+        }
+        for r, test_date, panel_id in rows
+    ]
+
+    return {
+        "analyte": {
+            "id": analyte.id,
+            "slug": analyte.slug,
+            "display_name_it": analyte.display_name_it,
+            "category": analyte.category,
+            "value_type": analyte.value_type,
+            "unit_canonical": analyte.unit_canonical,
+            "ref_low": float(analyte.ref_low) if analyte.ref_low is not None else None,
+            "ref_high": float(analyte.ref_high) if analyte.ref_high is not None else None,
+            "ref_text": analyte.ref_text,
+        },
+        "points": points,
+    }
