@@ -424,7 +424,26 @@ export interface LabResult {
   notes: string | null
 }
 
+export interface LabBodyHkSample {
+  value: number
+  unit: string
+  start_date: string
+}
+
+export interface LabBodySnapshot {
+  weight: LabBodyHkSample | null
+  body_fat: LabBodyHkSample | null
+  bmi: LabBodyHkSample | null
+}
+
 export interface LabPanelDetail extends LabPanelSummary {
+  activity_text: string | null
+  medications_text: string | null
+  supplements_text: string | null
+  nutrition_text: string | null
+  diet_text: string | null
+  workout_text: string | null
+  body_snapshot?: LabBodySnapshot
   results: LabResult[]
 }
 

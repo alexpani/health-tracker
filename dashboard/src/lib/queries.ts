@@ -481,6 +481,31 @@ export function useLabDeleteResult() {
   })
 }
 
+export interface LabPanelPatch {
+  test_date?: string
+  lab_name?: string | null
+  notes?: string | null
+  specimen_types?: string[] | null
+  activity_text?: string | null
+  medications_text?: string | null
+  supplements_text?: string | null
+  nutrition_text?: string | null
+  diet_text?: string | null
+  workout_text?: string | null
+}
+
+export function useLabPatchPanel() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ panelId, patch }: { panelId: number; patch: LabPanelPatch }) =>
+      apiPatch<{ ok: boolean; id: number }>(`/api/v1/lab/panels/${panelId}`, patch),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["labPanel"] })
+      await qc.invalidateQueries({ queryKey: ["labPanels"] })
+    },
+  })
+}
+
 export function useLabConfirmPanel() {
   const qc = useQueryClient()
   return useMutation({

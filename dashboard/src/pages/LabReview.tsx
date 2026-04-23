@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table"
 import { API_URL } from "@/lib/api"
 import { formatDate } from "@/lib/utils"
+import { Textarea } from "@/components/ui/textarea"
 import {
   useLabAnalytes,
   useLabConfirmPanel,
@@ -29,10 +30,11 @@ import {
   useLabCreateAnalyte,
   useLabDeleteResult,
   useLabPanel,
+  useLabPatchPanel,
   useLabPatchResult,
   useLatestWeightBefore,
 } from "@/lib/queries"
-import type { LabAnalyte, LabResult } from "@/lib/types"
+import type { LabAnalyte, LabBodySnapshot, LabPanelDetail, LabResult } from "@/lib/types"
 
 export default function LabReview() {
   const params = useParams<{ id: string }>()
@@ -148,7 +150,9 @@ export default function LabReview() {
         </div>
       )}
 
-      <WeightAtSamplingCard testDate={panel.test_date} />
+      <BodySnapshotCard snapshot={panel.body_snapshot ?? null} testDate={panel.test_date} />
+
+      <ContextSection panel={panel} />
 
       {!isConfirmed && (
         <div>
@@ -473,28 +477,154 @@ function AliasAction({
   )
 }
 
-function WeightAtSamplingCard({ testDate }: { testDate: string }) {
-  const { data, isLoading } = useLatestWeightBefore(testDate, 3)
-  if (isLoading) return null
-  if (!data?.data) {
+function BodySnapshotCard({
+  snapshot,
+  testDate,
+}: {
+  snapshot: LabBodySnapshot | null
+  testDate: string
+}) {
+  const items: { label: string; value: string; when: string | null }[] = []
+  if (snapshot?.weight) {
+    items.push({
+      label: "Peso",
+      value: `${snapshot.weight.value.toFixed(1)} ${snapshot.weight.unit}`,
+      when: snapshot.weight.start_date.slice(0, 10),
+    })
+  }
+  if (snapshot?.body_fat) {
+    items.push({
+      label: "Massa grassa",
+      value: `${(snapshot.body_fat.value * 100).toFixed(1)} %`,
+      when: snapshot.body_fat.start_date.slice(0, 10),
+    })
+  }
+  if (snapshot?.bmi) {
+    items.push({
+      label: "BMI",
+      value: snapshot.bmi.value.toFixed(1),
+      when: snapshot.bmi.start_date.slice(0, 10),
+    })
+  }
+
+  if (items.length === 0) {
     return (
       <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        Peso al prelievo: nessun valore HK entro 3 giorni prima del {formatDate(testDate)}.
+        Corpo al prelievo ({formatDate(testDate)}): nessun dato HK nei 30 giorni
+        precedenti.
       </div>
     )
   }
-  const sampleDate = data.data.start_date.slice(0, 10)
   return (
-    <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm flex items-center justify-between">
-      <span>
-        <span className="font-medium">Peso al prelievo:</span>{" "}
-        <span className="font-mono">
-          {data.data.value.toFixed(1)} {data.data.unit}
+    <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+      <div className="flex flex-wrap gap-x-6 gap-y-1">
+        {items.map(it => (
+          <div key={it.label} className="flex items-baseline gap-1">
+            <span className="font-medium">{it.label}:</span>
+            <span className="font-mono">{it.value}</span>
+            {it.when && (
+              <span className="text-xs text-muted-foreground">
+                (il {formatDate(it.when)})
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="text-xs text-muted-foreground mt-1">
+        Ultimi valori Apple Health ≤ data del prelievo ({formatDate(testDate)}). Non
+        modificabili.
+      </div>
+    </div>
+  )
+}
+
+const CONTEXT_FIELDS: {
+  key: keyof LabPanelDetail
+  label: string
+  placeholder: string
+}[] = [
+  { key: "activity_text", label: "Attività fisica", placeholder: "Es. corsa 3×/settimana…" },
+  { key: "medications_text", label: "Farmaci", placeholder: "Es. tamsulosina 0.4mg…" },
+  { key: "supplements_text", label: "Integratori", placeholder: "Es. vit D 2000 UI…" },
+  { key: "nutrition_text", label: "Alimentazione", placeholder: "Note generiche sull'alimentazione" },
+  {
+    key: "diet_text",
+    label: "Dieta (auto-fill da diario)",
+    placeholder: "Riassunto calorie/macro del giorno",
+  },
+  {
+    key: "workout_text",
+    label: "Workout (auto-fill da HealthKit)",
+    placeholder: "Attività del giorno o del giorno precedente",
+  },
+  { key: "notes", label: "Note libere", placeholder: "Altro…" },
+]
+
+function ContextSection({ panel }: { panel: LabPanelDetail }) {
+  const patch = useLabPatchPanel()
+  const [open, setOpen] = useState(false)
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      CONTEXT_FIELDS.map(f => [f.key as string, ((panel as any)[f.key] as string | null) ?? ""])
+    )
+  )
+  const [savingKey, setSavingKey] = useState<string | null>(null)
+
+  async function commit(key: string) {
+    const newVal = values[key] ?? ""
+    const stored = ((panel as any)[key] as string | null) ?? ""
+    if (newVal === stored) return
+    setSavingKey(key)
+    try {
+      await patch.mutateAsync({
+        panelId: panel.id,
+        patch: { [key]: newVal || null },
+      })
+    } catch (e) {
+      alert(`Errore salvataggio ${key}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
+  const filledCount = CONTEXT_FIELDS.filter(
+    f => ((panel as any)[f.key] as string | null)?.trim()
+  ).length
+
+  return (
+    <div className="border rounded">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-accent"
+      >
+        <span className="font-medium">
+          Contesto del prelievo{" "}
+          <span className="text-xs text-muted-foreground">
+            ({filledCount} / {CONTEXT_FIELDS.length} compilati)
+          </span>
         </span>
-      </span>
-      <span className="text-xs text-muted-foreground">
-        rilevato il {formatDate(sampleDate)} (Apple Health)
-      </span>
+        <span className="text-xs text-muted-foreground">{open ? "chiudi" : "apri"}</span>
+      </button>
+      {open && (
+        <div className="border-t p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          {CONTEXT_FIELDS.map(f => (
+            <div key={f.key as string}>
+              <Label className="text-xs mb-1 block">{f.label}</Label>
+              <Textarea
+                value={values[f.key as string] ?? ""}
+                onChange={e =>
+                  setValues(prev => ({ ...prev, [f.key as string]: e.target.value }))
+                }
+                onBlur={() => commit(f.key as string)}
+                placeholder={f.placeholder}
+                className="text-sm min-h-[60px]"
+                disabled={savingKey === (f.key as string)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

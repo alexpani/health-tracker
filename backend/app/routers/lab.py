@@ -7,10 +7,13 @@ arriveranno in PR #2b.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+import os
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.models import HealthSample, Workout
 from app.models.lab import (
     LabAnalyte,
     LabAnalyteAlias,
@@ -31,6 +35,59 @@ from app.models.lab import (
     LabResult,
 )
 from app.services import lab_ingest, lab_units
+
+DIARIO_BASE_URL = os.environ.get("DIARIO_BASE_URL", "http://192.168.68.173:3000")
+
+
+async def _auto_fill_diet_text(test_date: date) -> str | None:
+    """Riassunto diario alimentare per `test_date` come contesto panel."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(
+                f"{DIARIO_BASE_URL}/api/external/daily-totals",
+                params={"from": test_date.isoformat(), "to": test_date.isoformat()},
+            )
+        if r.status_code != 200:
+            return None
+        rows = r.json() or []
+        day = next((row for row in rows if row.get("date") == test_date.isoformat()), None)
+        if day is None:
+            return None
+        target = day.get("kcal_target")
+        bits = [f"kcal {int(day.get('kcal', 0))}"]
+        if target:
+            bits.append(f"target {int(target)}")
+        for k, label in (("protein_g", "P"), ("fat_g", "G"), ("carbs_g", "C")):
+            v = day.get(k)
+            if v is not None:
+                bits.append(f"{label} {v:.0f}g")
+        return " · ".join(bits)
+    except Exception:
+        return None
+
+
+async def _auto_fill_workout_text(db: AsyncSession, test_date: date) -> str | None:
+    """Workout più rilevante del giorno del prelievo (o del giorno prima)."""
+    start_dt = datetime.combine(test_date - timedelta(days=1), time(0, 0), tzinfo=timezone.utc)
+    end_dt = datetime.combine(test_date, time(23, 59, 59), tzinfo=timezone.utc)
+    row = (await db.execute(
+        select(Workout)
+        .where(Workout.start_date >= start_dt, Workout.start_date <= end_dt)
+        .order_by(Workout.start_date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    bits: list[str] = []
+    name = row.activity_name or f"Activity {row.activity_type}"
+    bits.append(name)
+    if row.duration:
+        bits.append(f"{int(row.duration / 60)} min")
+    if row.total_distance:
+        bits.append(f"{row.total_distance / 1000:.1f} km")
+    when = row.start_date.date().isoformat()
+    bits.append(when)
+    return " · ".join(bits)
 
 router = APIRouter(prefix="/api/v1/lab", tags=["lab"])
 
@@ -117,6 +174,22 @@ async def ingest_referto(
         panel_kwargs["lab_name"] = extracted.lab_name
         panel_kwargs["specimen_types"] = extracted.specimen_types
         matched = await lab_ingest.build_matched_results(db, extracted.analytes)
+
+    # Auto-fill dei campi di contesto se possibile (silent fallback su None).
+    td_for_context = panel_kwargs.get("test_date")
+    if td_for_context is not None:
+        try:
+            diet = await _auto_fill_diet_text(td_for_context)
+            if diet:
+                panel_kwargs["diet_text"] = diet
+        except Exception:
+            logger.debug("diet auto-fill skipped", exc_info=True)
+        try:
+            wk = await _auto_fill_workout_text(db, td_for_context)
+            if wk:
+                panel_kwargs["workout_text"] = wk
+        except Exception:
+            logger.debug("workout auto-fill skipped", exc_info=True)
 
     panel = LabPanel(**panel_kwargs)
     db.add(panel)
@@ -228,6 +301,27 @@ async def list_panels(
 # GET /panels/{id}
 # ---------------------------------------------------------------------------
 
+async def _latest_hk_value(
+    db: AsyncSession, type_: str, before: datetime, window_days: int = 30,
+) -> dict[str, Any] | None:
+    lower = before - timedelta(days=window_days)
+    row = (await db.execute(
+        select(HealthSample)
+        .where(HealthSample.type == type_)
+        .where(HealthSample.start_date <= before)
+        .where(HealthSample.start_date >= lower)
+        .order_by(HealthSample.start_date.desc(), HealthSample.id.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    return {
+        "value": float(row.value),
+        "unit": row.unit,
+        "start_date": row.start_date.isoformat(),
+    }
+
+
 @router.get("/panels/{panel_id}")
 async def get_panel(
     panel_id: int,
@@ -243,6 +337,14 @@ async def get_panel(
         select(LabResult).where(LabResult.panel_id == panel_id).order_by(LabResult.id)
     )).scalars().all()
 
+    # Body snapshot: ultimo peso, massa grassa, BMI con start_date ≤ test_date
+    end_of_day = datetime.combine(panel.test_date, time(23, 59, 59), tzinfo=timezone.utc)
+    body_snapshot = {
+        "weight": await _latest_hk_value(db, "HKQuantityTypeIdentifierBodyMass", end_of_day),
+        "body_fat": await _latest_hk_value(db, "HKQuantityTypeIdentifierBodyFatPercentage", end_of_day),
+        "bmi": await _latest_hk_value(db, "HKQuantityTypeIdentifierBodyMassIndex", end_of_day),
+    }
+
     return {
         "id": panel.id,
         "test_date": panel.test_date.isoformat(),
@@ -252,6 +354,13 @@ async def get_panel(
         "notes": panel.notes,
         "document_id": panel.document_id,
         "confirmed_at": panel.confirmed_at.isoformat() if panel.confirmed_at else None,
+        "activity_text": panel.activity_text,
+        "medications_text": panel.medications_text,
+        "supplements_text": panel.supplements_text,
+        "nutrition_text": panel.nutrition_text,
+        "diet_text": panel.diet_text,
+        "workout_text": panel.workout_text,
+        "body_snapshot": body_snapshot,
         "results": [
             {
                 "id": r.id,
@@ -551,6 +660,12 @@ class PanelPatch(BaseModel):
     lab_name: str | None = None
     notes: str | None = None
     specimen_types: list[str] | None = None
+    activity_text: str | None = None
+    medications_text: str | None = None
+    supplements_text: str | None = None
+    nutrition_text: str | None = None
+    diet_text: str | None = None
+    workout_text: str | None = None
 
 
 @router.patch("/panels/{panel_id}")
