@@ -353,6 +353,34 @@ docker compose up -d --build   # → http://192.168.68.190
 
 ---
 
+## Dominio Lab Results (sangue / urine)
+
+Dominio separato dal mondo HealthKit: referti di laboratorio. Spec completa in `LAB_RESULTS_SPEC.md`. Roadmap in 6 PR — **PR #1 (questa): solo schema + seed**, niente endpoint, dashboard o parsing LLM.
+
+### Tabelle (backend)
+- `lab_documents` — file PDF originali, una riga per hash `sha256` UNIQUE.
+- `lab_analytes` — catalogo normalizzato (`slug`, `display_name_it`, `category`, `specimen`, `value_type`, `unit_canonical`, `ref_low/high`, `ref_text`). Catalogo iniziale: 28 analiti sangue + 17 urine, popolato dalla migration `seed_lab_analytes`.
+- `lab_analyte_aliases` — sinonimi italiani per il matching nomi nei referti (UNIQUE su alias + index funzionale `ix_lab_aliases_lower ON (LOWER(alias))`).
+- `lab_panels` — un referto = un panel; `specimen_types TEXT[]`, `status` draft|confirmed, FK opzionale a `lab_documents`.
+- `lab_results` — singole misure; FK `analyte_id` opzionale per gestire la review (NULL finché l'utente non mappa). CASCADE on `panel_id`; SET NULL on `analyte_id`.
+
+### Alembic — ordine migration lab (§10 della spec)
+`lab_documents` → `lab_analytes`+`lab_analyte_aliases` → `lab_panels` → `lab_results` → `seed_lab_analytes`. Revision chain aggancia a `6677af61441c` (diario_hk_sync).
+
+### Modelli SQLAlchemy
+- `backend/app/models/lab.py`. `app.models` è ora un **package** (prima era un file singolo): l'import storico `from app.models import Base, HealthSample, ...` continua a funzionare identico. `__init__.py` contiene i modelli HealthKit esistenti e in coda fa `from . import lab` per registrare le tabelle lab su `Base.metadata` senza doverle importare esplicitamente in `alembic/env.py`.
+
+### Test
+- `backend/tests/` con `pytest` + `pytest-asyncio`. Requisiti in `backend/requirements-dev.txt`.
+- I test richiedono un DB Postgres reale (default `postgresql+asyncpg://health:health@localhost:5432/health_tracker_test`, override via env `TEST_DATABASE_URL`). Se il DB non risponde i test sono **skipped**, non falliti.
+
+### Policy
+- I PDF referto **non vanno mai committati**. Volume `backend/data/lab_documents/` già in `.gitignore`.
+- `ANTHROPIC_API_KEY` (da PR #2) letta solo dal backend via pydantic-settings; mai dalla dashboard.
+- Review umana obbligatoria prima del commit di un panel: i `lab_results` con `analyte_id IS NULL` bloccheranno il confirm (logica in PR #2).
+
+---
+
 ## Operational Commands
 
 ### Deploy

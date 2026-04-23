@@ -201,3 +201,6 @@ class DiarioHkSync(Base):
         UniqueConstraint("date", "type", name="uq_diario_hk_sync_date_type"),
         Index("idx_diario_hk_sync_pending", "pending_write_id"),
     )
+
+
+from . import lab  # noqa: E402, F401  — registra i modelli lab su Base.metadata
