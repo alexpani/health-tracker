@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
 import { ArrowLeft, Plus, Check, AlertCircle, FlaskConical, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -34,7 +34,13 @@ import {
   useLabPatchResult,
   useLatestWeightBefore,
 } from "@/lib/queries"
-import type { LabAnalyte, LabBodySnapshot, LabPanelDetail, LabResult } from "@/lib/types"
+import type {
+  LabAnalyte,
+  LabBodySnapshot,
+  LabPanelDetail,
+  LabResult,
+  LabResultPatch,
+} from "@/lib/types"
 
 export default function LabReview() {
   const params = useParams<{ id: string }>()
@@ -312,7 +318,7 @@ function ResultRow({
   result: LabResult
   analytes: LabAnalyte[]
   analyteById: Map<number, LabAnalyte>
-  onPatch: (resultId: number, patch: { analyte_id?: number | null }) => Promise<void>
+  onPatch: (resultId: number, patch: LabResultPatch) => Promise<void>
   onDelete: (resultId: number) => Promise<void>
   onSaveAlias: (analyteId: number, alias: string) => Promise<void>
   onCreateFromRow: () => void
@@ -320,13 +326,91 @@ function ResultRow({
 }) {
   const current = result.analyte_id != null ? analyteById.get(result.analyte_id) : undefined
   const [nameInput, setNameInput] = useState(current?.display_name_it ?? "")
+  // Edit inline di valore/unità/range — bufferizziamo in stato locale e
+  // committiamo al blur. Se il server aggiorna il result (es. re-fetch
+  // dopo PATCH), i valori locali restano sincronizzati via useEffect
+  // (vedi sotto).
+  const [valueInput, setValueInput] = useState(
+    result.value_numeric != null
+      ? String(result.value_numeric)
+      : result.value_text ?? ""
+  )
+  const [unitInput, setUnitInput] = useState(result.unit_raw ?? "")
+  const [refLowInput, setRefLowInput] = useState(
+    result.ref_low_raw != null ? String(result.ref_low_raw) : ""
+  )
+  const [refHighInput, setRefHighInput] = useState(
+    result.ref_high_raw != null ? String(result.ref_high_raw) : ""
+  )
+  const [refTextInput, setRefTextInput] = useState(result.ref_text_raw ?? "")
 
-  const valueDisplay =
-    result.value_numeric != null ? String(result.value_numeric) : result.value_text ?? "—"
-  const rangeDisplay =
-    result.ref_low_raw != null || result.ref_high_raw != null
-      ? `${result.ref_low_raw ?? "-"} – ${result.ref_high_raw ?? "-"}`
-      : result.ref_text_raw ?? ""
+  // Risincronizza gli input quando i dati server cambiano (es. dopo PATCH
+  // o re-ingest). Non tocca nameInput perché l'utente sta tipando lì.
+  useEffect(() => {
+    setValueInput(
+      result.value_numeric != null
+        ? String(result.value_numeric)
+        : result.value_text ?? ""
+    )
+    setUnitInput(result.unit_raw ?? "")
+    setRefLowInput(result.ref_low_raw != null ? String(result.ref_low_raw) : "")
+    setRefHighInput(result.ref_high_raw != null ? String(result.ref_high_raw) : "")
+    setRefTextInput(result.ref_text_raw ?? "")
+  }, [
+    result.value_numeric,
+    result.value_text,
+    result.unit_raw,
+    result.ref_low_raw,
+    result.ref_high_raw,
+    result.ref_text_raw,
+  ])
+
+  function parseNumericInput(s: string): number | null {
+    const t = s.trim().replace(",", ".")
+    if (t === "") return null
+    const n = Number(t)
+    return Number.isFinite(n) ? n : null
+  }
+
+  async function commitValue() {
+    const s = valueInput.trim()
+    const asNum = parseNumericInput(s)
+    // Se lo stato corrente del DB è uguale, no-op.
+    const dbNum = result.value_numeric
+    const dbTxt = result.value_text ?? ""
+    if (asNum != null) {
+      if (dbNum != null && Number(dbNum) === asNum && !dbTxt) return
+      await onPatch(result.id, { value_numeric: asNum, value_text: null })
+    } else {
+      if (dbTxt === s && dbNum == null) return
+      await onPatch(result.id, { value_numeric: null, value_text: s || null })
+    }
+  }
+
+  async function commitUnit() {
+    const s = unitInput.trim()
+    if ((result.unit_raw ?? "") === s) return
+    await onPatch(result.id, { unit_raw: s || null })
+  }
+
+  async function commitRefLow() {
+    const n = parseNumericInput(refLowInput)
+    if ((result.ref_low_raw ?? null) === n) return
+    await onPatch(result.id, { ref_low_raw: n })
+  }
+
+  async function commitRefHigh() {
+    const n = parseNumericInput(refHighInput)
+    if ((result.ref_high_raw ?? null) === n) return
+    await onPatch(result.id, { ref_high_raw: n })
+  }
+
+  async function commitRefText() {
+    const s = refTextInput.trim()
+    if ((result.ref_text_raw ?? "") === s) return
+    await onPatch(result.id, { ref_text_raw: s || null })
+  }
+
 
   async function commitAnalyte() {
     const trimmed = nameInput.trim()
@@ -413,9 +497,51 @@ function ResultRow({
           )}
         </div>
       </TableCell>
-      <TableCell className="font-mono">{valueDisplay}</TableCell>
-      <TableCell>{result.unit_raw ?? "—"}</TableCell>
-      <TableCell className="text-xs text-muted-foreground">{rangeDisplay}</TableCell>
+      <TableCell>
+        <Input
+          value={valueInput}
+          onChange={e => setValueInput(e.target.value)}
+          onBlur={commitValue}
+          placeholder="valore"
+          className="h-8 text-sm font-mono w-24"
+          title="Modifica se l'OCR ha letto male"
+        />
+      </TableCell>
+      <TableCell>
+        <Input
+          value={unitInput}
+          onChange={e => setUnitInput(e.target.value)}
+          onBlur={commitUnit}
+          placeholder="—"
+          className="h-8 text-sm w-20"
+        />
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1 text-xs">
+          <Input
+            value={refLowInput}
+            onChange={e => setRefLowInput(e.target.value)}
+            onBlur={commitRefLow}
+            placeholder="min"
+            className="h-8 text-xs w-16 font-mono"
+          />
+          <span className="text-muted-foreground">–</span>
+          <Input
+            value={refHighInput}
+            onChange={e => setRefHighInput(e.target.value)}
+            onBlur={commitRefHigh}
+            placeholder="max"
+            className="h-8 text-xs w-16 font-mono"
+          />
+          <Input
+            value={refTextInput}
+            onChange={e => setRefTextInput(e.target.value)}
+            onBlur={commitRefText}
+            placeholder="range testuale"
+            className="h-8 text-xs w-32"
+          />
+        </div>
+      </TableCell>
       <TableCell>{stateBadge}</TableCell>
       <TableCell>
         {current && result.raw_name && <AliasAction analyte={current} rawName={result.raw_name} onSaveAlias={onSaveAlias} />}

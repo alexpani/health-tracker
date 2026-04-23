@@ -476,6 +476,9 @@ export interface LabResultPatch {
   value_numeric?: number | null
   value_text?: string | null
   unit_raw?: string | null
+  ref_low_raw?: number | null
+  ref_high_raw?: number | null
+  ref_text_raw?: string | null
   notes?: string | null
 }
 

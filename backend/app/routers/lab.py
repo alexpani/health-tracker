@@ -740,6 +740,9 @@ class ResultPatch(BaseModel):
     value_numeric: Decimal | None = None
     value_text: str | None = None
     unit_raw: str | None = None
+    ref_low_raw: Decimal | None = None
+    ref_high_raw: Decimal | None = None
+    ref_text_raw: str | None = None
     notes: str | None = None
 
 
