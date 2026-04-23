@@ -86,11 +86,15 @@ async def ingest_referto(
         doc = existing_doc
 
     # 2) LLM parse del PDF (testuale o scannerizzato: Anthropic gestisce entrambi).
+    #    Passiamo il catalogo così il modello può restituire suggested_slug
+    #    per ciascun analita — migliora enormemente il matching delle urine
+    #    (dove le varianti di naming sono moltissime).
     #    In caso di errore creiamo un panel vuoto con notes=parsing_failed.
     parsing_failed = False
     extracted: lab_ingest.ExtractedPanel | None = None
     try:
-        payload = lab_ingest.call_llm(data)
+        catalog = await lab_ingest.load_catalog_for_llm(db)
+        payload = lab_ingest.call_llm(data, catalog=catalog)
         extracted = lab_ingest.parse_extracted_panel(payload)
     except Exception:
         logger.exception("lab/ingest: LLM parsing failed")

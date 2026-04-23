@@ -184,12 +184,18 @@ function SeriesCard({
               tickFormatter={v => v.slice(2, 7)}
             />
             <YAxis tick={{ fontSize: 11 }} />
-            {ref_low != null && ref_high != null && (
+            {(ref_low != null || ref_high != null) && (
               <ReferenceArea
-                y1={ref_low}
-                y2={ref_high}
-                fill="#94a3b8"
-                fillOpacity={0.12}
+                // Se un lato manca, usa dataMin/dataMax del dominio Recharts
+                // → la banda verde copre sempre tutta la zona "nella norma".
+                y1={ref_low ?? "dataMin"}
+                y2={ref_high ?? "dataMax"}
+                fill="#10b981"
+                fillOpacity={0.18}
+                stroke="#10b981"
+                strokeOpacity={0.35}
+                strokeDasharray="3 3"
+                ifOverflow="visible"
               />
             )}
             <Tooltip

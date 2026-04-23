@@ -52,7 +52,7 @@ export default function LabMatrix({
   onJumpToTrends?: (slug: string) => void
 }) {
   const [filters, setFilters] = useState<MatrixFilters>(EMPTY_FILTERS)
-  const { data: analytesAll } = useLabAnalytes()
+  useLabAnalytes() // pre-warm cache — usata altrove
   const queryParams = useMemo(
     () => ({
       start: filters.start || undefined,
@@ -63,6 +63,20 @@ export default function LabMatrix({
     [filters]
   )
   const { data: rawData, isLoading, error } = useLabMatrix(queryParams)
+
+  // Seconda query senza `category`: serve per capire quali categorie
+  // contengono almeno un valore e popolare il menu a tendina solo con
+  // quelle utili (ignora l'input `category` ma rispetta date/specimen).
+  const noCategoryParams = useMemo(
+    () => ({
+      start: filters.start || undefined,
+      end: filters.end || undefined,
+      specimen: filters.specimen || undefined,
+    }),
+    [filters.start, filters.end, filters.specimen]
+  )
+  const { data: categoryPool } = useLabMatrix(noCategoryParams)
+
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   // Applica il filtro "solo fuori range" lato client (post-fetch).
@@ -76,11 +90,17 @@ export default function LabMatrix({
     return { ...rawData, analytes: filteredAnalytes }
   }, [rawData, filters.onlyOutOfRange])
 
+  // Solo categorie che hanno almeno un valore nella matrice (ignorando
+  // il filtro categoria, così tornano sempre tutte le popolate).
   const categories = useMemo(() => {
+    if (!categoryPool) return []
     const set = new Set<string>()
-    analytesAll?.forEach(a => set.add(a.category))
+    for (const a of categoryPool.analytes) {
+      const byPanel = categoryPool.cells[String(a.id)] ?? {}
+      if (Object.keys(byPanel).length > 0) set.add(a.category)
+    }
     return Array.from(set).sort()
-  }, [analytesAll])
+  }, [categoryPool])
 
   const grouped = useMemo(() => groupByCategory(data), [data])
   const filtersActive =
@@ -168,16 +188,16 @@ export default function LabMatrix({
         />
         Solo fuori range
       </label>
-      {filtersActive && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setFilters(EMPTY_FILTERS)}
-        >
-          <X className="h-3.5 w-3.5 mr-1" />
-          Reset
-        </Button>
-      )}
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setFilters(EMPTY_FILTERS)}
+        disabled={!filtersActive}
+        title={filtersActive ? "Ripristina tutti i filtri" : "Nessun filtro attivo"}
+      >
+        <X className="h-3.5 w-3.5 mr-1" />
+        Reset filtri
+      </Button>
     </div>
   )
 
