@@ -19,11 +19,12 @@ import { cn } from "@/lib/utils"
 const MAX_SERIES = 5
 const COLORS = ["#ef4444", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6"]
 const PRESETS: { label: string; months: number | null }[] = [
+  { label: "Tutto", months: null },
   { label: "12 mesi", months: 12 },
   { label: "3 anni", months: 36 },
   { label: "5 anni", months: 60 },
-  { label: "Tutto", months: null },
 ]
+const DEFAULT_PRESET_IDX = 0 // "Tutto"
 
 // Analiti "virtuali" non-lab: vivono dentro HealthKit. Condividono il UI degli
 // analiti lab per la tab Andamenti così si possono sovrapporre a valori lab.
@@ -68,7 +69,7 @@ function findBodyMetric(slug: string): BodyMetric | undefined {
 export default function LabTrends({ initialSlug }: { initialSlug?: string | null }) {
   const { data: analytes } = useLabAnalytes()
   const [selected, setSelected] = useState<string[]>(initialSlug ? [initialSlug] : [])
-  const [presetIdx, setPresetIdx] = useState(0)
+  const [presetIdx, setPresetIdx] = useState(DEFAULT_PRESET_IDX)
 
   const byCategory = useMemo(() => {
     const m = new Map<string, LabAnalyte[]>()
@@ -90,11 +91,11 @@ export default function LabTrends({ initialSlug }: { initialSlug?: string | null
     })
   }
 
-  const isDefaultState = selected.length === 0 && presetIdx === 0
+  const isDefaultState = selected.length === 0 && presetIdx === DEFAULT_PRESET_IDX
 
   function resetFilters() {
     setSelected([])
-    setPresetIdx(0)
+    setPresetIdx(DEFAULT_PRESET_IDX)
   }
 
   return (
@@ -110,7 +111,7 @@ export default function LabTrends({ initialSlug }: { initialSlug?: string | null
             title={
               isDefaultState
                 ? "Nessun filtro attivo"
-                : "Pulisci analiti + torna al preset 12 mesi"
+                : "Pulisci analiti + torna al preset di default"
             }
             className="h-6 text-xs"
           >
