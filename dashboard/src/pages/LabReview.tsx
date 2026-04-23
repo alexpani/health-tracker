@@ -24,6 +24,7 @@ import { API_URL } from "@/lib/api"
 import { formatDate } from "@/lib/utils"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  useLabAddResult,
   useLabAnalytes,
   useLabConfirmPanel,
   useLabCreateAlias,
@@ -51,6 +52,7 @@ export default function LabReview() {
   const { data: analytes } = useLabAnalytes()
   const patch = useLabPatchResult()
   const deleteResult = useLabDeleteResult()
+  const addResult = useLabAddResult()
   const confirm = useLabConfirmPanel()
   const createAlias = useLabCreateAlias()
   const [showNewAnalyteForm, setShowNewAnalyteForm] = useState(false)
@@ -107,20 +109,7 @@ export default function LabReview() {
           </Link>
         </Button>
         <div className="flex-1">
-          <h1 className="text-xl font-semibold">
-            Referto del {formatDate(panel.test_date)}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {panel.lab_name ?? "Lab non specificato"} ·{" "}
-            {panel.specimen_types.join(", ") || "—"} ·{" "}
-            <span
-              className={
-                isConfirmed ? "text-emerald-600" : "text-amber-600"
-              }
-            >
-              {isConfirmed ? "Confermato" : "In revisione"}
-            </span>
-          </p>
+          <PanelHeader panel={panel} isConfirmed={isConfirmed} />
         </div>
         {panel.document_id != null && (
           <Button variant="outline" size="sm" asChild>
@@ -287,6 +276,23 @@ export default function LabReview() {
               ])}
             </TableBody>
           </Table>
+          <div className="mt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await addResult.mutateAsync({ panelId: panel.id })
+                } catch (e) {
+                  alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
+                }
+              }}
+              disabled={addResult.isPending}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              {addResult.isPending ? "Aggiungo…" : "Aggiungi riga"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -411,6 +417,18 @@ function ResultRow({
     await onPatch(result.id, { ref_text_raw: s || null })
   }
 
+  const [rawNameInput, setRawNameInput] = useState(result.raw_name)
+  useEffect(() => setRawNameInput(result.raw_name), [result.raw_name])
+  async function commitRawName() {
+    const s = rawNameInput.trim()
+    if (!s) {
+      setRawNameInput(result.raw_name)
+      return
+    }
+    if (s === result.raw_name) return
+    await onPatch(result.id, { raw_name: s })
+  }
+
 
   async function commitAnalyte() {
     const trimmed = nameInput.trim()
@@ -466,7 +484,14 @@ function ResultRow({
 
   return (
     <TableRow>
-      <TableCell className="font-mono text-xs">{result.raw_name}</TableCell>
+      <TableCell>
+        <Input
+          value={rawNameInput}
+          onChange={e => setRawNameInput(e.target.value)}
+          onBlur={commitRawName}
+          className="h-8 text-xs font-mono w-full min-w-[140px]"
+        />
+      </TableCell>
       <TableCell>
         <div className="flex items-center gap-1">
           <Input
@@ -600,6 +625,101 @@ function AliasAction({
       <Plus className="h-3.5 w-3.5 mr-1" />
       alias
     </Button>
+  )
+}
+
+function PanelHeader({
+  panel,
+  isConfirmed,
+}: {
+  panel: LabPanelDetail
+  isConfirmed: boolean
+}) {
+  const patchPanel = useLabPatchPanel()
+  const [editing, setEditing] = useState(false)
+  const [dateInput, setDateInput] = useState(panel.test_date)
+  const [labInput, setLabInput] = useState(panel.lab_name ?? "")
+
+  useEffect(() => {
+    setDateInput(panel.test_date)
+    setLabInput(panel.lab_name ?? "")
+  }, [panel.test_date, panel.lab_name])
+
+  async function save() {
+    const patch: { test_date?: string; lab_name?: string | null } = {}
+    if (dateInput !== panel.test_date) patch.test_date = dateInput
+    const newLab = labInput.trim()
+    if (newLab !== (panel.lab_name ?? "")) patch.lab_name = newLab || null
+    if (Object.keys(patch).length === 0) {
+      setEditing(false)
+      return
+    }
+    try {
+      await patchPanel.mutateAsync({ panelId: panel.id, patch })
+      setEditing(false)
+    } catch (e) {
+      alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div>
+        <h1 className="text-xl font-semibold flex items-center gap-2">
+          Referto del {formatDate(panel.test_date)}
+          <button
+            onClick={() => setEditing(true)}
+            className="text-xs font-normal text-muted-foreground hover:text-primary hover:underline"
+          >
+            modifica
+          </button>
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          {panel.lab_name ?? "Lab non specificato"} ·{" "}
+          {panel.specimen_types.join(", ") || "—"} ·{" "}
+          <span className={isConfirmed ? "text-emerald-600" : "text-amber-600"}>
+            {isConfirmed ? "Confermato" : "In revisione"}
+          </span>
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <div>
+        <Label className="text-xs">Data prelievo</Label>
+        <Input
+          type="date"
+          value={dateInput}
+          onChange={e => setDateInput(e.target.value)}
+          className="h-8 text-sm w-40"
+        />
+      </div>
+      <div className="flex-1 min-w-[200px]">
+        <Label className="text-xs">Laboratorio</Label>
+        <Input
+          value={labInput}
+          onChange={e => setLabInput(e.target.value)}
+          placeholder="es. C.D.R."
+          className="h-8 text-sm"
+        />
+      </div>
+      <Button size="sm" onClick={save} disabled={patchPanel.isPending}>
+        {patchPanel.isPending ? "Salvo…" : "Salva"}
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          setDateInput(panel.test_date)
+          setLabInput(panel.lab_name ?? "")
+          setEditing(false)
+        }}
+      >
+        Annulla
+      </Button>
+    </div>
   )
 }
 

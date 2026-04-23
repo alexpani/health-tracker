@@ -737,6 +737,7 @@ async def delete_panel(
 
 class ResultPatch(BaseModel):
     analyte_id: int | None = None
+    raw_name: str | None = None
     value_numeric: Decimal | None = None
     value_text: str | None = None
     unit_raw: str | None = None
@@ -793,6 +794,60 @@ async def patch_result(
 
     await db.commit()
     return {"ok": True, "id": result.id}
+
+
+class NewResultIn(BaseModel):
+    raw_name: str = "Nuovo risultato"
+    analyte_id: int | None = None
+    value_numeric: Decimal | None = None
+    value_text: str | None = None
+    unit_raw: str | None = None
+    ref_low_raw: Decimal | None = None
+    ref_high_raw: Decimal | None = None
+    ref_text_raw: str | None = None
+    notes: str | None = None
+
+
+@router.post("/panels/{panel_id}/results", status_code=201)
+async def add_result(
+    panel_id: int,
+    body: NewResultIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Aggiunge un risultato a un panel esistente (righe mancate dall'OCR)."""
+    panel = (await db.execute(
+        select(LabPanel).where(LabPanel.id == panel_id)
+    )).scalar_one_or_none()
+    if panel is None:
+        raise HTTPException(404, "panel non trovato")
+
+    result = LabResult(
+        panel_id=panel_id,
+        raw_name=body.raw_name.strip() or "Nuovo risultato",
+        analyte_id=body.analyte_id,
+        value_numeric=body.value_numeric,
+        value_text=body.value_text,
+        unit_raw=body.unit_raw,
+        ref_low_raw=body.ref_low_raw,
+        ref_high_raw=body.ref_high_raw,
+        ref_text_raw=body.ref_text_raw,
+        notes=body.notes,
+        needs_review=True,
+    )
+    db.add(result)
+    await db.flush()
+
+    # Se il panel è già confirmed e abbiamo un analyte_id, applica subito OOR
+    if panel.status == "confirmed" and result.analyte_id is not None:
+        analyte = (await db.execute(
+            select(LabAnalyte).where(LabAnalyte.id == result.analyte_id)
+        )).scalar_one_or_none()
+        if analyte is not None:
+            _apply_confirm_logic(result, analyte)
+
+    await db.commit()
+    await db.refresh(result)
+    return {"id": result.id, "panel_id": result.panel_id, "raw_name": result.raw_name}
 
 
 @router.delete("/results/{result_id}")

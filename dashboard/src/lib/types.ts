@@ -473,6 +473,7 @@ export interface LabConfirmResponse {
 
 export interface LabResultPatch {
   analyte_id?: number | null
+  raw_name?: string
   value_numeric?: number | null
   value_text?: string | null
   unit_raw?: string | null

@@ -481,6 +481,22 @@ export function useLabDeleteResult() {
   })
 }
 
+export function useLabAddResult() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ panelId, raw_name }: { panelId: number; raw_name?: string }) =>
+      apiPost<{ id: number; panel_id: number; raw_name: string }>(
+        `/api/v1/lab/panels/${panelId}/results`,
+        { raw_name: raw_name ?? "Nuovo risultato" }
+      ),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["labPanel"] })
+      await qc.invalidateQueries({ queryKey: ["labPanels"] })
+      await qc.invalidateQueries({ queryKey: ["labMatrix"] })
+    },
+  })
+}
+
 export interface LabPanelPatch {
   test_date?: string
   lab_name?: string | null
