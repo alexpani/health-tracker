@@ -460,3 +460,38 @@ export interface LabAliasIn {
   analyte_id: number
   alias: string
 }
+
+export interface LabMatrixCell {
+  value_numeric: number | null
+  value_text: string | null
+  unit: string | null
+  out_of_range: boolean | null
+  needs_review: boolean
+}
+
+export interface LabMatrixPanel {
+  id: number
+  test_date: string
+  lab_name: string | null
+}
+
+export interface LabMatrixResponse {
+  analytes: LabAnalyte[]
+  panels: LabMatrixPanel[]
+  // Keys are stringified ids (JSON object).
+  cells: Record<string, Record<string, LabMatrixCell>>
+}
+
+export interface LabTimeseriesPoint {
+  panel_id: number
+  test_date: string
+  value_numeric: number | null
+  value_text: string | null
+  unit: string | null
+  out_of_range: boolean | null
+}
+
+export interface LabTimeseriesResponse {
+  analyte: LabAnalyte
+  points: LabTimeseriesPoint[]
+}

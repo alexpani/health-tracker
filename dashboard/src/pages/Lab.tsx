@@ -1,9 +1,20 @@
+import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import LabMatrix from "@/components/LabMatrix"
 import LabPanelsList from "@/components/LabPanelsList"
+import LabTrends from "@/components/LabTrends"
 import LabUploadDropzone from "@/components/LabUploadDropzone"
 
 export default function Lab() {
+  const [tab, setTab] = useState("referti")
+  const [trendsSlug, setTrendsSlug] = useState<string | null>(null)
+
+  function jumpToTrends(slug: string) {
+    setTrendsSlug(slug)
+    setTab("andamenti")
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -18,15 +29,11 @@ export default function Lab() {
         </div>
       </div>
 
-      <Tabs defaultValue="referti">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="referti">Referti</TabsTrigger>
-          <TabsTrigger value="matrice" disabled>
-            Matrice
-          </TabsTrigger>
-          <TabsTrigger value="andamenti" disabled>
-            Andamenti
-          </TabsTrigger>
+          <TabsTrigger value="matrice">Matrice</TabsTrigger>
+          <TabsTrigger value="andamenti">Andamenti</TabsTrigger>
         </TabsList>
 
         <TabsContent value="referti" className="mt-4">
@@ -36,6 +43,32 @@ export default function Lab() {
             </CardHeader>
             <CardContent>
               <LabPanelsList />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="matrice" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Matrice analiti × date</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Solo referti confermati. Click sul nome dell'analita → Andamenti.
+                Celle in rosso: fuori range; in ambra: da rivedere.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <LabMatrix onJumpToTrends={jumpToTrends} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="andamenti" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Andamenti nel tempo</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <LabTrends initialSlug={trendsSlug} />
             </CardContent>
           </Card>
         </TabsContent>
