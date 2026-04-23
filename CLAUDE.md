@@ -412,6 +412,15 @@ Dominio separato dal mondo HealthKit: referti di laboratorio. Spec completa in `
 ### Volume Docker
 - `backend/docker-compose.yml` monta `./data/lab_documents` su `/app/data/lab_documents`. Variabile `LAB_DOCUMENTS_DIR` nel container.
 
+### Import storico xlsx (PR #5)
+- Script: `backend/scripts/import_spreadsheet_lab.py`.
+- Uso: `python -m scripts.import_spreadsheet_lab --file storico.xlsx [--sheet Analisi] [--dry-run|--commit]`.
+- Formato atteso: riga 1 = date in colonne B.., colonna A = nomi analiti, riga "Note" → popolamento `panel.notes` per colonna. Valori: numeri con virgola italiana, testo qualitativo, o "numero + unità inline" (es. `3,02 pg/ml`).
+- Matching: exact case-insensitive su `lab_analyte_aliases`. Miss → result inserito comunque con `analyte_id=NULL` e `needs_review=True` (da risolvere via UI /lab review).
+- I panel creati sono `status='confirmed'` con `specimen_types=['blood']` (default MVP — editabile via `PATCH /panels/{id}`).
+- Dry-run di default: scrive `import_report.tsv` accanto al file di input con: panel trovati, count valori per colonna, righe non mappate. Nessuna scrittura su DB.
+- Dep aggiunta: `openpyxl`.
+
 ---
 
 ## Operational Commands
