@@ -375,9 +375,25 @@ Dominio separato dal mondo HealthKit: referti di laboratorio. Spec completa in `
 - I test richiedono un DB Postgres reale (default `postgresql+asyncpg://health:health@localhost:5432/health_tracker_test`, override via env `TEST_DATABASE_URL`). Se il DB non risponde i test sono **skipped**, non falliti.
 
 ### Policy
-- I PDF referto **non vanno mai committati**. Volume `backend/data/lab_documents/` già in `.gitignore`.
-- `ANTHROPIC_API_KEY` (da PR #2) letta solo dal backend via pydantic-settings; mai dalla dashboard.
-- Review umana obbligatoria prima del commit di un panel: i `lab_results` con `analyte_id IS NULL` bloccheranno il confirm (logica in PR #2).
+- App single-user self-hosted: dati medici reali **possono** vivere in repo (fixture test, commenti, esempi). Nessun obbligo di anonimizzazione. I PDF operativi stanno comunque nel volume `backend/data/lab_documents/` (in `.gitignore`) per non gonfiare la history.
+- `ANTHROPIC_API_KEY` letta solo dal backend via pydantic-settings (`app/config.py`); mai dalla dashboard. Default modello: `claude-opus-4-7` (override via env `ANTHROPIC_MODEL`).
+- Review umana obbligatoria prima del commit di un panel: i `lab_results` con `analyte_id IS NULL` bloccheranno il confirm (logica in PR #2b).
+
+### Ingest pipeline (PR #2a)
+- Service: `app/services/lab_ingest.py` (estrazione testo pdfplumber → Anthropic JSON parse → matching alias).
+- Matching alias: **exact case-insensitive** su `lab_analyte_aliases` → fallback **pg_trgm similarity > 0.6**. Extension `pg_trgm` abilitata dalla migration `07a1b2c3d4e5`.
+- Dedup upload via `sha256`: stesso PDF caricato due volte → riusa il document esistente e ritorna il panel già associato (se presente).
+- Parsing deterministico lato service: decimale italiano (`27,62` → `Decimal("27.62")`), range `a - b` → `(ref_low_raw, ref_high_raw)`, reference testuale (`Superiore a 35`, `fino a 12`) → `ref_text_raw`. Asterischi "*" di out-of-range restano nel `raw_name`/`value_raw` grezzo — non sono interpretati qui, saranno ricostruiti dal confirm in PR #2b via `ref_low`/`ref_high` dell'analita.
+
+### Endpoint lab (tutti sotto `/api/v1/lab`, in `app/routers/lab.py`)
+- `POST /ingest` — multipart PDF. Ritorna `{panel_id, status, test_date, lab_name, specimen_types, analytes_count, unmatched_count, parsing_failed, document_id}`. Panel creato in `draft`.
+- `GET /panels` — lista paginata con filtri `status`, `year`, `specimen`, `lab_name`.
+- `GET /panels/{id}` — dettaglio + array di `results` con valori e range.
+- `GET /documents/{id}/file` — stream del PDF originale.
+- `GET /analytes` — catalogo read-only, filtri `specimen`, `category`.
+
+### Volume Docker
+- `backend/docker-compose.yml` monta `./data/lab_documents` su `/app/data/lab_documents`. Variabile `LAB_DOCUMENTS_DIR` nel container.
 
 ---
 
