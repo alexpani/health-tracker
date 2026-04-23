@@ -18,11 +18,17 @@ export default function LabPanelsList() {
   const { data, isLoading, error } = useLabPanels({ limit: 200 })
   const del = useLabDeletePanel()
 
-  const { drafts, confirmed } = useMemo(() => {
+  const { incomplete, complete } = useMemo(() => {
     const items = data?.items ?? []
+    // "Da completare" = qualsiasi panel con righe non mappate O ancora draft.
+    // "Completati" = solo confirmed + 0 unmapped.
     return {
-      drafts: items.filter(p => p.status === "draft"),
-      confirmed: items.filter(p => p.status === "confirmed"),
+      incomplete: items.filter(
+        p => p.status === "draft" || (p.unmapped_count ?? 0) > 0
+      ),
+      complete: items.filter(
+        p => p.status === "confirmed" && (p.unmapped_count ?? 0) === 0
+      ),
     }
   }, [data])
 
@@ -43,23 +49,23 @@ export default function LabPanelsList() {
 
   return (
     <div className="space-y-6">
-      {drafts.length > 0 && (
+      {incomplete.length > 0 && (
         <section>
           <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-amber-600" />
-            Da rivedere ({drafts.length})
+            Da completare ({incomplete.length})
           </h3>
-          <PanelsTable panels={drafts} isDraft onDelete={handleDelete} />
+          <PanelsTable panels={incomplete} onDelete={handleDelete} />
         </section>
       )}
 
-      {confirmed.length > 0 && (
+      {complete.length > 0 && (
         <section>
           <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-            Confermati ({confirmed.length})
+            Completati ({complete.length})
           </h3>
-          <PanelsTable panels={confirmed} onDelete={handleDelete} />
+          <PanelsTable panels={complete} onDelete={handleDelete} />
         </section>
       )}
     </div>
@@ -68,11 +74,9 @@ export default function LabPanelsList() {
 
 function PanelsTable({
   panels,
-  isDraft = false,
   onDelete,
 }: {
   panels: LabPanelSummary[]
-  isDraft?: boolean
   onDelete: (p: LabPanelSummary) => void
 }) {
   return (
@@ -82,24 +86,40 @@ function PanelsTable({
           <TableHead>Data</TableHead>
           <TableHead>Laboratorio</TableHead>
           <TableHead>Campioni</TableHead>
+          <TableHead>Stato</TableHead>
           <TableHead>Note</TableHead>
           <TableHead className="text-right">Azioni</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {panels.map(p => {
-          const linkTarget = isDraft ? `/lab/panels/${p.id}/review` : `/lab/panels/${p.id}/review`
           const parsingFailed = p.notes === "parsing_failed"
+          const unmapped = p.unmapped_count ?? 0
           return (
             <TableRow key={p.id}>
               <TableCell>
-                <Link to={linkTarget} className="text-primary hover:underline">
+                <Link to={`/lab/panels/${p.id}/review`} className="text-primary hover:underline">
                   {formatDate(p.test_date)}
                 </Link>
               </TableCell>
               <TableCell>{p.lab_name ?? "—"}</TableCell>
               <TableCell>
                 {p.specimen_types.length > 0 ? p.specimen_types.join(", ") : "—"}
+              </TableCell>
+              <TableCell>
+                {p.status === "draft" ? (
+                  <span className="text-xs rounded-full bg-amber-100 text-amber-800 px-2 py-0.5">
+                    bozza
+                  </span>
+                ) : unmapped > 0 ? (
+                  <span className="text-xs rounded-full bg-amber-100 text-amber-800 px-2 py-0.5">
+                    {unmapped} da rivedere
+                  </span>
+                ) : (
+                  <span className="text-xs rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5">
+                    completo
+                  </span>
+                )}
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
                 {parsingFailed ? (

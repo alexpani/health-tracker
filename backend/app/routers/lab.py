@@ -181,6 +181,23 @@ async def list_panels(
     stmt = stmt.order_by(LabPanel.test_date.desc(), LabPanel.id.desc()).offset(offset).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
 
+    panel_ids = [p.id for p in rows]
+    unmapped_by_panel: dict[int, int] = {pid: 0 for pid in panel_ids}
+    total_by_panel: dict[int, int] = {pid: 0 for pid in panel_ids}
+    if panel_ids:
+        agg_rows = (await db.execute(
+            select(
+                LabResult.panel_id,
+                func.count().label("total"),
+                func.count().filter(LabResult.analyte_id.is_(None)).label("unmapped"),
+            )
+            .where(LabResult.panel_id.in_(panel_ids))
+            .group_by(LabResult.panel_id)
+        )).all()
+        for pid, tot, unm in agg_rows:
+            total_by_panel[pid] = tot
+            unmapped_by_panel[pid] = unm
+
     return {
         "total": total,
         "offset": offset,
@@ -195,6 +212,8 @@ async def list_panels(
                 "notes": p.notes,
                 "document_id": p.document_id,
                 "confirmed_at": p.confirmed_at.isoformat() if p.confirmed_at else None,
+                "results_count": total_by_panel.get(p.id, 0),
+                "unmapped_count": unmapped_by_panel.get(p.id, 0),
             }
             for p in rows
         ],

@@ -397,6 +397,8 @@ export interface LabPanelSummary {
   notes: string | null
   document_id: number | null
   confirmed_at: string | null
+  results_count: number
+  unmapped_count: number
 }
 
 export interface LabPanelListResponse {
