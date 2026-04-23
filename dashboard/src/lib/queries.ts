@@ -478,6 +478,31 @@ export function useLabCreateAlias() {
   })
 }
 
+export interface LabAnalyteCreate {
+  slug: string
+  display_name_it: string
+  category: string
+  specimen?: "blood" | "urine" | "other"
+  value_type?: "numeric" | "semi_quantitative" | "qualitative" | "textual"
+  unit_canonical?: string | null
+  ref_low?: number | null
+  ref_high?: number | null
+  ref_text?: string | null
+  aliases?: string[]
+}
+
+export function useLabCreateAnalyte() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: LabAnalyteCreate) =>
+      apiPost<{ id: number; slug: string; aliases_created: number; aliases_skipped: number }>(
+        "/api/v1/lab/analytes",
+        body
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["labAnalytes"] }),
+  })
+}
+
 export function useLabMatrix(params?: {
   start?: string
   end?: string

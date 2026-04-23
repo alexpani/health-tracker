@@ -174,12 +174,15 @@ async def test_confirm_numeric_out_of_range_and_equivalent_unit(db_session, engi
         app.dependency_overrides.clear()
 
 
-async def test_confirm_rejects_unmatched_results(db_session, engine):
+async def test_confirm_allows_partial_mapping(db_session, engine):
+    """Il confirm procede anche con righe senza analyte_id: le righe mappate
+    vengono processate (out_of_range + unit_normalized), quelle non mappate
+    restano needs_review=True ma il panel diventa confirmed. Così i valori
+    noti finiscono subito in Matrice/Andamenti."""
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
 
     analyte, panel = await _setup_analyte_and_panel(db_session)
-    # Due result: uno con analyte_id, uno senza
     db_session.add_all([
         LabResult(panel_id=panel.id, analyte_id=analyte.id, raw_name="GLICEMIA",
                   value_numeric=Decimal("90"), unit_raw="mg/dl"),
@@ -192,15 +195,20 @@ async def test_confirm_rejects_unmatched_results(db_session, engine):
     try:
         async with await _client(app) as c:
             r = await c.post(f"/api/v1/lab/panels/{panel.id}/confirm")
-        assert r.status_code == 400
-        assert "review incompleta" in r.json()["detail"]
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["status"] == "confirmed"
+        assert body["results_count"] == 2
+        assert body["unmapped_count"] == 1
 
-        # Il panel resta draft
+        # La riga non mappata resta needs_review=True, quella mappata no.
         await db_session.expire_all()
-        p = (await db_session.execute(
-            text("SELECT status FROM lab_panels WHERE id = :id"), {"id": panel.id}
-        )).scalar_one()
-        assert p == "draft"
+        rows = (await db_session.execute(text(
+            "SELECT analyte_id, needs_review FROM lab_results "
+            "WHERE panel_id=:p ORDER BY id"
+        ), {"p": panel.id})).all()
+        assert rows[0].analyte_id == analyte.id and rows[0].needs_review is False
+        assert rows[1].analyte_id is None and rows[1].needs_review is True
     finally:
         app.dependency_overrides.clear()
 

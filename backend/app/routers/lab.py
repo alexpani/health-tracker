@@ -341,13 +341,21 @@ async def confirm_panel(
     panel_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Promuove un panel `draft → confirmed`. Per ogni result:
-    - se l'analita è numerico e l'unità matcha quella canonica → copia il valore
-      in `unit_normalized` e calcola `out_of_range` con i range dell'analita;
+    """Promuove un panel `draft → confirmed`.
+
+    Per ogni result mappato (analyte_id presente):
+    - se l'analita è numerico e l'unità matcha quella canonica → copia il
+      valore in `unit_normalized` e calcola `out_of_range` con i range
+      dell'analita;
     - se l'unità non matcha (e non è equivalente) → `needs_review=True`,
-      `unit_normalized=NULL`: si confronta comunque con i range raw, se presenti;
+      `unit_normalized=NULL`: confronta comunque coi range raw, se presenti;
     - se l'analita è qualitativo → confronto testo/testo con `ref_text`.
-    Rifiuta il confirm se almeno un result non ha `analyte_id`.
+
+    I result senza analita (`analyte_id=NULL`) restano con `needs_review=True`
+    e vengono naturalmente esclusi da Matrice/Andamenti (i filtri usano
+    `analyte_id`). Il panel si conferma comunque, così i valori mappati
+    diventano subito visibili; i non-mappati possono essere completati in
+    seguito tornando sulla review.
     """
     panel = (await db.execute(
         select(LabPanel).where(LabPanel.id == panel_id)
@@ -360,13 +368,6 @@ async def confirm_panel(
     results = (await db.execute(
         select(LabResult).where(LabResult.panel_id == panel_id)
     )).scalars().all()
-    unmatched = [r.id for r in results if r.analyte_id is None]
-    if unmatched:
-        raise HTTPException(
-            400,
-            f"review incompleta: {len(unmatched)} result senza analita "
-            f"(ids: {unmatched[:10]}{'…' if len(unmatched) > 10 else ''})",
-        )
 
     # Carica gli analiti una sola volta
     analyte_ids = {r.analyte_id for r in results if r.analyte_id is not None}
@@ -379,10 +380,16 @@ async def confirm_panel(
 
     updated_out_of_range = 0
     still_needs_review = 0
+    unmapped_count = 0
     for r in results:
         a = analytes.get(r.analyte_id)  # type: ignore[arg-type]
         if a is None:
-            continue  # già filtrato sopra, ma safe
+            # Result senza analita: resta da rivedere, fuori da Matrice/Andamenti
+            r.needs_review = True
+            r.out_of_range = None
+            r.unit_normalized = None
+            unmapped_count += 1
+            continue
 
         r.needs_review = False
         r.unit_normalized = None
@@ -438,6 +445,7 @@ async def confirm_panel(
         "results_count": len(results),
         "out_of_range_count": updated_out_of_range,
         "still_needs_review": still_needs_review,
+        "unmapped_count": unmapped_count,
     }
 
 

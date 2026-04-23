@@ -1,9 +1,17 @@
 import { useMemo, useState } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
-import { ArrowLeft, Plus, Check, AlertCircle } from "lucide-react"
+import { ArrowLeft, Plus, Check, AlertCircle, FlaskConical } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -18,6 +26,7 @@ import {
   useLabAnalytes,
   useLabConfirmPanel,
   useLabCreateAlias,
+  useLabCreateAnalyte,
   useLabPanel,
   useLabPatchResult,
   useLatestWeightBefore,
@@ -34,6 +43,7 @@ export default function LabReview() {
   const patch = useLabPatchResult()
   const confirm = useLabConfirmPanel()
   const createAlias = useLabCreateAlias()
+  const [showNewAnalyteForm, setShowNewAnalyteForm] = useState(false)
 
   const analyteById = useMemo(() => {
     const m = new Map<number, LabAnalyte>()
@@ -49,11 +59,6 @@ export default function LabReview() {
     [analytes]
   )
 
-  const allMapped = useMemo(() => {
-    if (!panel) return false
-    return panel.results.every(r => r.analyte_id != null)
-  }, [panel])
-
   if (!panelId) return <p>ID non valido.</p>
   if (isLoading || !panel) return <p>Caricamento…</p>
 
@@ -62,15 +67,19 @@ export default function LabReview() {
 
   async function handleConfirm() {
     if (!panelId) return
+    if (unmatchedCount > 0) {
+      const ok = confirm.isPending
+        ? false
+        : window.confirm(
+            `${unmatchedCount} analit${unmatchedCount === 1 ? "a" : "i"} senza mapping. ` +
+              `Quelle righe resteranno "da rivedere" e NON appariranno in Matrice/Andamenti. ` +
+              `Il resto verrà confermato e sarà subito visibile. Procedo?`
+          )
+      if (!ok) return
+    }
     try {
-      const res = await confirm.mutateAsync(panelId)
-      alert(
-        `Confermato. ${res.out_of_range_count} valori fuori range.` +
-          (res.still_needs_review > 0
-            ? ` ${res.still_needs_review} ancora da rivedere (unità incompatibile).`
-            : "")
-      )
-      navigate(`/lab/panels/${panelId}/review`)
+      await confirm.mutateAsync(panelId)
+      navigate("/lab")
     } catch (e) {
       alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
     }
@@ -118,7 +127,7 @@ export default function LabReview() {
         <div className="rounded-md bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2 text-sm">
           <div className="flex items-center gap-2 font-medium">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            {unmatchedCount} analit{unmatchedCount === 1 ? "a" : "i"} senza mapping:
+            {unmatchedCount} analit{unmatchedCount === 1 ? "a senza mapping" : "i senza mapping"}:
           </div>
           <ul className="mt-1 ml-6 text-xs font-mono">
             {panel.results
@@ -127,10 +136,37 @@ export default function LabReview() {
                 <li key={r.id}>{r.raw_name}</li>
               ))}
           </ul>
+          <p className="mt-2 text-xs">
+            Puoi confermare comunque: le righe mappate finiscono subito in
+            Matrice e Andamenti, quelle senza analita restano "da rivedere"
+            e potrai completarle tornando qui più tardi.
+          </p>
         </div>
       )}
 
       <WeightAtSamplingCard testDate={panel.test_date} />
+
+      {!isConfirmed && (
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowNewAnalyteForm(v => !v)}
+          >
+            <FlaskConical className="h-4 w-4 mr-1" />
+            {showNewAnalyteForm ? "Chiudi" : "Nuovo analita"}
+          </Button>
+          {showNewAnalyteForm && (
+            <div className="mt-3">
+              <NewAnalyteForm
+                defaultSpecimen={panel.specimen_types[0] === "urine" ? "urine" : "blood"}
+                defaultAlias={null}
+                onCreated={() => setShowNewAnalyteForm(false)}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -172,13 +208,12 @@ export default function LabReview() {
                         analyte_id: analyteId,
                         alias,
                       })
-                      alert(`Alias "${alias}" salvato.`)
+                      // Nessun popup di conferma: il badge "alias noto" appare
+                      // in pochi ms grazie all'invalidazione della query.
                     } catch (e) {
                       const msg = e instanceof Error ? e.message : String(e)
-                      if (msg.includes("409")) {
-                        alert("Alias già esistente.")
-                      } else {
-                        alert(`Errore: ${msg}`)
+                      if (!msg.includes("409")) {
+                        alert(`Errore salvataggio alias: ${msg}`)
                       }
                     }
                   }}
@@ -194,10 +229,7 @@ export default function LabReview() {
           <Button variant="outline" onClick={() => navigate("/lab")}>
             Torna alla lista
           </Button>
-          <Button
-            onClick={handleConfirm}
-            disabled={!allMapped || confirm.isPending}
-          >
+          <Button onClick={handleConfirm} disabled={confirm.isPending}>
             <Check className="h-4 w-4 mr-1" />
             {confirm.isPending ? "Conferma in corso…" : "Conferma referto"}
           </Button>
@@ -247,10 +279,9 @@ function ResultRow({
         await onPatch(result.id, { analyte_id: matched.id })
       }
     } else {
-      alert(
-        `"${trimmed}" non è nel catalogo. Scegli un'opzione esistente (il catalogo si estende via POST /analytes in un'altra UI).`
-      )
-      setNameInput(current?.display_name_it ?? "")
+      // Nome non esistente: non tocchiamo il DB e non resettiamo — l'utente
+      // può usare il pulsante "Nuovo analita" in alto per crearlo.
+      // Manteniamo il testo digitato come hint visibile.
     }
   }
 
@@ -376,5 +407,179 @@ function WeightAtSamplingCard({ testDate }: { testDate: string }) {
         rilevato il {formatDate(sampleDate)} (Apple Health)
       </span>
     </div>
+  )
+}
+
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 100)
+}
+
+function NewAnalyteForm({
+  defaultSpecimen,
+  defaultAlias,
+  onCreated,
+}: {
+  defaultSpecimen: "blood" | "urine"
+  defaultAlias: string | null
+  onCreated: (slug: string) => void
+}) {
+  const create = useLabCreateAnalyte()
+  const [displayName, setDisplayName] = useState("")
+  const [slug, setSlug] = useState("")
+  const [slugTouched, setSlugTouched] = useState(false)
+  const [category, setCategory] = useState("")
+  const [specimen, setSpecimen] = useState<"blood" | "urine" | "other">(defaultSpecimen)
+  const [valueType, setValueType] =
+    useState<"numeric" | "semi_quantitative" | "qualitative" | "textual">("numeric")
+  const [unitCanonical, setUnitCanonical] = useState("")
+  const [refLow, setRefLow] = useState("")
+  const [refHigh, setRefHigh] = useState("")
+  const [refText, setRefText] = useState("")
+  const [aliases, setAliases] = useState(defaultAlias ?? "")
+
+  function onNameChange(v: string) {
+    setDisplayName(v)
+    if (!slugTouched) setSlug(slugify(v))
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!displayName.trim() || !slug.trim() || !category.trim()) {
+      alert("Nome, slug e categoria sono obbligatori")
+      return
+    }
+    try {
+      const body = {
+        slug: slug.trim(),
+        display_name_it: displayName.trim(),
+        category: category.trim(),
+        specimen,
+        value_type: valueType,
+        unit_canonical: unitCanonical.trim() || null,
+        ref_low: refLow.trim() ? Number(refLow.replace(",", ".")) : null,
+        ref_high: refHigh.trim() ? Number(refHigh.replace(",", ".")) : null,
+        ref_text: refText.trim() || null,
+        aliases: aliases
+          .split(",")
+          .map(a => a.trim())
+          .filter(Boolean),
+      }
+      const res = await create.mutateAsync(body)
+      onCreated(res.slug)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      alert(`Errore creazione analita: ${msg}`)
+    }
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="rounded-md border bg-muted/30 p-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm"
+    >
+      <div>
+        <Label className="text-xs">Nome (italiano) *</Label>
+        <Input
+          value={displayName}
+          onChange={e => onNameChange(e.target.value)}
+          placeholder="es. Emoglobina glicata"
+          className="h-8"
+        />
+      </div>
+      <div>
+        <Label className="text-xs">Slug *</Label>
+        <Input
+          value={slug}
+          onChange={e => {
+            setSlug(e.target.value)
+            setSlugTouched(true)
+          }}
+          placeholder="es. hba1c"
+          className="h-8 font-mono"
+        />
+      </div>
+      <div>
+        <Label className="text-xs">Categoria *</Label>
+        <Input
+          value={category}
+          onChange={e => setCategory(e.target.value)}
+          placeholder="es. metabolismo, ormoni, fegato…"
+          className="h-8"
+        />
+      </div>
+      <div>
+        <Label className="text-xs">Campione</Label>
+        <Select value={specimen} onValueChange={v => setSpecimen(v as typeof specimen)}>
+          <SelectTrigger className="h-8">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="blood">blood</SelectItem>
+            <SelectItem value="urine">urine</SelectItem>
+            <SelectItem value="other">other</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label className="text-xs">Tipo valore</Label>
+        <Select value={valueType} onValueChange={v => setValueType(v as typeof valueType)}>
+          <SelectTrigger className="h-8">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="numeric">numeric</SelectItem>
+            <SelectItem value="semi_quantitative">semi_quantitative</SelectItem>
+            <SelectItem value="qualitative">qualitative</SelectItem>
+            <SelectItem value="textual">textual</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label className="text-xs">Unità canonica</Label>
+        <Input
+          value={unitCanonical}
+          onChange={e => setUnitCanonical(e.target.value)}
+          placeholder="es. mg/dl"
+          className="h-8"
+        />
+      </div>
+      <div>
+        <Label className="text-xs">Range min</Label>
+        <Input value={refLow} onChange={e => setRefLow(e.target.value)} className="h-8" />
+      </div>
+      <div>
+        <Label className="text-xs">Range max</Label>
+        <Input value={refHigh} onChange={e => setRefHigh(e.target.value)} className="h-8" />
+      </div>
+      <div>
+        <Label className="text-xs">Range testuale</Label>
+        <Input
+          value={refText}
+          onChange={e => setRefText(e.target.value)}
+          placeholder="es. assente, negativo"
+          className="h-8"
+        />
+      </div>
+      <div className="md:col-span-3">
+        <Label className="text-xs">Alias iniziali (separati da virgola)</Label>
+        <Input
+          value={aliases}
+          onChange={e => setAliases(e.target.value)}
+          placeholder="es. HbA1c, Emoglobina glicata, A1c"
+          className="h-8"
+        />
+      </div>
+      <div className="md:col-span-3 flex justify-end gap-2">
+        <Button type="submit" size="sm" disabled={create.isPending}>
+          {create.isPending ? "Salvataggio…" : "Crea analita"}
+        </Button>
+      </div>
+    </form>
   )
 }

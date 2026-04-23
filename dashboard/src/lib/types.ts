@@ -447,6 +447,7 @@ export interface LabConfirmResponse {
   results_count: number
   out_of_range_count: number
   still_needs_review: number
+  unmapped_count: number
 }
 
 export interface LabResultPatch {
