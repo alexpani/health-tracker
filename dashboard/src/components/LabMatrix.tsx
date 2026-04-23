@@ -270,6 +270,37 @@ export default function LabMatrix({
               />
             )
           })}
+          {data.panel_weights && Object.keys(data.panel_weights).length > 0 && (
+            <>
+              <tr className="bg-muted/50">
+                <td
+                  className="sticky left-0 z-10 bg-muted/50 px-3 py-1.5 font-semibold border-r"
+                  colSpan={1}
+                >
+                  corpo (Apple Health)
+                </td>
+                <td colSpan={data.panels.length} className="bg-muted/50" />
+              </tr>
+              <tr>
+                <td className="sticky left-0 z-10 bg-background px-3 py-1.5 border-r">
+                  <span className="italic">Peso al prelievo</span>
+                </td>
+                {data.panels.map(p => {
+                  const cell = data.panel_weights?.[String(p.id)]
+                  const value = cell?.value_numeric
+                  return (
+                    <td
+                      key={p.id}
+                      className="px-2 py-1.5 text-center whitespace-nowrap border-b border-border/50 italic text-muted-foreground"
+                      title={cell ? "Ultimo HKBodyMass ≤ data prelievo" : ""}
+                    >
+                      {value != null ? `${value.toFixed(1)} ${cell?.unit ?? "kg"}` : ""}
+                    </td>
+                  )
+                })}
+              </tr>
+            </>
+          )}
         </tbody>
       </table>
     </div>

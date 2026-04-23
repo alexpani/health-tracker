@@ -12,8 +12,8 @@ import {
 } from "recharts"
 import { RotateCcw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { useLabAnalytes, useLabTimeseries } from "@/lib/queries"
-import type { LabAnalyte, LabTimeseriesResponse } from "@/lib/types"
+import { useLabAnalytes, useLabTimeseries, useSamples } from "@/lib/queries"
+import type { LabAnalyte, LabTimeseriesResponse, SamplesResponse } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const MAX_SERIES = 5
@@ -24,6 +24,46 @@ const PRESETS: { label: string; months: number | null }[] = [
   { label: "5 anni", months: 60 },
   { label: "Tutto", months: null },
 ]
+
+// Analiti "virtuali" non-lab: vivono dentro HealthKit. Condividono il UI degli
+// analiti lab per la tab Andamenti così si possono sovrapporre a valori lab.
+interface BodyMetric {
+  slug: string // prefisso "__hk_"
+  label: string
+  unit: string
+  hkType: string
+  multiplier?: number
+}
+
+const BODY_METRICS: BodyMetric[] = [
+  {
+    slug: "__hk_body_mass",
+    label: "Peso corporeo",
+    unit: "kg",
+    hkType: "HKQuantityTypeIdentifierBodyMass",
+  },
+  {
+    slug: "__hk_body_fat",
+    label: "Massa grassa",
+    unit: "%",
+    hkType: "HKQuantityTypeIdentifierBodyFatPercentage",
+    multiplier: 100,
+  },
+  {
+    slug: "__hk_bmi",
+    label: "Indice di massa corporea",
+    unit: "",
+    hkType: "HKQuantityTypeIdentifierBodyMassIndex",
+  },
+]
+
+function isBodyMetricSlug(slug: string): boolean {
+  return slug.startsWith("__hk_")
+}
+
+function findBodyMetric(slug: string): BodyMetric | undefined {
+  return BODY_METRICS.find(m => m.slug === slug)
+}
 
 export default function LabTrends({ initialSlug }: { initialSlug?: string | null }) {
   const { data: analytes } = useLabAnalytes()
@@ -102,6 +142,33 @@ export default function LabTrends({ initialSlug }: { initialSlug?: string | null
         </div>
 
         <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+          <div>
+            <div className="text-xs font-semibold text-muted-foreground mb-1 sticky top-0 bg-background">
+              corpo (Apple Health)
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {BODY_METRICS.map(m => {
+                const isOn = selected.includes(m.slug)
+                const idx = selected.indexOf(m.slug)
+                return (
+                  <button
+                    key={m.slug}
+                    onClick={() => toggle(m.slug)}
+                    className={cn(
+                      "text-xs px-2 py-1 rounded border",
+                      isOn
+                        ? "border-transparent text-white"
+                        : "bg-background hover:bg-accent border-border"
+                    )}
+                    style={isOn ? { backgroundColor: COLORS[idx % COLORS.length] } : undefined}
+                  >
+                    {m.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           {byCategory.map(([cat, items]) => (
             <div key={cat}>
               <div className="text-xs font-semibold text-muted-foreground mb-1 sticky top-0 bg-background">
@@ -139,16 +206,19 @@ export default function LabTrends({ initialSlug }: { initialSlug?: string | null
             Seleziona un analita dalla sidebar.
           </p>
         ) : (
-          selected.map((slug, idx) => (
-            <SeriesCard
-              key={slug}
-              slug={slug}
-              color={COLORS[idx % COLORS.length]}
-              start={start}
-              end={end}
-              onRemove={() => toggle(slug)}
-            />
-          ))
+          selected.map((slug, idx) => {
+            const Component = isBodyMetricSlug(slug) ? HkSeriesCard : SeriesCard
+            return (
+              <Component
+                key={slug}
+                slug={slug}
+                color={COLORS[idx % COLORS.length]}
+                start={start}
+                end={end}
+                onRemove={() => toggle(slug)}
+              />
+            )
+          })
         )}
       </div>
     </div>
@@ -283,4 +353,111 @@ function computeRange(months: number | null): { start?: string; end?: string } {
     start: start.toISOString().slice(0, 10),
     end: end.toISOString().slice(0, 10),
   }
+}
+
+function HkSeriesCard({
+  slug,
+  color,
+  start,
+  end,
+  onRemove,
+}: {
+  slug: string
+  color: string
+  start: string | undefined
+  end: string | undefined
+  onRemove: () => void
+}) {
+  const metric = findBodyMetric(slug)
+  const startIso = start ? `${start}T00:00:00Z` : undefined
+  const endIso = end ? `${end}T23:59:59Z` : undefined
+  const query = useSamples(
+    {
+      type: metric?.hkType ?? "",
+      start: startIso,
+      end: endIso,
+      aggregation: "none",
+      limit: 5000,
+    },
+    !!metric
+  )
+
+  const chartData = useMemo<ChartPoint[]>(() => {
+    if (!query.data) return []
+    const mul = metric?.multiplier ?? 1
+    const raw = query.data.data as Array<{ start_date: string; value: number }>
+    return raw
+      .map(s => ({
+        test_date: s.start_date.slice(0, 10),
+        value: s.value * mul,
+        out_of_range: null,
+      }))
+      .sort((a, b) => a.test_date.localeCompare(b.test_date))
+  }, [query.data, metric])
+
+  if (!metric) return null
+  if (query.isLoading)
+    return <div className="border rounded p-3 text-sm">Caricamento {metric.label}…</div>
+  if (query.error)
+    return (
+      <div className="border rounded p-3 text-sm text-red-600">
+        Errore su {metric.label}
+      </div>
+    )
+  if (chartData.length === 0) {
+    return (
+      <div className="border rounded p-3 text-sm text-muted-foreground flex items-center justify-between">
+        <span>{metric.label}: nessun valore HK nel periodo.</span>
+        <Button variant="ghost" size="sm" onClick={onRemove}>
+          <X className="h-3 w-3" />
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border rounded p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <span className="font-medium" style={{ color }}>
+            {metric.label}
+          </span>
+          <span className="text-xs text-muted-foreground ml-2">
+            {metric.unit} · Apple Health
+          </span>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onRemove}>
+          <X className="h-3 w-3" />
+        </Button>
+      </div>
+      <div className="h-56">
+        <ResponsiveContainer>
+          <LineChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis
+              dataKey="test_date"
+              tick={{ fontSize: 11 }}
+              tickFormatter={v => v.slice(2, 7)}
+            />
+            <YAxis tick={{ fontSize: 11 }} domain={["auto", "auto"]} />
+            <Tooltip
+              contentStyle={{ fontSize: 12 }}
+              formatter={(v: number) => [
+                Number(v).toFixed(1) + (metric.unit ? ` ${metric.unit}` : ""),
+                metric.label,
+              ]}
+            />
+            <Line
+              type="monotone"
+              dataKey="value"
+              stroke={color}
+              strokeWidth={2}
+              dot={{ r: 2, fill: color, stroke: color }}
+            />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  )
 }

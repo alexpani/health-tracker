@@ -484,6 +484,9 @@ export interface LabMatrixResponse {
   panels: LabMatrixPanel[]
   // Keys are stringified ids (JSON object).
   cells: Record<string, Record<string, LabMatrixCell>>
+  // Ultimo peso corporeo noto alla data di ciascun panel (HK BodyMass).
+  // Chiave: panel_id stringificato.
+  panel_weights?: Record<string, LabMatrixCell>
 }
 
 export interface LabTimeseriesPoint {

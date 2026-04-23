@@ -873,7 +873,7 @@ async def get_matrix(
     ]
 
     if not panels or not analytes:
-        return {"analytes": analytes, "panels": panels, "cells": {}}
+        return {"analytes": analytes, "panels": panels, "cells": {}, "panel_weights": {}}
 
     analyte_ids = [a["id"] for a in analytes]
     panel_ids = [p["id"] for p in panels]
@@ -899,7 +899,39 @@ async def get_matrix(
             "needs_review": r.needs_review,
         }
 
-    return {"analytes": analytes, "panels": panels, "cells": cells}
+    # Peso corporeo (HKBodyMass) per ciascun panel: ultimo sample noto con
+    # start_date <= test_date. Non è un analita lab ma è utile per
+    # correlazioni. Si restituisce come riga aggiuntiva con slug sentinel.
+    from app.models import HealthSample
+
+    panel_weights: dict[int, dict[str, Any]] = {}
+    if panels:
+        for p in panels:
+            pid = p["id"]
+            td = date.fromisoformat(p["test_date"])
+            end_dt = datetime.combine(td, datetime.max.time(), tzinfo=timezone.utc)
+            ws = (await db.execute(
+                select(HealthSample)
+                .where(HealthSample.type == "HKQuantityTypeIdentifierBodyMass")
+                .where(HealthSample.start_date <= end_dt)
+                .order_by(HealthSample.start_date.desc(), HealthSample.id.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+            if ws is not None:
+                panel_weights[pid] = {
+                    "value_numeric": float(ws.value),
+                    "value_text": None,
+                    "unit": ws.unit or "kg",
+                    "out_of_range": None,
+                    "needs_review": False,
+                }
+
+    return {
+        "analytes": analytes,
+        "panels": panels,
+        "cells": cells,
+        "panel_weights": panel_weights,
+    }
 
 
 # ---------------------------------------------------------------------------
