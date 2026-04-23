@@ -368,11 +368,15 @@ function ResultRow({
           />
           {result.analyte_id == null && (
             <Button
-              variant="ghost"
+              type="button"
+              variant="outline"
               size="sm"
+              // Evita che il click rubi focus all'Input prima di partire
+              // (onBlur dell'Input interferiva con l'apertura della form).
+              onMouseDown={e => e.preventDefault()}
               onClick={() => onCreateFromRow(result.raw_name)}
               title={`Crea un nuovo analita a partire da "${result.raw_name}"`}
-              className="shrink-0"
+              className="shrink-0 border-amber-400 text-amber-700 hover:bg-amber-50"
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
               crea
