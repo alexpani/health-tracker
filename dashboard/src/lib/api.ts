@@ -50,4 +50,12 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return res.json()
 }
 
+export async function apiUpload<T>(path: string, file: File, fieldName = "file"): Promise<T> {
+  const form = new FormData()
+  form.append(fieldName, file)
+  const res = await fetch(`${API_URL}${path}`, { method: "POST", body: form })
+  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`)
+  return res.json()
+}
+
 export { API_URL }
