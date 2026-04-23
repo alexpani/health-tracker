@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
-import { ArrowLeft, Plus, Check, AlertCircle, FlaskConical } from "lucide-react"
+import { ArrowLeft, Plus, Check, AlertCircle, FlaskConical, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -27,6 +27,7 @@ import {
   useLabConfirmPanel,
   useLabCreateAlias,
   useLabCreateAnalyte,
+  useLabDeleteResult,
   useLabPanel,
   useLabPatchResult,
   useLatestWeightBefore,
@@ -41,6 +42,7 @@ export default function LabReview() {
   const { data: panel, isLoading } = useLabPanel(panelId)
   const { data: analytes } = useLabAnalytes()
   const patch = useLabPatchResult()
+  const deleteResult = useLabDeleteResult()
   const confirm = useLabConfirmPanel()
   const createAlias = useLabCreateAlias()
   const [showNewAnalyteForm, setShowNewAnalyteForm] = useState(false)
@@ -189,6 +191,7 @@ export default function LabReview() {
                 <TableHead>Range</TableHead>
                 <TableHead>Stato</TableHead>
                 <TableHead></TableHead>
+                <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -198,9 +201,16 @@ export default function LabReview() {
                   result={r}
                   analytes={analytesAlpha}
                   analyteById={analyteById}
-                  readOnly={isConfirmed}
                   onPatch={async (resultId, patchBody) => {
                     await patch.mutateAsync({ resultId, patch: patchBody })
+                  }}
+                  onDelete={async resultId => {
+                    if (!window.confirm("Eliminare questo risultato?")) return
+                    try {
+                      await deleteResult.mutateAsync(resultId)
+                    } catch (e) {
+                      alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
+                    }
                   }}
                   onSaveAlias={async (analyteId, alias) => {
                     try {
@@ -243,15 +253,15 @@ function ResultRow({
   result,
   analytes,
   analyteById,
-  readOnly,
   onPatch,
+  onDelete,
   onSaveAlias,
 }: {
   result: LabResult
   analytes: LabAnalyte[]
   analyteById: Map<number, LabAnalyte>
-  readOnly: boolean
   onPatch: (resultId: number, patch: { analyte_id?: number | null }) => Promise<void>
+  onDelete: (resultId: number) => Promise<void>
   onSaveAlias: (analyteId: number, alias: string) => Promise<void>
 }) {
   const current = result.analyte_id != null ? analyteById.get(result.analyte_id) : undefined
@@ -265,7 +275,6 @@ function ResultRow({
       : result.ref_text_raw ?? ""
 
   async function commitAnalyte() {
-    if (readOnly) return
     const trimmed = nameInput.trim()
     if (!trimmed) {
       await onPatch(result.id, { analyte_id: null })
@@ -317,25 +326,31 @@ function ResultRow({
     <TableRow>
       <TableCell className="font-mono text-xs">{result.raw_name}</TableCell>
       <TableCell>
-        {readOnly ? (
-          <span>{current?.display_name_it ?? "—"}</span>
-        ) : (
-          <Input
-            list="lab-analytes-list"
-            value={nameInput}
-            onChange={e => setNameInput(e.target.value)}
-            onBlur={commitAnalyte}
-            placeholder="Cerca analita…"
-            className="h-8 text-sm"
-          />
-        )}
+        <Input
+          list="lab-analytes-list"
+          value={nameInput}
+          onChange={e => setNameInput(e.target.value)}
+          onBlur={commitAnalyte}
+          placeholder="Cerca analita…"
+          className="h-8 text-sm"
+        />
       </TableCell>
       <TableCell className="font-mono">{valueDisplay}</TableCell>
       <TableCell>{result.unit_raw ?? "—"}</TableCell>
       <TableCell className="text-xs text-muted-foreground">{rangeDisplay}</TableCell>
       <TableCell>{stateBadge}</TableCell>
       <TableCell>
-        {!readOnly && current && result.raw_name && <AliasAction analyte={current} rawName={result.raw_name} onSaveAlias={onSaveAlias} />}
+        {current && result.raw_name && <AliasAction analyte={current} rawName={result.raw_name} onSaveAlias={onSaveAlias} />}
+      </TableCell>
+      <TableCell>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onDelete(result.id)}
+          title="Elimina questo risultato"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
       </TableCell>
     </TableRow>
   )

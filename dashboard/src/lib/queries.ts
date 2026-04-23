@@ -444,6 +444,23 @@ export function useLabPatchResult() {
       apiPatch<{ ok: boolean; id: number }>(`/api/v1/lab/results/${resultId}`, patch),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["labPanel"] })
+      await qc.invalidateQueries({ queryKey: ["labMatrix"] })
+      await qc.invalidateQueries({ queryKey: ["labTimeseries"] })
+      await qc.invalidateQueries({ queryKey: ["labRecentOor"] })
+    },
+  })
+}
+
+export function useLabDeleteResult() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (resultId: number) =>
+      apiDelete<{ ok: boolean }>(`/api/v1/lab/results/${resultId}`),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["labPanel"] })
+      await qc.invalidateQueries({ queryKey: ["labMatrix"] })
+      await qc.invalidateQueries({ queryKey: ["labTimeseries"] })
+      await qc.invalidateQueries({ queryKey: ["labRecentOor"] })
     },
   })
 }

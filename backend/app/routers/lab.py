@@ -85,17 +85,12 @@ async def ingest_referto(
     else:
         doc = existing_doc
 
-    # 2) Extract PDF text
-    try:
-        raw_text = lab_ingest.extract_text_from_pdf(full_path)
-    except Exception as exc:
-        raise HTTPException(422, f"impossibile estrarre testo dal PDF: {exc}")
-
-    # 3) LLM parse — in caso di errore creiamo un panel vuoto con notes=parsing_failed
+    # 2) LLM parse del PDF (testuale o scannerizzato: Anthropic gestisce entrambi).
+    #    In caso di errore creiamo un panel vuoto con notes=parsing_failed.
     parsing_failed = False
     extracted: lab_ingest.ExtractedPanel | None = None
     try:
-        payload = lab_ingest.call_llm(raw_text)
+        payload = lab_ingest.call_llm(data)
         extracted = lab_ingest.parse_extracted_panel(payload)
     except Exception:
         logger.exception("lab/ingest: LLM parsing failed")
@@ -333,6 +328,81 @@ async def list_analytes(
 
 
 # ---------------------------------------------------------------------------
+# Helper: applica unit matching + out_of_range a un singolo result
+# ---------------------------------------------------------------------------
+
+def _apply_confirm_logic(result: LabResult, analyte: LabAnalyte) -> None:
+    """Aggiorna in place `result.unit_normalized`, `result.out_of_range`,
+    `result.needs_review` dato il suo analita. Usato dal confirm panel e
+    dal backfill automatico (POST /analytes, POST /aliases)."""
+    result.unit_normalized = None
+    result.out_of_range = None
+
+    if analyte.value_type == "numeric":
+        if result.value_numeric is None:
+            result.needs_review = True
+            return
+        if analyte.unit_canonical is None:
+            result.unit_normalized = result.unit_raw
+            result.out_of_range = lab_units.numeric_out_of_range(
+                result.value_numeric, result.ref_low_raw, result.ref_high_raw,
+            )
+            result.needs_review = False
+        elif lab_units.units_equivalent(result.unit_raw, analyte.unit_canonical):
+            result.unit_normalized = analyte.unit_canonical
+            result.out_of_range = lab_units.numeric_out_of_range(
+                result.value_numeric, analyte.ref_low, analyte.ref_high,
+            )
+            result.needs_review = False
+        else:
+            # Unità incompatibile: lasciamo il flag review su, usando i range raw
+            # come hint visivo nel frattempo.
+            result.out_of_range = lab_units.numeric_out_of_range(
+                result.value_numeric, result.ref_low_raw, result.ref_high_raw,
+            )
+            result.needs_review = True
+    elif analyte.value_type in ("qualitative", "semi_quantitative"):
+        result.out_of_range = lab_units.qualitative_out_of_range(
+            result.value_text, analyte.ref_text,
+        )
+        result.needs_review = result.out_of_range is None
+    elif analyte.value_type == "textual":
+        result.out_of_range = None
+        result.needs_review = False
+
+
+async def _backfill_analyte_for_aliases(
+    db: AsyncSession, analyte: LabAnalyte, alias_strings: list[str],
+) -> int:
+    """Per ogni `lab_results` con `analyte_id=NULL` il cui `raw_name` combacia
+    (case-insensitive) con uno dei `alias_strings` passati O con
+    `analyte.display_name_it`: assegna l'analita e, per i result in panel già
+    `confirmed`, applica anche la logica di range/unit. Ritorna il count di
+    result aggiornati."""
+    needles = {analyte.display_name_it.lower(), *(a.lower() for a in alias_strings if a)}
+    needles = {n for n in needles if n}
+    if not needles:
+        return 0
+
+    # Trova i result candidati (con JOIN su panel per conoscere lo status)
+    candidates = (await db.execute(
+        select(LabResult, LabPanel.status)
+        .join(LabPanel, LabResult.panel_id == LabPanel.id)
+        .where(LabResult.analyte_id.is_(None))
+        .where(func.lower(LabResult.raw_name).in_(needles))
+    )).all()
+    count = 0
+    for result, panel_status in candidates:
+        result.analyte_id = analyte.id
+        if panel_status == "confirmed":
+            _apply_confirm_logic(result, analyte)
+        # Per panel ancora draft: non tocchiamo out_of_range/needs_review,
+        # li calcolerà il confirm quando l'utente chiuderà la review.
+        count += 1
+    return count
+
+
+# ---------------------------------------------------------------------------
 # POST /panels/{id}/confirm
 # ---------------------------------------------------------------------------
 
@@ -549,22 +619,55 @@ async def patch_result(
 
     data = body.model_dump(exclude_unset=True)
     # Verifica analyte_id se fornito
+    new_analyte: LabAnalyte | None = None
     if "analyte_id" in data and data["analyte_id"] is not None:
-        exists = (await db.execute(
-            select(LabAnalyte.id).where(LabAnalyte.id == data["analyte_id"])
+        new_analyte = (await db.execute(
+            select(LabAnalyte).where(LabAnalyte.id == data["analyte_id"])
         )).scalar_one_or_none()
-        if exists is None:
+        if new_analyte is None:
             raise HTTPException(400, "analyte_id inesistente")
 
     for k, v in data.items():
         setattr(result, k, v)
 
-    # Qualsiasi PATCH rimette il result in review: il confirm lo risettarà.
-    result.needs_review = True
-    result.unit_normalized = None
-    result.out_of_range = None
+    # Se il panel è già confermato e la riga ha un analita, riapplica subito
+    # la logica di unit/out_of_range così la Matrice/Andamenti restano
+    # coerenti senza obbligare l'utente a rifare il confirm.
+    panel_status = (await db.execute(
+        select(LabPanel.status).where(LabPanel.id == result.panel_id)
+    )).scalar_one()
+
+    if panel_status == "confirmed" and result.analyte_id is not None:
+        analyte = new_analyte
+        if analyte is None or analyte.id != result.analyte_id:
+            analyte = (await db.execute(
+                select(LabAnalyte).where(LabAnalyte.id == result.analyte_id)
+            )).scalar_one()
+        _apply_confirm_logic(result, analyte)
+    else:
+        # Panel ancora draft: lasciamo il confirm a ricalcolare tutto alla fine.
+        result.needs_review = True
+        result.unit_normalized = None
+        result.out_of_range = None
+
     await db.commit()
     return {"ok": True, "id": result.id}
+
+
+@router.delete("/results/{result_id}")
+async def delete_result(
+    result_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Elimina un singolo risultato (es. valore errato nel referto)."""
+    result = (await db.execute(
+        select(LabResult).where(LabResult.id == result_id)
+    )).scalar_one_or_none()
+    if result is None:
+        raise HTTPException(404, "result non trovato")
+    await db.delete(result)
+    await db.commit()
+    return {"ok": True, "deleted_result_id": result_id}
 
 
 # ---------------------------------------------------------------------------
@@ -587,15 +690,25 @@ async def create_alias(
     if analyte is None:
         raise HTTPException(400, "analyte_id inesistente")
 
-    alias = LabAnalyteAlias(analyte_id=body.analyte_id, alias=body.alias.strip())
+    alias_str = body.alias.strip()
+    alias = LabAnalyteAlias(analyte_id=body.analyte_id, alias=alias_str)
     db.add(alias)
     try:
-        await db.commit()
+        await db.flush()
     except IntegrityError:
         await db.rollback()
         raise HTTPException(409, "alias già presente")
+
+    # Backfill: mappa i result esistenti con raw_name matching a questo analita
+    backfilled = await _backfill_analyte_for_aliases(db, analyte, [alias_str])
+    await db.commit()
     await db.refresh(alias)
-    return {"id": alias.id, "analyte_id": alias.analyte_id, "alias": alias.alias}
+    return {
+        "id": alias.id,
+        "analyte_id": alias.analyte_id,
+        "alias": alias.alias,
+        "results_backfilled": backfilled,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +760,7 @@ async def create_analyte(
 
     created_aliases = 0
     skipped_aliases = 0
+    created_alias_strings: list[str] = []
     for raw in body.aliases:
         a = raw.strip()
         if not a:
@@ -655,15 +769,24 @@ async def create_analyte(
         try:
             await db.commit()
             created_aliases += 1
+            created_alias_strings.append(a)
         except IntegrityError:
             await db.rollback()
             skipped_aliases += 1
+
+    # Backfill sui result esistenti senza analita: il match usa
+    # display_name_it + tutti gli alias appena creati.
+    backfilled = await _backfill_analyte_for_aliases(
+        db, analyte, created_alias_strings
+    )
+    await db.commit()
 
     return {
         "id": analyte.id,
         "slug": analyte.slug,
         "aliases_created": created_aliases,
         "aliases_skipped": skipped_aliases,
+        "results_backfilled": backfilled,
     }
 
 

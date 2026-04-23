@@ -1,14 +1,17 @@
 """Pipeline di ingest per un referto PDF.
 
-Step (spec §5.1):
-  1. Estrazione testo con pdfplumber (PDF testuali).
-  2. Chiamata Anthropic (system prompt IT, temp=0) → JSON strutturato.
+Step:
+  1. Hash SHA-256 + salvataggio file nel volume (`lab_documents/<sha>.pdf`).
+  2. Invio del PDF ad Anthropic come blocco `document` (base64): il modello
+     gestisce sia PDF testuali che scannerizzati (OCR interno) e risponde
+     con il JSON strutturato richiesto dal system prompt.
   3. Matching raw_name → analyte_id via alias esatti + pg_trgm similarity.
 
 La chiamata LLM è isolata dietro `call_llm()` per poter essere mockata nei test.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
@@ -18,7 +21,6 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-import pdfplumber
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -103,31 +105,16 @@ def save_document(data: bytes, original_filename: str) -> tuple[Path, str, int]:
 
 
 # ---------------------------------------------------------------------------
-# 2. Estrazione testo
+# 2. Chiamata LLM col PDF come input diretto (gestisce anche referti scannerizzati)
 # ---------------------------------------------------------------------------
 
-def extract_text_from_pdf(path: Path) -> str:
-    """Estrae il testo di tutte le pagine, separate da form-feed."""
-    chunks: list[str] = []
-    with pdfplumber.open(path) as pdf:
-        for page in pdf.pages:
-            txt = page.extract_text() or ""
-            chunks.append(txt)
-    return "\n\f\n".join(chunks)
-
-
-# ---------------------------------------------------------------------------
-# 3. Chiamata LLM
-# ---------------------------------------------------------------------------
-
-def call_llm(raw_text: str) -> dict[str, Any]:
-    """Chiama Anthropic e parsa la risposta JSON.
+def call_llm(pdf_bytes: bytes) -> dict[str, Any]:
+    """Chiama Anthropic passando il PDF direttamente come blocco `document`
+    e parsa la risposta JSON. Il modello gestisce sia PDF testuali che
+    scannerizzati (OCR interno), quindi non dipendiamo più da pdfplumber.
 
     Restituisce il dict grezzo `{test_date, lab_name, specimen_types, analytes}`.
-    Può sollevare `RuntimeError` se la risposta non è JSON valido: il chiamante
-    deve decidere se marcare il panel come `parsing_failed`.
-
-    Isolata in una funzione modulare per permettere il mocking nei test.
+    Solleva `RuntimeError` se la risposta non è JSON valido.
     """
     if not settings.anthropic_api_key:
         raise RuntimeError("ANTHROPIC_API_KEY non configurata")
@@ -135,22 +122,47 @@ def call_llm(raw_text: str) -> dict[str, Any]:
     from anthropic import Anthropic
 
     client = Anthropic(api_key=settings.anthropic_api_key)
-    # N.B. `temperature` è deprecato su Opus 4.7 — lasciamo il default del modello
-    # (deterministico per definizione a temp fissa interna).
+    pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("ascii")
+    # N.B. `temperature` è deprecato su Opus 4.7 — lasciamo il default del
+    # modello (deterministico a temp fissa interna).
     resp = client.messages.create(
         model=settings.anthropic_model,
         max_tokens=MAX_LLM_TOKENS,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": raw_text}],
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": pdf_b64,
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": "Estrai gli analiti da questo referto secondo le regole del system prompt.",
+                },
+            ],
+        }],
     )
-    # La risposta è in resp.content[0].text per messaggi text-only.
     body = "".join(
         block.text for block in resp.content if getattr(block, "type", None) == "text"
     )
+    # Alcuni modelli avvolgono il JSON in un codice-fence: strip se presente.
+    body = body.strip()
+    if body.startswith("```"):
+        body = body.strip("`")
+        # Rimuovi eventuale `json\n` iniziale
+        first_nl = body.find("\n")
+        if first_nl != -1 and not body[:first_nl].strip().startswith("{"):
+            body = body[first_nl + 1 :]
+        body = body.rsplit("```", 1)[0].strip()
     try:
         return json.loads(body)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Risposta LLM non è JSON valido: {exc}") from exc
+        raise RuntimeError(f"Risposta LLM non è JSON valido: {exc}\nBody: {body[:500]!r}") from exc
 
 
 # ---------------------------------------------------------------------------
