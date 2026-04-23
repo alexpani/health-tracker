@@ -115,10 +115,18 @@ export default function LabReview() {
       </div>
 
       {!isConfirmed && unmatchedCount > 0 && (
-        <div className="flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2 text-sm">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {unmatchedCount} analit{unmatchedCount === 1 ? "a" : "i"} senza mapping.
-          Completa tutte le righe prima di confermare.
+        <div className="rounded-md bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2 text-sm">
+          <div className="flex items-center gap-2 font-medium">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {unmatchedCount} analit{unmatchedCount === 1 ? "a" : "i"} senza mapping:
+          </div>
+          <ul className="mt-1 ml-6 text-xs font-mono">
+            {panel.results
+              .filter(r => r.analyte_id == null)
+              .map(r => (
+                <li key={r.id}>{r.raw_name}</li>
+              ))}
+          </ul>
         </div>
       )}
 
@@ -246,21 +254,33 @@ function ResultRow({
     }
   }
 
-  const stateBadge = result.needs_review ? (
-    <span className="text-xs rounded-full bg-amber-100 text-amber-800 px-2 py-0.5">
-      da rivedere
-    </span>
-  ) : result.out_of_range === true ? (
-    <span className="text-xs rounded-full bg-red-100 text-red-800 px-2 py-0.5">
-      fuori range
-    </span>
-  ) : result.out_of_range === false ? (
-    <span className="text-xs rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5">
-      ok
-    </span>
-  ) : (
-    <span className="text-xs text-muted-foreground">—</span>
-  )
+  // Priorità: non mappato (rosso) > fuori range (rosso) > ok (verde).
+  // Se `needs_review=true` ma l'analita è mappato, non mostriamo nulla di
+  // speciale: il flag è normale fra ingest e confirm, non è un warning
+  // per l'utente. Dopo il confirm resettiamo needs_review e compaiono i
+  // badge definitivi.
+  let stateBadge: JSX.Element
+  if (result.analyte_id == null) {
+    stateBadge = (
+      <span className="text-xs rounded-full bg-red-100 text-red-800 px-2 py-0.5">
+        senza analita
+      </span>
+    )
+  } else if (result.out_of_range === true) {
+    stateBadge = (
+      <span className="text-xs rounded-full bg-red-100 text-red-800 px-2 py-0.5">
+        fuori range
+      </span>
+    )
+  } else if (result.out_of_range === false) {
+    stateBadge = (
+      <span className="text-xs rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5">
+        ok
+      </span>
+    )
+  } else {
+    stateBadge = <span className="text-xs text-muted-foreground">—</span>
+  }
 
   return (
     <TableRow>

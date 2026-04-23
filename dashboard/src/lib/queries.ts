@@ -417,6 +417,7 @@ export function useLabPanel(panelId: number | null | undefined) {
     queryKey: ["labPanel", panelId],
     queryFn: () => apiGet<LabPanelDetail>(`/api/v1/lab/panels/${panelId}`),
     enabled: panelId != null,
+    staleTime: 0,
   })
 }
 
@@ -441,8 +442,8 @@ export function useLabPatchResult() {
   return useMutation({
     mutationFn: ({ resultId, patch }: { resultId: number; patch: LabResultPatch }) =>
       apiPatch<{ ok: boolean; id: number }>(`/api/v1/lab/results/${resultId}`, patch),
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: ["labPanel"] })
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["labPanel"] })
     },
   })
 }
