@@ -296,9 +296,9 @@ Output dry-run in `stdout` + file `import_report.tsv`.
 - **Aggiornare `CLAUDE.md`** con il nuovo dominio: convenzioni naming, dove vivono i PDF, policy review obbligatoria.
 - **`.gitignore`**: aggiungere `backend/data/lab_documents/`.
 - **Env var**: `ANTHROPIC_API_KEY` letta dal backend via `pydantic-settings`. La chiamata LLM si fa **solo dal backend**, mai dalla dashboard.
-- **Test**: almeno 3 fixture PDF anonimizzati in `backend/tests/fixtures/lab/` + test parsing con mock della chiamata Anthropic (risposte LLM hardcoded).
+- **Test**: almeno 3 fixture PDF in `backend/tests/fixtures/lab/` + test parsing con mock della chiamata Anthropic (risposte LLM hardcoded).
 - **Migration order**: (1) `lab_documents`, (2) `lab_analytes` + `lab_analyte_aliases` + seed, (3) `lab_panels`, (4) `lab_results`.
-- **Privacy**: nel README aggiungere un disclaimer: i dati medici non vanno committati; fixture devono essere anonimizzate.
+- **Privacy**: l'app è esclusivamente personale (single-user, self-hosted). Dati medici reali possono vivere in repo — nessun obbligo di anonimizzazione su fixture o contenuti. I PDF operativi restano comunque fuori dal repo tramite il volume `backend/data/lab_documents/` in `.gitignore` (evita di gonfiare la history).
 - **Niente auth**: coerente col resto del progetto single-user.
 
 ---
