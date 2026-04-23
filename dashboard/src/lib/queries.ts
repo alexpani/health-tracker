@@ -528,11 +528,23 @@ export function useLabCreateAnalyte() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: LabAnalyteCreate) =>
-      apiPost<{ id: number; slug: string; aliases_created: number; aliases_skipped: number }>(
-        "/api/v1/lab/analytes",
-        body
-      ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["labAnalytes"] }),
+      apiPost<{
+        id: number
+        slug: string
+        aliases_created: number
+        aliases_skipped: number
+        results_backfilled?: number
+      }>("/api/v1/lab/analytes", body),
+    onSuccess: async () => {
+      // Il backend fa backfill automatico sui result col raw_name combaciante:
+      // invalidiamo catalog, panels (per le righe mappate) e viste derivate.
+      await qc.invalidateQueries({ queryKey: ["labAnalytes"] })
+      await qc.invalidateQueries({ queryKey: ["labPanel"] })
+      await qc.invalidateQueries({ queryKey: ["labPanels"] })
+      await qc.invalidateQueries({ queryKey: ["labMatrix"] })
+      await qc.invalidateQueries({ queryKey: ["labTimeseries"] })
+      await qc.invalidateQueries({ queryKey: ["labRecentOor"] })
+    },
   })
 }
 

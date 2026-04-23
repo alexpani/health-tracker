@@ -256,7 +256,20 @@ export default function LabReview() {
                           r.ref_high_raw != null ? String(r.ref_high_raw) : ""
                         }
                         defaultRefText={r.ref_text_raw ?? ""}
-                        onCreated={() => setCreateFromRowId(null)}
+                        onCreated={async analyteId => {
+                          // Assegna il nuovo analita alla riga di origine —
+                          // fallback al backfill backend (che salta se
+                          // l'utente ha rimosso il raw_name dagli alias).
+                          try {
+                            await patch.mutateAsync({
+                              resultId: r.id,
+                              patch: { analyte_id: analyteId },
+                            })
+                          } catch {
+                            // già invalidato dal create, nessun problema
+                          }
+                          setCreateFromRowId(null)
+                        }}
                       />
                     </TableCell>
                   </TableRow>
@@ -526,7 +539,7 @@ function NewAnalyteForm({
   defaultRefLow?: string
   defaultRefHigh?: string
   defaultRefText?: string
-  onCreated: (slug: string) => void
+  onCreated: (analyteId: number, slug: string) => void
 }) {
   const create = useLabCreateAnalyte()
   const { data: allAnalytes } = useLabAnalytes()
@@ -576,7 +589,7 @@ function NewAnalyteForm({
           .filter(Boolean),
       }
       const res = await create.mutateAsync(body)
-      onCreated(res.slug)
+      onCreated(res.id, res.slug)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       alert(`Errore creazione analita: ${msg}`)
