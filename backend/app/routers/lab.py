@@ -301,6 +301,19 @@ async def list_analytes(
     if category:
         stmt = stmt.where(LabAnalyte.category == category)
     rows = (await db.execute(stmt)).scalars().all()
+    analyte_ids = [a.id for a in rows]
+
+    # Carica tutti gli alias in una sola query, raggruppati per analyte_id.
+    aliases_by_id: dict[int, list[str]] = {aid: [] for aid in analyte_ids}
+    if analyte_ids:
+        alias_rows = (await db.execute(
+            select(LabAnalyteAlias.analyte_id, LabAnalyteAlias.alias)
+            .where(LabAnalyteAlias.analyte_id.in_(analyte_ids))
+            .order_by(LabAnalyteAlias.analyte_id, LabAnalyteAlias.alias)
+        )).all()
+        for aid, alias in alias_rows:
+            aliases_by_id[aid].append(alias)
+
     return [
         {
             "id": a.id,
@@ -313,6 +326,7 @@ async def list_analytes(
             "ref_low": float(a.ref_low) if a.ref_low is not None else None,
             "ref_high": float(a.ref_high) if a.ref_high is not None else None,
             "ref_text": a.ref_text,
+            "aliases": aliases_by_id.get(a.id, []),
         }
         for a in rows
     ]

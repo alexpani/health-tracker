@@ -304,19 +304,52 @@ function ResultRow({
       <TableCell className="text-xs text-muted-foreground">{rangeDisplay}</TableCell>
       <TableCell>{stateBadge}</TableCell>
       <TableCell>
-        {!readOnly && current && result.raw_name && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onSaveAlias(current.id, result.raw_name)}
-            title={`Salva "${result.raw_name}" come alias di ${current.display_name_it}`}
-          >
-            <Plus className="h-3.5 w-3.5 mr-1" />
-            alias
-          </Button>
-        )}
+        {!readOnly && current && result.raw_name && <AliasAction analyte={current} rawName={result.raw_name} onSaveAlias={onSaveAlias} />}
       </TableCell>
     </TableRow>
+  )
+}
+
+function AliasAction({
+  analyte,
+  rawName,
+  onSaveAlias,
+}: {
+  analyte: LabAnalyte
+  rawName: string
+  onSaveAlias: (analyteId: number, alias: string) => Promise<void>
+}) {
+  const aliases = analyte.aliases ?? []
+  const normalized = rawName.trim().toLowerCase()
+  const alreadyAlias = aliases.some(a => a.toLowerCase() === normalized)
+
+  const aliasTooltip =
+    aliases.length > 0
+      ? `Alias già noti per ${analyte.display_name_it}:\n${aliases.map(a => `• ${a}`).join("\n")}`
+      : `Nessun alias salvato per ${analyte.display_name_it}`
+
+  if (alreadyAlias) {
+    return (
+      <span
+        className="text-xs text-emerald-700 inline-flex items-center gap-1"
+        title={aliasTooltip}
+      >
+        <Check className="h-3.5 w-3.5" />
+        alias noto
+      </span>
+    )
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => onSaveAlias(analyte.id, rawName)}
+      title={`Salva "${rawName}" come alias di ${analyte.display_name_it}.\n\n${aliasTooltip}`}
+    >
+      <Plus className="h-3.5 w-3.5 mr-1" />
+      alias
+    </Button>
   )
 }
 

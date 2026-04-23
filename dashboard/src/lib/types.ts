@@ -385,6 +385,7 @@ export interface LabAnalyte {
   ref_low: number | null
   ref_high: number | null
   ref_text: string | null
+  aliases?: string[]
 }
 
 export interface LabPanelSummary {
