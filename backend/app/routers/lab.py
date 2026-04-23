@@ -6,23 +6,28 @@ arriveranno in PR #2b.
 """
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
 from app.models.lab import (
     LabAnalyte,
+    LabAnalyteAlias,
     LabDocument,
     LabPanel,
     LabResult,
 )
-from app.services import lab_ingest
+from app.services import lab_ingest, lab_units
 
 router = APIRouter(prefix="/api/v1/lab", tags=["lab"])
 
@@ -307,3 +312,330 @@ async def list_analytes(
         }
         for a in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# POST /panels/{id}/confirm
+# ---------------------------------------------------------------------------
+
+@router.post("/panels/{panel_id}/confirm")
+async def confirm_panel(
+    panel_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Promuove un panel `draft → confirmed`. Per ogni result:
+    - se l'analita è numerico e l'unità matcha quella canonica → copia il valore
+      in `unit_normalized` e calcola `out_of_range` con i range dell'analita;
+    - se l'unità non matcha (e non è equivalente) → `needs_review=True`,
+      `unit_normalized=NULL`: si confronta comunque con i range raw, se presenti;
+    - se l'analita è qualitativo → confronto testo/testo con `ref_text`.
+    Rifiuta il confirm se almeno un result non ha `analyte_id`.
+    """
+    panel = (await db.execute(
+        select(LabPanel).where(LabPanel.id == panel_id)
+    )).scalar_one_or_none()
+    if panel is None:
+        raise HTTPException(404, "panel non trovato")
+    if panel.status == "confirmed":
+        raise HTTPException(409, "panel già confermato")
+
+    results = (await db.execute(
+        select(LabResult).where(LabResult.panel_id == panel_id)
+    )).scalars().all()
+    unmatched = [r.id for r in results if r.analyte_id is None]
+    if unmatched:
+        raise HTTPException(
+            400,
+            f"review incompleta: {len(unmatched)} result senza analita "
+            f"(ids: {unmatched[:10]}{'…' if len(unmatched) > 10 else ''})",
+        )
+
+    # Carica gli analiti una sola volta
+    analyte_ids = {r.analyte_id for r in results if r.analyte_id is not None}
+    analytes: dict[int, LabAnalyte] = {}
+    if analyte_ids:
+        rows = (await db.execute(
+            select(LabAnalyte).where(LabAnalyte.id.in_(analyte_ids))
+        )).scalars().all()
+        analytes = {a.id: a for a in rows}
+
+    updated_out_of_range = 0
+    still_needs_review = 0
+    for r in results:
+        a = analytes.get(r.analyte_id)  # type: ignore[arg-type]
+        if a is None:
+            continue  # già filtrato sopra, ma safe
+
+        r.needs_review = False
+        r.unit_normalized = None
+        r.out_of_range = None
+
+        if a.value_type == "numeric":
+            # Se manca del tutto il numero, lasciamo needs_review attivo.
+            if r.value_numeric is None:
+                r.needs_review = True
+                still_needs_review += 1
+                continue
+            # Unità canonica mancante: confronta solo con i range raw.
+            if a.unit_canonical is None:
+                r.unit_normalized = r.unit_raw
+                r.out_of_range = lab_units.numeric_out_of_range(
+                    r.value_numeric, r.ref_low_raw, r.ref_high_raw,
+                )
+            elif lab_units.units_equivalent(r.unit_raw, a.unit_canonical):
+                r.unit_normalized = a.unit_canonical
+                r.out_of_range = lab_units.numeric_out_of_range(
+                    r.value_numeric, a.ref_low, a.ref_high,
+                )
+            else:
+                # Unità diversa da quella canonica: lasciamo decidere l'umano.
+                r.needs_review = True
+                # Usa comunque i range raw per un primo hint visivo
+                r.out_of_range = lab_units.numeric_out_of_range(
+                    r.value_numeric, r.ref_low_raw, r.ref_high_raw,
+                )
+                still_needs_review += 1
+        elif a.value_type in ("qualitative", "semi_quantitative"):
+            r.out_of_range = lab_units.qualitative_out_of_range(
+                r.value_text, a.ref_text,
+            )
+            if r.out_of_range is None:
+                r.needs_review = True
+                still_needs_review += 1
+        elif a.value_type == "textual":
+            # Testo libero: nessun giudizio automatico.
+            r.out_of_range = None
+
+        if r.out_of_range:
+            updated_out_of_range += 1
+
+    panel.status = "confirmed"
+    panel.confirmed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {
+        "panel_id": panel.id,
+        "status": panel.status,
+        "confirmed_at": panel.confirmed_at.isoformat(),
+        "results_count": len(results),
+        "out_of_range_count": updated_out_of_range,
+        "still_needs_review": still_needs_review,
+    }
+
+
+# ---------------------------------------------------------------------------
+# PATCH /panels/{id}
+# ---------------------------------------------------------------------------
+
+class PanelPatch(BaseModel):
+    test_date: date | None = None
+    lab_name: str | None = None
+    notes: str | None = None
+    specimen_types: list[str] | None = None
+
+
+@router.patch("/panels/{panel_id}")
+async def patch_panel(
+    panel_id: int,
+    body: PanelPatch,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    panel = (await db.execute(
+        select(LabPanel).where(LabPanel.id == panel_id)
+    )).scalar_one_or_none()
+    if panel is None:
+        raise HTTPException(404, "panel non trovato")
+
+    data = body.model_dump(exclude_unset=True)
+    if "specimen_types" in data and data["specimen_types"] is not None:
+        allowed = {"blood", "urine"}
+        data["specimen_types"] = [s for s in data["specimen_types"] if s in allowed]
+
+    for k, v in data.items():
+        setattr(panel, k, v)
+    await db.commit()
+    return {"ok": True, "id": panel.id}
+
+
+# ---------------------------------------------------------------------------
+# DELETE /panels/{id}
+# ---------------------------------------------------------------------------
+
+@router.delete("/panels/{panel_id}")
+async def delete_panel(
+    panel_id: int,
+    delete_document: bool = Query(True, description="Elimina anche il LabDocument e il PDF su disco"),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    panel = (await db.execute(
+        select(LabPanel).where(LabPanel.id == panel_id)
+    )).scalar_one_or_none()
+    if panel is None:
+        raise HTTPException(404, "panel non trovato")
+
+    doc_id = panel.document_id
+    await db.delete(panel)  # CASCADE sui results
+    await db.flush()
+
+    removed_file = False
+    if delete_document and doc_id is not None:
+        doc = (await db.execute(
+            select(LabDocument).where(LabDocument.id == doc_id)
+        )).scalar_one_or_none()
+        if doc is not None:
+            # Rimuove il file su disco se esiste
+            full_path = settings.lab_documents_dir / doc.relative_path
+            try:
+                if full_path.exists():
+                    full_path.unlink()
+                    removed_file = True
+            except OSError:
+                pass
+            await db.delete(doc)
+
+    await db.commit()
+    return {"ok": True, "deleted_panel_id": panel_id, "removed_file": removed_file}
+
+
+# ---------------------------------------------------------------------------
+# PATCH /results/{id}
+# ---------------------------------------------------------------------------
+
+class ResultPatch(BaseModel):
+    analyte_id: int | None = None
+    value_numeric: Decimal | None = None
+    value_text: str | None = None
+    unit_raw: str | None = None
+    notes: str | None = None
+
+
+@router.patch("/results/{result_id}")
+async def patch_result(
+    result_id: int,
+    body: ResultPatch,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = (await db.execute(
+        select(LabResult).where(LabResult.id == result_id)
+    )).scalar_one_or_none()
+    if result is None:
+        raise HTTPException(404, "result non trovato")
+
+    data = body.model_dump(exclude_unset=True)
+    # Verifica analyte_id se fornito
+    if "analyte_id" in data and data["analyte_id"] is not None:
+        exists = (await db.execute(
+            select(LabAnalyte.id).where(LabAnalyte.id == data["analyte_id"])
+        )).scalar_one_or_none()
+        if exists is None:
+            raise HTTPException(400, "analyte_id inesistente")
+
+    for k, v in data.items():
+        setattr(result, k, v)
+
+    # Qualsiasi PATCH rimette il result in review: il confirm lo risettarà.
+    result.needs_review = True
+    result.unit_normalized = None
+    result.out_of_range = None
+    await db.commit()
+    return {"ok": True, "id": result.id}
+
+
+# ---------------------------------------------------------------------------
+# POST /aliases
+# ---------------------------------------------------------------------------
+
+class AliasIn(BaseModel):
+    analyte_id: int
+    alias: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/aliases", status_code=201)
+async def create_alias(
+    body: AliasIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    analyte = (await db.execute(
+        select(LabAnalyte).where(LabAnalyte.id == body.analyte_id)
+    )).scalar_one_or_none()
+    if analyte is None:
+        raise HTTPException(400, "analyte_id inesistente")
+
+    alias = LabAnalyteAlias(analyte_id=body.analyte_id, alias=body.alias.strip())
+    db.add(alias)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(409, "alias già presente")
+    await db.refresh(alias)
+    return {"id": alias.id, "analyte_id": alias.analyte_id, "alias": alias.alias}
+
+
+# ---------------------------------------------------------------------------
+# POST /analytes
+# ---------------------------------------------------------------------------
+
+class AnalyteIn(BaseModel):
+    slug: str = Field(min_length=1, max_length=100, pattern=r"^[a-z0-9_]+$")
+    display_name_it: str
+    category: str
+    specimen: str = "blood"
+    value_type: str = "numeric"
+    unit_canonical: str | None = None
+    ref_low: Decimal | None = None
+    ref_high: Decimal | None = None
+    ref_text: str | None = None
+    sex_specific: str | None = None
+    loinc_code: str | None = None
+    notes: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+
+
+@router.post("/analytes", status_code=201)
+async def create_analyte(
+    body: AnalyteIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    analyte = LabAnalyte(
+        slug=body.slug,
+        display_name_it=body.display_name_it,
+        category=body.category,
+        specimen=body.specimen,
+        value_type=body.value_type,
+        unit_canonical=body.unit_canonical,
+        ref_low=body.ref_low,
+        ref_high=body.ref_high,
+        ref_text=body.ref_text,
+        sex_specific=body.sex_specific,
+        loinc_code=body.loinc_code,
+        notes=body.notes,
+    )
+    db.add(analyte)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(409, "slug già esistente")
+    await db.refresh(analyte)
+
+    created_aliases = 0
+    skipped_aliases = 0
+    for raw in body.aliases:
+        a = raw.strip()
+        if not a:
+            continue
+        db.add(LabAnalyteAlias(analyte_id=analyte.id, alias=a))
+        try:
+            await db.commit()
+            created_aliases += 1
+        except IntegrityError:
+            await db.rollback()
+            skipped_aliases += 1
+
+    return {
+        "id": analyte.id,
+        "slug": analyte.slug,
+        "aliases_created": created_aliases,
+        "aliases_skipped": skipped_aliases,
+    }
