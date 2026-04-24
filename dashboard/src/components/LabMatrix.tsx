@@ -21,6 +21,65 @@ import type {
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 
+// id virtuale per analita derivati (non esistono nel DB ma aggiunti client-side)
+const DERIVED_CHOL_RATIO_ID = -1001
+const DERIVED_CHOL_RATIO_SLUG = "__derived_chol_ratio"
+
+function injectDerivedAnalytes(
+  data: LabMatrixResponse | undefined
+): LabMatrixResponse | undefined {
+  if (!data) return data
+  const totalA = data.analytes.find(a => a.slug === "cholesterol_total")
+  const hdlA = data.analytes.find(a => a.slug === "cholesterol_hdl")
+  if (!totalA || !hdlA) return data
+
+  const totalCells = data.cells[String(totalA.id)] ?? {}
+  const hdlCells = data.cells[String(hdlA.id)] ?? {}
+
+  const ratioCells: Record<string, LabMatrixCell> = {}
+  for (const panelIdStr of Object.keys(totalCells)) {
+    const t = totalCells[panelIdStr]
+    const h = hdlCells[panelIdStr]
+    if (
+      !t ||
+      !h ||
+      t.value_numeric == null ||
+      h.value_numeric == null ||
+      h.value_numeric === 0
+    ) continue
+    const ratio = t.value_numeric / h.value_numeric
+    ratioCells[panelIdStr] = {
+      value_numeric: Number(ratio.toFixed(2)),
+      value_text: null,
+      unit: "",
+      // Logica: >5 = rischio alto; tra 3.5 e 5 = basso; <3.5 = molto basso
+      out_of_range: ratio > 5,
+      needs_review: false,
+    }
+  }
+  if (Object.keys(ratioCells).length === 0) return data
+
+  const derived: LabAnalyte = {
+    id: DERIVED_CHOL_RATIO_ID,
+    slug: DERIVED_CHOL_RATIO_SLUG,
+    display_name_it: "Rapporto Col.tot / HDL (derivato)",
+    category: "lipidi",
+    specimen: "blood",
+    value_type: "numeric",
+    unit_canonical: "",
+    ref_low: null,
+    ref_high: 5,
+    ref_text: "<3.5 rischio molto basso · <5 basso · >5 elevato",
+    aliases: [],
+  }
+
+  return {
+    ...data,
+    analytes: [...data.analytes, derived],
+    cells: { ...data.cells, [String(DERIVED_CHOL_RATIO_ID)]: ratioCells },
+  }
+}
+
 const CONTEXT_ROWS: { key: keyof LabPanelContextRow; label: string }[] = [
   { key: "activity_text", label: "Attività fisica" },
   { key: "medications_text", label: "Farmaci" },
@@ -97,15 +156,17 @@ export default function LabMatrix({
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
-  // Applica il filtro "solo fuori range" lato client (post-fetch).
+  // Inietta analiti derivati (es. Col.tot/HDL) e applica eventuale filtro
+  // "solo fuori range" lato client (post-fetch).
   const data = useMemo<LabMatrixResponse | undefined>(() => {
-    if (!rawData) return rawData
-    if (!filters.onlyOutOfRange) return rawData
-    const filteredAnalytes = rawData.analytes.filter(a => {
-      const byPanel = rawData.cells[String(a.id)] ?? {}
+    const enriched = injectDerivedAnalytes(rawData)
+    if (!enriched) return enriched
+    if (!filters.onlyOutOfRange) return enriched
+    const filteredAnalytes = enriched.analytes.filter(a => {
+      const byPanel = enriched.cells[String(a.id)] ?? {}
       return Object.values(byPanel).some(cell => cell.out_of_range === true)
     })
-    return { ...rawData, analytes: filteredAnalytes }
+    return { ...enriched, analytes: filteredAnalytes }
   }, [rawData, filters.onlyOutOfRange])
 
   // Solo categorie che hanno almeno un valore nella matrice (ignorando
