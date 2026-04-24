@@ -286,20 +286,26 @@ function formatHours(minutes: number): string {
 }
 
 // Raggruppa i sample sonno per data di risveglio; ritorna il più recente,
-// sommando i minuti di Core/Deep/REM (= tempo realmente addormentato).
+// sommando i minuti di Core/Deep/REM/generic asleep (tempo realmente
+// addormentato, escluso "A letto sveglio").
 function computeLastNightSleep(
   samples: CategorySample[] | undefined
 ): { wakeDate: string; asleepMinutes: number } | null {
   if (!samples || samples.length === 0) return null
   const byNight: Record<string, number> = {}
-  const ASLEEP_VALUES = [3, 4, 5] // Core, Deep, REM in SLEEP_STAGES
+  // 1=asleep (legacy), 3=core, 4=deep, 5=REM. Escludiamo 0 (a letto) e 2 (sveglio).
+  const ASLEEP_VALUES = new Set([1, 3, 4, 5])
   for (const s of samples) {
+    if (!ASLEEP_VALUES.has(s.value)) continue
     const end = new Date(s.end_date)
-    const key = new Date(end.getFullYear(), end.getMonth(), end.getDate())
-      .toISOString()
-      .slice(0, 10)
-    if (!ASLEEP_VALUES.includes(s.value)) continue
-    const durationMin = (end.getTime() - new Date(s.start_date).getTime()) / 60_000
+    // Chiave basata su data locale, senza passare da toISOString (che
+    // converte in UTC e sbaglia giorno con offset positivi tipo CEST).
+    const y = end.getFullYear()
+    const m = String(end.getMonth() + 1).padStart(2, "0")
+    const d = String(end.getDate()).padStart(2, "0")
+    const key = `${y}-${m}-${d}`
+    const durationMin =
+      (end.getTime() - new Date(s.start_date).getTime()) / 60_000
     byNight[key] = (byNight[key] ?? 0) + durationMin
   }
   const entries = Object.entries(byNight).sort(([a], [b]) => (a < b ? 1 : -1))
