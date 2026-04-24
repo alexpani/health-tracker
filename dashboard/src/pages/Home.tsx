@@ -18,28 +18,43 @@ import { formatDate, formatDateTime, formatNumber } from "@/lib/utils"
 import type { CategorySample, StretchingSession, Workout } from "@/lib/types"
 
 export default function Home() {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const startOfWeek = new Date()
-  startOfWeek.setDate(startOfWeek.getDate() - 7)
-  const startOf24h = new Date()
-  startOf24h.setHours(startOf24h.getHours() - 24)
+  // IMPORTANTE: tutte le date che diventano parametri di query vanno calcolate
+  // una sola volta per mount. Se ad ogni render facciamo `new Date()`, i ms
+  // cambiano → query key cambia → React Query ri-fetcha in loop (bug
+  // catastrofico: si sono visti 6000+ richieste in pochi secondi).
+  const dateRefs = useMemo(() => {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const startOfWeek = new Date(now)
+    startOfWeek.setDate(now.getDate() - 7)
+    const startOf36h = new Date(now.getTime() - 36 * 3600_000)
+    const yesterday = new Date(now)
+    yesterday.setDate(now.getDate() - 1)
+    return {
+      todayIso: today.toISOString(),
+      startOfWeekIso: startOfWeek.toISOString(),
+      startOf36hIso: startOf36h.toISOString(),
+      nowIso: now.toISOString(),
+      yesterdayYmd: `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`,
+      todayYmd: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
+    }
+  }, [])
 
   const steps = useSamples({
     type: "HKQuantityTypeIdentifierStepCount",
-    start: today.toISOString(),
+    start: dateRefs.todayIso,
     aggregation: "daily",
   })
   const activeCal = useSamples({
     type: "HKQuantityTypeIdentifierActiveEnergyBurned",
-    start: today.toISOString(),
+    start: dateRefs.todayIso,
     aggregation: "daily",
   })
   const latestWeight = useLatest("HKQuantityTypeIdentifierBodyMass")
 
   const stepsWeek = useSamples({
     type: "HKQuantityTypeIdentifierStepCount",
-    start: startOfWeek.toISOString(),
+    start: dateRefs.startOfWeekIso,
     aggregation: "daily",
   })
 
@@ -47,14 +62,11 @@ export default function Home() {
   const status = useSyncStatus()
   const sessions = useSyncSessions(10)
 
-  // Sonno ultima notte: fetch fasi delle ultime 36h, raggruppa per "data
-  // di risveglio" (end_date) e prendi il gruppo più recente.
-  const startOf36h = new Date()
-  startOf36h.setHours(startOf36h.getHours() - 36)
+  // Sonno ultima notte: fetch fasi delle ultime 36h
   const sleepCats = useCategories(
     "HKCategoryTypeIdentifierSleepAnalysis",
-    startOf36h.toISOString(),
-    new Date().toISOString(),
+    dateRefs.startOf36hIso,
+    dateRefs.nowIso,
   )
   const lastNightSleep = useMemo(() => computeLastNightSleep(sleepCats.data), [sleepCats.data])
 
@@ -62,12 +74,7 @@ export default function Home() {
   const recentWorkout = useMemo(() => pickRecentWorkout(workouts.data ?? []), [workouts.data])
 
   // Stretching di oggi o ieri
-  const yesterday = new Date()
-  yesterday.setDate(yesterday.getDate() - 1)
-  const strDay = useStretchingSessions(
-    yesterday.toISOString().slice(0, 10),
-    new Date().toISOString().slice(0, 10),
-  )
+  const strDay = useStretchingSessions(dateRefs.yesterdayYmd, dateRefs.todayYmd)
   const recentStretch = useMemo(() => pickRecentStretch(strDay.data ?? []), [strDay.data])
 
   const stepsTodayTotal = steps.data?.data?.[0] && "avg" in steps.data.data[0]
