@@ -356,7 +356,7 @@ export default function LabMatrix({
   return (
     <>
     {filterBar}
-    <div className="overflow-x-auto border rounded-md">
+    <div className="overflow-auto border rounded-md max-h-[calc(100vh-220px)]">
       <table className="text-xs min-w-max border-separate border-spacing-0">
         <thead>
           <tr>
