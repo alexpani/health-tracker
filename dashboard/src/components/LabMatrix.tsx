@@ -98,6 +98,18 @@ interface MatrixFilters {
   onlyOutOfRange: boolean
 }
 
+const CATEGORY_ORDER = ["lipidi", "fegato", "ormoni", "metabolismo"]
+
+function sortCategories<T extends { category: string }>(items: T[]): T[] {
+  const order = new Map(CATEGORY_ORDER.map((c, i) => [c, i]))
+  return [...items].sort((a, b) => {
+    const ia = order.has(a.category) ? order.get(a.category)! : 1000
+    const ib = order.has(b.category) ? order.get(b.category)! : 1000
+    if (ia !== ib) return ia - ib
+    return a.category.localeCompare(b.category)
+  })
+}
+
 const EMPTY_FILTERS: MatrixFilters = {
   start: "",
   end: "",
@@ -155,6 +167,7 @@ export default function LabMatrix({
   const { data: categoryPool } = useLabMatrix(noCategoryParams)
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [collapsedInitialized, setCollapsedInitialized] = useState(false)
 
   // Inietta analiti derivati (es. Col.tot/HDL) e applica eventuale filtro
   // "solo fuori range" lato client (post-fetch).
@@ -182,6 +195,26 @@ export default function LabMatrix({
   }, [categoryPool])
 
   const grouped = useMemo(() => groupByCategory(data), [data])
+
+  // Al primo caricamento: colassa tutte le categorie tranne "lipidi".
+  useEffect(() => {
+    if (collapsedInitialized) return
+    if (grouped.length === 0) return
+    const initial = new Set<string>(
+      grouped.filter(g => g.category !== "lipidi").map(g => g.category)
+    )
+    setCollapsed(initial)
+    setCollapsedInitialized(true)
+  }, [grouped, collapsedInitialized])
+
+  function collapseAll() {
+    setCollapsed(new Set(grouped.map(g => g.category)))
+  }
+  function expandAll() {
+    setCollapsed(new Set())
+  }
+  const allCollapsed = collapsed.size === grouped.length && grouped.length > 0
+
   const filtersActive =
     filters.start ||
     filters.end ||
@@ -276,6 +309,19 @@ export default function LabMatrix({
       >
         <X className="h-3.5 w-3.5 mr-1" />
         Reset filtri
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={allCollapsed ? expandAll : collapseAll}
+        title={allCollapsed ? "Espandi tutte le categorie" : "Collassa tutte le categorie"}
+      >
+        {allCollapsed ? (
+          <ChevronDown className="h-3.5 w-3.5 mr-1" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 mr-1" />
+        )}
+        {allCollapsed ? "Espandi tutto" : "Collassa tutto"}
       </Button>
     </div>
   )
@@ -511,7 +557,11 @@ function groupByCategory(data: LabMatrixResponse | undefined) {
     arr.push(a)
     m.set(a.category, arr)
   }
-  return Array.from(m.entries()).map(([category, analytes]) => ({ category, analytes }))
+  const groups = Array.from(m.entries()).map(([category, analytes]) => ({
+    category,
+    analytes,
+  }))
+  return sortCategories(groups)
 }
 
 function ContextMatrixRow({

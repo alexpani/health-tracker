@@ -99,6 +99,18 @@ function findDerived(slug: string): DerivedAnalyte | undefined {
   return DERIVED_ANALYTES.find(d => d.slug === slug)
 }
 
+const CATEGORY_ORDER = ["lipidi", "fegato", "ormoni", "metabolismo"]
+
+function sortCategoryEntries<T>(entries: [string, T][]): [string, T][] {
+  const order = new Map(CATEGORY_ORDER.map((c, i) => [c, i]))
+  return [...entries].sort(([a], [b]) => {
+    const ia = order.has(a) ? order.get(a)! : 1000
+    const ib = order.has(b) ? order.get(b)! : 1000
+    if (ia !== ib) return ia - ib
+    return a.localeCompare(b)
+  })
+}
+
 export default function LabTrends({ initialSlug }: { initialSlug?: string | null }) {
   const { data: analytes } = useLabAnalytes()
   const [selected, setSelected] = useState<string[]>(
@@ -132,7 +144,7 @@ export default function LabTrends({ initialSlug }: { initialSlug?: string | null
       })
       m.set(d.category, arr)
     })
-    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b))
+    return sortCategoryEntries(Array.from(m.entries()))
   }, [analytes])
 
   const { start, end } = useMemo(() => computeRange(PRESETS[presetIdx].months), [presetIdx])
