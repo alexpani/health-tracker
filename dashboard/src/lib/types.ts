@@ -502,6 +502,20 @@ export interface LabMatrixPanel {
   lab_name: string | null
 }
 
+export interface LabMatrixWeight extends LabMatrixCell {
+  sample_date?: string
+}
+
+export interface LabPanelContextRow {
+  activity_text: string | null
+  medications_text: string | null
+  supplements_text: string | null
+  nutrition_text: string | null
+  diet_text: string | null
+  workout_text: string | null
+  notes: string | null
+}
+
 export interface LabMatrixResponse {
   analytes: LabAnalyte[]
   panels: LabMatrixPanel[]
@@ -509,7 +523,9 @@ export interface LabMatrixResponse {
   cells: Record<string, Record<string, LabMatrixCell>>
   // Ultimo peso corporeo noto alla data di ciascun panel (HK BodyMass).
   // Chiave: panel_id stringificato.
-  panel_weights?: Record<string, LabMatrixCell>
+  panel_weights?: Record<string, LabMatrixWeight>
+  // Note di contesto per panel (editabili inline nella Matrice).
+  panel_context?: Record<string, LabPanelContextRow>
 }
 
 export interface LabTimeseriesPoint {

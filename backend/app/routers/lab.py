@@ -1046,7 +1046,13 @@ async def get_matrix(
     ]
 
     if not panels or not analytes:
-        return {"analytes": analytes, "panels": panels, "cells": {}, "panel_weights": {}}
+        return {
+            "analytes": analytes,
+            "panels": panels,
+            "cells": {},
+            "panel_weights": {},
+            "panel_context": {},
+        }
 
     analyte_ids = [a["id"] for a in analytes]
     panel_ids = [p["id"] for p in panels]
@@ -1073,10 +1079,8 @@ async def get_matrix(
         }
 
     # Peso corporeo (HKBodyMass) per ciascun panel: ultimo sample noto con
-    # start_date <= test_date. Non è un analita lab ma è utile per
-    # correlazioni. Si restituisce come riga aggiuntiva con slug sentinel.
-    from app.models import HealthSample
-
+    # start_date <= test_date. Aggiungiamo anche sample_date per poter
+    # distinguere lato UI quando il peso è "del giorno" vs "di giorni prima".
     panel_weights: dict[int, dict[str, Any]] = {}
     if panels:
         for p in panels:
@@ -1097,13 +1101,42 @@ async def get_matrix(
                     "unit": ws.unit or "kg",
                     "out_of_range": None,
                     "needs_review": False,
+                    "sample_date": ws.start_date.date().isoformat(),
                 }
+
+    # Note di contesto per panel (attività, farmaci, etc.). Ci servono
+    # nella Matrice come righe editabili sotto il peso.
+    ctx_rows = (await db.execute(
+        select(
+            LabPanel.id,
+            LabPanel.activity_text,
+            LabPanel.medications_text,
+            LabPanel.supplements_text,
+            LabPanel.nutrition_text,
+            LabPanel.diet_text,
+            LabPanel.workout_text,
+            LabPanel.notes,
+        ).where(LabPanel.id.in_(panel_ids))
+    )).all()
+    panel_context: dict[int, dict[str, str | None]] = {
+        r.id: {
+            "activity_text": r.activity_text,
+            "medications_text": r.medications_text,
+            "supplements_text": r.supplements_text,
+            "nutrition_text": r.nutrition_text,
+            "diet_text": r.diet_text,
+            "workout_text": r.workout_text,
+            "notes": r.notes,
+        }
+        for r in ctx_rows
+    }
 
     return {
         "analytes": analytes,
         "panels": panels,
         "cells": cells,
         "panel_weights": panel_weights,
+        "panel_context": panel_context,
     }
 
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ChevronDown, ChevronRight, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -11,10 +11,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useLabAnalytes, useLabMatrix } from "@/lib/queries"
-import type { LabAnalyte, LabMatrixCell, LabMatrixResponse } from "@/lib/types"
+import { useLabAnalytes, useLabMatrix, useLabPatchPanel } from "@/lib/queries"
+import type {
+  LabAnalyte,
+  LabMatrixCell,
+  LabMatrixResponse,
+  LabPanelContextRow,
+} from "@/lib/types"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
+
+const CONTEXT_ROWS: { key: keyof LabPanelContextRow; label: string }[] = [
+  { key: "activity_text", label: "Attività fisica" },
+  { key: "medications_text", label: "Farmaci" },
+  { key: "supplements_text", label: "Integratori" },
+  { key: "nutrition_text", label: "Alimentazione" },
+  { key: "diet_text", label: "Dieta (piano)" },
+  { key: "workout_text", label: "Workout" },
+  { key: "notes", label: "Note" },
+]
 
 interface MatrixFilters {
   start: string
@@ -274,31 +289,61 @@ export default function LabMatrix({
             <>
               <tr className="bg-muted/50">
                 <td
-                  className="sticky left-0 z-10 bg-muted/50 px-3 py-1.5 font-semibold border-r"
+                  className="sticky left-0 z-10 bg-muted/50 px-3 py-1.5 font-semibold border-r text-sm capitalize"
                   colSpan={1}
                 >
-                  corpo (Apple Health)
+                  Corpo (Apple Health)
                 </td>
                 <td colSpan={data.panels.length} className="bg-muted/50" />
               </tr>
               <tr>
                 <td className="sticky left-0 z-10 bg-background px-3 py-1.5 border-r">
-                  <span className="italic">Peso al prelievo</span>
+                  Peso al prelievo
                 </td>
                 {data.panels.map(p => {
                   const cell = data.panel_weights?.[String(p.id)]
                   const value = cell?.value_numeric
+                  // Corsivo solo se il peso è di >3 giorni prima del prelievo
+                  // (oppure manca sample_date).
+                  let daysDelta: number | null = null
+                  if (cell?.sample_date) {
+                    daysDelta =
+                      (new Date(p.test_date).getTime() -
+                        new Date(cell.sample_date).getTime()) /
+                      86_400_000
+                  }
+                  const staleWeight = daysDelta == null || daysDelta > 3
                   return (
                     <td
                       key={p.id}
-                      className="px-2 py-1.5 text-center whitespace-nowrap border-b border-border/50 italic text-muted-foreground"
-                      title={cell ? "Ultimo HKBodyMass ≤ data prelievo" : ""}
+                      className={cn(
+                        "px-2 py-1.5 text-center whitespace-nowrap border-b border-border/50",
+                        staleWeight
+                          ? "italic text-muted-foreground"
+                          : "font-mono"
+                      )}
+                      title={
+                        cell
+                          ? cell.sample_date
+                            ? `HKBodyMass ${cell.sample_date} · ${daysDelta?.toFixed(0) ?? "?"} giorni dal prelievo`
+                            : "Ultimo HKBodyMass ≤ data prelievo"
+                          : ""
+                      }
                     >
                       {value != null ? `${value.toFixed(1)} ${cell?.unit ?? "kg"}` : ""}
                     </td>
                   )
                 })}
               </tr>
+              {CONTEXT_ROWS.map(row => (
+                <ContextMatrixRow
+                  key={row.key}
+                  label={row.label}
+                  fieldKey={row.key}
+                  panels={data.panels}
+                  context={data.panel_context ?? {}}
+                />
+              ))}
             </>
           )}
         </tbody>
@@ -406,4 +451,76 @@ function groupByCategory(data: LabMatrixResponse | undefined) {
     m.set(a.category, arr)
   }
   return Array.from(m.entries()).map(([category, analytes]) => ({ category, analytes }))
+}
+
+function ContextMatrixRow({
+  label,
+  fieldKey,
+  panels,
+  context,
+}: {
+  label: string
+  fieldKey: keyof LabPanelContextRow
+  panels: LabMatrixResponse["panels"]
+  context: Record<string, LabPanelContextRow>
+}) {
+  return (
+    <tr>
+      <td className="sticky left-0 z-10 bg-background px-3 py-1.5 border-r text-muted-foreground">
+        {label}
+      </td>
+      {panels.map(p => (
+        <td
+          key={p.id}
+          className="px-1 py-1 align-top border-b border-border/50 min-w-[180px] max-w-[240px]"
+        >
+          <ContextCell
+            panelId={p.id}
+            fieldKey={fieldKey}
+            initial={context[String(p.id)]?.[fieldKey] ?? ""}
+          />
+        </td>
+      ))}
+    </tr>
+  )
+}
+
+function ContextCell({
+  panelId,
+  fieldKey,
+  initial,
+}: {
+  panelId: number
+  fieldKey: keyof LabPanelContextRow
+  initial: string
+}) {
+  const patch = useLabPatchPanel()
+  const [value, setValue] = useState(initial)
+  // Risincronizza se il server aggiorna (es. dopo auto-fill).
+  useEffect(() => setValue(initial), [initial])
+
+  async function commit() {
+    const trimmed = value.trim()
+    if (trimmed === initial.trim()) return
+    try {
+      await patch.mutateAsync({
+        panelId,
+        patch: { [fieldKey]: trimmed || null },
+      })
+    } catch (e) {
+      alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
+      setValue(initial)
+    }
+  }
+
+  return (
+    <textarea
+      value={value}
+      onChange={e => setValue(e.target.value)}
+      onBlur={commit}
+      placeholder="—"
+      rows={2}
+      className="w-full text-xs bg-transparent resize-y px-1.5 py-1 rounded border border-transparent hover:border-border focus:border-primary focus:outline-none"
+    />
+  )
 }
