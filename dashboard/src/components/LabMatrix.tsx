@@ -357,16 +357,16 @@ export default function LabMatrix({
     <>
     {filterBar}
     <div className="overflow-x-auto border rounded-md">
-      <table className="text-xs min-w-max">
-        <thead className="sticky top-0 z-10 bg-background">
+      <table className="text-xs min-w-max border-separate border-spacing-0">
+        <thead>
           <tr>
-            <th className="sticky left-0 z-20 bg-background text-left px-3 py-2 font-medium border-b border-r min-w-[220px]">
+            <th className="sticky left-0 top-0 z-30 bg-background text-left px-3 py-2 font-medium border-b border-r min-w-[220px] shadow-[inset_0_-1px_0_rgb(229_231_235)]">
               Analita
             </th>
             {data.panels.map(p => (
               <th
                 key={p.id}
-                className="px-2 py-2 border-b font-medium whitespace-nowrap"
+                className="sticky top-0 z-20 bg-background px-2 py-2 font-medium whitespace-nowrap shadow-[inset_0_-1px_0_rgb(229_231_235)]"
                 title={p.lab_name ?? ""}
               >
                 <Link to={`/lab/panels/${p.id}/review`} className="hover:underline">

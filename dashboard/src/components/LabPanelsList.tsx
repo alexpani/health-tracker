@@ -1,6 +1,5 @@
-import { useMemo } from "react"
 import { Link } from "react-router-dom"
-import { AlertTriangle, CheckCircle2, Trash2 } from "lucide-react"
+import { Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -18,20 +17,6 @@ export default function LabPanelsList() {
   const { data, isLoading, error } = useLabPanels({ limit: 200 })
   const del = useLabDeletePanel()
 
-  const { incomplete, complete } = useMemo(() => {
-    const items = data?.items ?? []
-    // "Da completare" = qualsiasi panel con righe non mappate O ancora draft.
-    // "Completati" = solo confirmed + 0 unmapped.
-    return {
-      incomplete: items.filter(
-        p => p.status === "draft" || (p.unmapped_count ?? 0) > 0
-      ),
-      complete: items.filter(
-        p => p.status === "confirmed" && (p.unmapped_count ?? 0) === 0
-      ),
-    }
-  }, [data])
-
   async function handleDelete(panel: LabPanelSummary) {
     if (!confirm(`Eliminare il referto del ${formatDate(panel.test_date)}?`)) return
     try {
@@ -47,29 +32,7 @@ export default function LabPanelsList() {
     return <p className="text-sm text-muted-foreground">Nessun referto ancora caricato.</p>
   }
 
-  return (
-    <div className="space-y-6">
-      {incomplete.length > 0 && (
-        <section>
-          <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-600" />
-            Da completare ({incomplete.length})
-          </h3>
-          <PanelsTable panels={incomplete} onDelete={handleDelete} />
-        </section>
-      )}
-
-      {complete.length > 0 && (
-        <section>
-          <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-            Completati ({complete.length})
-          </h3>
-          <PanelsTable panels={complete} onDelete={handleDelete} />
-        </section>
-      )}
-    </div>
-  )
+  return <PanelsTable panels={data.items} onDelete={handleDelete} />
 }
 
 function PanelsTable({
