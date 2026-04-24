@@ -68,7 +68,9 @@ function findBodyMetric(slug: string): BodyMetric | undefined {
 
 export default function LabTrends({ initialSlug }: { initialSlug?: string | null }) {
   const { data: analytes } = useLabAnalytes()
-  const [selected, setSelected] = useState<string[]>(initialSlug ? [initialSlug] : [])
+  const [selected, setSelected] = useState<string[]>(
+    initialSlug ? [initialSlug] : ["__hk_body_mass"]
+  )
   const [presetIdx, setPresetIdx] = useState(DEFAULT_PRESET_IDX)
 
   const byCategory = useMemo(() => {
@@ -91,10 +93,14 @@ export default function LabTrends({ initialSlug }: { initialSlug?: string | null
     })
   }
 
-  const isDefaultState = selected.length === 0 && presetIdx === DEFAULT_PRESET_IDX
+  const DEFAULT_SELECTED = ["__hk_body_mass"]
+  const isDefaultState =
+    selected.length === DEFAULT_SELECTED.length &&
+    selected.every((s, i) => s === DEFAULT_SELECTED[i]) &&
+    presetIdx === DEFAULT_PRESET_IDX
 
   function resetFilters() {
-    setSelected([])
+    setSelected([...DEFAULT_SELECTED])
     setPresetIdx(DEFAULT_PRESET_IDX)
   }
 
@@ -142,10 +148,10 @@ export default function LabTrends({ initialSlug }: { initialSlug?: string | null
             : `Seleziona fino a ${MAX_SERIES} analiti.`}
         </div>
 
-        <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto">
           <div>
-            <div className="text-xs font-semibold text-muted-foreground mb-1 sticky top-0 bg-background">
-              corpo (Apple Health)
+            <div className="text-sm font-semibold text-foreground mb-1.5 sticky top-0 bg-background py-1 border-b">
+              Corpo (Apple Health)
             </div>
             <div className="flex flex-wrap gap-1">
               {BODY_METRICS.map(m => {
@@ -172,7 +178,7 @@ export default function LabTrends({ initialSlug }: { initialSlug?: string | null
 
           {byCategory.map(([cat, items]) => (
             <div key={cat}>
-              <div className="text-xs font-semibold text-muted-foreground mb-1 sticky top-0 bg-background">
+              <div className="text-sm font-semibold text-foreground mb-1.5 sticky top-0 bg-background py-1 border-b capitalize">
                 {cat}
               </div>
               <div className="flex flex-wrap gap-1">
