@@ -10,12 +10,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { useDiarioActivePlan, useDiarioDailyTotals, useDiarioSyncToHK, useSamples } from "@/lib/queries"
+import { useDiarioActivePlan, useDiarioDailyTotals, useSamples } from "@/lib/queries"
 import type { DiarioDailyTotal, NutritionFilters, Sample } from "@/lib/types"
-import { RefreshCw } from "lucide-react"
 
 // HealthKit dietary types we consolidate with the diario
 const HK_DIETARY_MAP = [
@@ -198,41 +196,14 @@ export function DiarioSection({ filters }: Props) {
 
   const planMissing = planError && (planErr as any)?.message?.includes("404")
 
-  const syncToHK = useDiarioSyncToHK()
-
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="text-xl font-semibold">Diario alimentare</h2>
-          <p className="text-xs text-muted-foreground mt-1">
-            Regime alimentare quotidiano dal servizio <span className="font-mono">diario-alimentare</span>.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => syncToHK.mutate()}
-            disabled={syncToHK.isPending}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 mr-2 ${syncToHK.isPending ? "animate-spin" : ""}`} />
-            Sincronizza con Apple Salute
-          </Button>
-          {syncToHK.data && (
-            <p className="text-[11px] text-muted-foreground text-right">
-              Accodate {syncToHK.data.queued_writes} write + {syncToHK.data.queued_deletions} delete.{" "}
-              {syncToHK.data.queued_writes + syncToHK.data.queued_deletions === 0
-                ? "Tutto gia' allineato."
-                : "Saranno processate al prossimo Sync Now sull'iPhone."}
-            </p>
-          )}
-          {syncToHK.isError && (
-            <p className="text-[11px] text-destructive text-right">
-              Errore: {(syncToHK.error as Error).message}
-            </p>
-          )}
-        </div>
+      <div>
+        <h2 className="text-xl font-semibold">Diario alimentare</h2>
+        <p className="text-xs text-muted-foreground mt-1">
+          Regime alimentare quotidiano dal servizio <span className="font-mono">diario-alimentare</span>.
+          Sync con Apple Salute automatico al prossimo Sync Now sull'iPhone.
+        </p>
       </div>
 
       {/* Piano attivo */}
