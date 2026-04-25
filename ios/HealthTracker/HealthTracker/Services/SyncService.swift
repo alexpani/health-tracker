@@ -487,6 +487,22 @@ final class SyncService {
         (.dietaryCarbohydrates,  .gram()),
         (.dietaryFatTotal,       .gram()),
         (.dietaryProtein,        .gram()),
+        // Apple Watch cumulative activity types — Watch writes samples to
+        // HealthKit retroactively when it syncs with the iPhone (often
+        // hours after the activity). The windowed lastSyncDate path with
+        // .strictStartDate misses any sample that arrives in HealthKit
+        // after the previous sync's "now" moved past its startDate. This
+        // showed up as daily kcal/steps totals being 5–25% lower than
+        // Apple Salute.
+        (.activeEnergyBurned,        .kilocalorie()),
+        (.basalEnergyBurned,         .kilocalorie()),
+        (.stepCount,                 .count()),
+        (.distanceWalkingRunning,    .meter()),
+        (.distanceCycling,           .meter()),
+        (.flightsClimbed,            .count()),
+        (.appleExerciseTime,         .minute()),
+        (.appleStandTime,            .minute()),
+        (.appleMoveTime,             .minute()),
     ]
 
     static var anchoredQuantityIds: Set<String> {
