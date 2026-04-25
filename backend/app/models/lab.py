@@ -88,6 +88,13 @@ class LabPanel(Base):
         Text, nullable=False, server_default="draft"
     )
     notes: Mapped[str | None] = mapped_column(Text)
+    # Contesto del prelievo (tutti opzionali; auto-popolati o editabili).
+    activity_text: Mapped[str | None] = mapped_column(Text)
+    medications_text: Mapped[str | None] = mapped_column(Text)
+    supplements_text: Mapped[str | None] = mapped_column(Text)
+    nutrition_text: Mapped[str | None] = mapped_column(Text)
+    diet_text: Mapped[str | None] = mapped_column(Text)
+    workout_text: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

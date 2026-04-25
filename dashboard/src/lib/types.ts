@@ -385,6 +385,7 @@ export interface LabAnalyte {
   ref_low: number | null
   ref_high: number | null
   ref_text: string | null
+  aliases?: string[]
 }
 
 export interface LabPanelSummary {
@@ -396,6 +397,8 @@ export interface LabPanelSummary {
   notes: string | null
   document_id: number | null
   confirmed_at: string | null
+  results_count: number
+  unmapped_count: number
 }
 
 export interface LabPanelListResponse {
@@ -421,7 +424,26 @@ export interface LabResult {
   notes: string | null
 }
 
+export interface LabBodyHkSample {
+  value: number
+  unit: string
+  start_date: string
+}
+
+export interface LabBodySnapshot {
+  weight: LabBodyHkSample | null
+  body_fat: LabBodyHkSample | null
+  bmi: LabBodyHkSample | null
+}
+
 export interface LabPanelDetail extends LabPanelSummary {
+  activity_text: string | null
+  medications_text: string | null
+  supplements_text: string | null
+  nutrition_text: string | null
+  diet_text: string | null
+  workout_text: string | null
+  body_snapshot?: LabBodySnapshot
   results: LabResult[]
 }
 
@@ -446,13 +468,18 @@ export interface LabConfirmResponse {
   results_count: number
   out_of_range_count: number
   still_needs_review: number
+  unmapped_count: number
 }
 
 export interface LabResultPatch {
   analyte_id?: number | null
+  raw_name?: string
   value_numeric?: number | null
   value_text?: string | null
   unit_raw?: string | null
+  ref_low_raw?: number | null
+  ref_high_raw?: number | null
+  ref_text_raw?: string | null
   notes?: string | null
 }
 
@@ -475,11 +502,30 @@ export interface LabMatrixPanel {
   lab_name: string | null
 }
 
+export interface LabMatrixWeight extends LabMatrixCell {
+  sample_date?: string
+}
+
+export interface LabPanelContextRow {
+  activity_text: string | null
+  medications_text: string | null
+  supplements_text: string | null
+  nutrition_text: string | null
+  diet_text: string | null
+  workout_text: string | null
+  notes: string | null
+}
+
 export interface LabMatrixResponse {
   analytes: LabAnalyte[]
   panels: LabMatrixPanel[]
   // Keys are stringified ids (JSON object).
   cells: Record<string, Record<string, LabMatrixCell>>
+  // Ultimo peso corporeo noto alla data di ciascun panel (HK BodyMass).
+  // Chiave: panel_id stringificato.
+  panel_weights?: Record<string, LabMatrixWeight>
+  // Note di contesto per panel (editabili inline nella Matrice).
+  panel_context?: Record<string, LabPanelContextRow>
 }
 
 export interface LabTimeseriesPoint {

@@ -1,14 +1,17 @@
 """Pipeline di ingest per un referto PDF.
 
-Step (spec §5.1):
-  1. Estrazione testo con pdfplumber (PDF testuali).
-  2. Chiamata Anthropic (system prompt IT, temp=0) → JSON strutturato.
+Step:
+  1. Hash SHA-256 + salvataggio file nel volume (`lab_documents/<sha>.pdf`).
+  2. Invio del PDF ad Anthropic come blocco `document` (base64): il modello
+     gestisce sia PDF testuali che scannerizzati (OCR interno) e risponde
+     con il JSON strutturato richiesto dal system prompt.
   3. Matching raw_name → analyte_id via alias esatti + pg_trgm similarity.
 
 La chiamata LLM è isolata dietro `call_llm()` per poter essere mockata nei test.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
@@ -18,26 +21,57 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-import pdfplumber
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 
-SYSTEM_PROMPT = """Sei un parser di referti medici italiani. Ricevi il testo grezzo di un referto
-di analisi del sangue e/o delle urine. Estrai esattamente:
+SYSTEM_PROMPT_BASE = """Sei un parser di referti medici italiani. Ricevi un referto di analisi
+del sangue e/o delle urine (PDF testuale o scannerizzato, fai OCR se serve).
+
+Estrai esattamente:
 - test_date (ISO YYYY-MM-DD, la data del prelievo, non la data di refertazione)
 - lab_name (nome del laboratorio, stringa)
 - specimen_types (array tra "blood", "urine")
-- analytes: array di { raw_name, value_raw, unit_raw, ref_range_raw }
-  dove value_raw è la stringa esatta del valore (può essere numero o testo
-  come "assente", "tracce", "++", "negativo"); ref_range_raw è la stringa
-  esatta del range come riportato nel referto, se presente.
+- analytes: array di oggetti con campi:
+    - raw_name: il nome dell'analita come riportato nel referto, senza modifiche
+    - value_raw: stringa esatta del valore (numero o testo come "assente",
+      "tracce", "++", "negativo", "giallo paglierino")
+    - unit_raw: stringa esatta dell'unità se presente
+    - ref_range_raw: stringa esatta del range di riferimento se presente
+    - suggested_slug: lo slug di un analita del catalogo qui sotto che
+      corrisponde concettualmente all'analita estratto, altrimenti null
 
-Regole:
-- Non normalizzare nulla. Non tradurre. Non inferire valori.
+Regole generali:
+- Non tradurre e non normalizzare valori, unità o nomi.
+- Per i referti delle urine, usa i nomi canonici italiani anche per valori
+  qualitativi (es. "assente", "tracce", "+", "++", "+++", "++++", "negativo",
+  "positivo", "raro", "presente").
 - Se un campo manca, usa null.
+- Ogni analita presente nel referto deve comparire nell'output, anche se
+  suggested_slug è null.
+- Per `suggested_slug` usa SOLO uno degli slug presenti nel catalogo fornito.
 - Rispondi SOLO con JSON valido, niente testo prima o dopo, niente markdown."""
+
+
+def build_system_prompt(catalog: list[dict[str, Any]]) -> str:
+    """Appende il catalogo al system prompt così il modello può suggerire lo
+    slug corretto per ciascun analita estratto.
+
+    `catalog`: lista di dict con chiavi `slug`, `display_name_it`, `category`,
+    `specimen`, e opzionalmente `aliases` (lista di stringhe).
+    """
+    if not catalog:
+        return SYSTEM_PROMPT_BASE
+    lines = ["", "CATALOGO ANALITI (slug | campione | nome | sinonimi):"]
+    for a in catalog:
+        aliases = a.get("aliases") or []
+        alias_str = ", ".join(aliases[:6])
+        lines.append(
+            f"- {a['slug']} | {a['specimen']} | {a['display_name_it']}"
+            + (f" | {alias_str}" if alias_str else "")
+        )
+    return SYSTEM_PROMPT_BASE + "\n" + "\n".join(lines)
 
 TRGM_SIMILARITY_THRESHOLD = 0.6
 MAX_LLM_TOKENS = 4096
@@ -53,6 +87,7 @@ class ExtractedAnalyte:
     value_raw: str | None
     unit_raw: str | None
     ref_range_raw: str | None
+    suggested_slug: str | None = None
 
 
 @dataclass
@@ -103,31 +138,19 @@ def save_document(data: bytes, original_filename: str) -> tuple[Path, str, int]:
 
 
 # ---------------------------------------------------------------------------
-# 2. Estrazione testo
+# 2. Chiamata LLM col PDF come input diretto (gestisce anche referti scannerizzati)
 # ---------------------------------------------------------------------------
 
-def extract_text_from_pdf(path: Path) -> str:
-    """Estrae il testo di tutte le pagine, separate da form-feed."""
-    chunks: list[str] = []
-    with pdfplumber.open(path) as pdf:
-        for page in pdf.pages:
-            txt = page.extract_text() or ""
-            chunks.append(txt)
-    return "\n\f\n".join(chunks)
+def call_llm(pdf_bytes: bytes, catalog: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Chiama Anthropic passando il PDF direttamente come blocco `document`
+    e parsa la risposta JSON. Il modello gestisce sia PDF testuali che
+    scannerizzati (OCR interno).
 
-
-# ---------------------------------------------------------------------------
-# 3. Chiamata LLM
-# ---------------------------------------------------------------------------
-
-def call_llm(raw_text: str) -> dict[str, Any]:
-    """Chiama Anthropic e parsa la risposta JSON.
+    `catalog`: elenco di analiti (slug, display_name_it, specimen, aliases)
+    accoded al system prompt così il modello può suggerire lo slug giusto.
 
     Restituisce il dict grezzo `{test_date, lab_name, specimen_types, analytes}`.
-    Può sollevare `RuntimeError` se la risposta non è JSON valido: il chiamante
-    deve decidere se marcare il panel come `parsing_failed`.
-
-    Isolata in una funzione modulare per permettere il mocking nei test.
+    Solleva `RuntimeError` se la risposta non è JSON valido.
     """
     if not settings.anthropic_api_key:
         raise RuntimeError("ANTHROPIC_API_KEY non configurata")
@@ -135,21 +158,48 @@ def call_llm(raw_text: str) -> dict[str, Any]:
     from anthropic import Anthropic
 
     client = Anthropic(api_key=settings.anthropic_api_key)
+    pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("ascii")
+    system_prompt = build_system_prompt(catalog or [])
+    # N.B. `temperature` è deprecato su Opus 4.7 — lasciamo il default del
+    # modello (deterministico a temp fissa interna).
     resp = client.messages.create(
         model=settings.anthropic_model,
         max_tokens=MAX_LLM_TOKENS,
-        temperature=0,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": raw_text}],
+        system=system_prompt,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": pdf_b64,
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": "Estrai gli analiti da questo referto secondo le regole del system prompt.",
+                },
+            ],
+        }],
     )
-    # La risposta è in resp.content[0].text per messaggi text-only.
     body = "".join(
         block.text for block in resp.content if getattr(block, "type", None) == "text"
     )
+    # Alcuni modelli avvolgono il JSON in un codice-fence: strip se presente.
+    body = body.strip()
+    if body.startswith("```"):
+        body = body.strip("`")
+        # Rimuovi eventuale `json\n` iniziale
+        first_nl = body.find("\n")
+        if first_nl != -1 and not body[:first_nl].strip().startswith("{"):
+            body = body[first_nl + 1 :]
+        body = body.rsplit("```", 1)[0].strip()
     try:
         return json.loads(body)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Risposta LLM non è JSON valido: {exc}") from exc
+        raise RuntimeError(f"Risposta LLM non è JSON valido: {exc}\nBody: {body[:500]!r}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +232,7 @@ def parse_extracted_panel(payload: dict[str, Any]) -> ExtractedPanel:
             value_raw=_clean_str(a.get("value_raw")),
             unit_raw=_clean_str(a.get("unit_raw")),
             ref_range_raw=_clean_str(a.get("ref_range_raw")),
+            suggested_slug=_clean_str(a.get("suggested_slug")),
         ))
 
     return ExtractedPanel(
@@ -247,13 +298,24 @@ def parse_ref_range(raw: str | None) -> tuple[Decimal | None, Decimal | None, st
 
 
 async def match_analyte(
-    db: AsyncSession, raw_name: str
+    db: AsyncSession, raw_name: str, suggested_slug: str | None = None,
 ) -> int | None:
     """Tenta di mappare `raw_name` a un `lab_analytes.id`:
-    1. Exact match case-insensitive su `lab_analyte_aliases`.
-    2. Similarity trigram `> TRGM_SIMILARITY_THRESHOLD` (pg_trgm).
+    1. Se il LLM ha fornito `suggested_slug`, proviamo prima quello.
+    2. Exact match case-insensitive su `lab_analyte_aliases`.
+    3. Similarity trigram `> TRGM_SIMILARITY_THRESHOLD` (pg_trgm).
     """
-    # 1) exact
+    # 0) slug suggerito dal LLM (catalog-aware)
+    if suggested_slug:
+        sug = await db.execute(
+            text("SELECT id FROM lab_analytes WHERE slug = :s LIMIT 1"),
+            {"s": suggested_slug},
+        )
+        row = sug.first()
+        if row is not None:
+            return row[0]
+
+    # 1) exact alias
     exact = await db.execute(
         text(
             "SELECT analyte_id FROM lab_analyte_aliases "
@@ -284,7 +346,7 @@ async def build_matched_results(
 ) -> list[MatchedResult]:
     out: list[MatchedResult] = []
     for a in analytes:
-        aid = await match_analyte(db, a.raw_name)
+        aid = await match_analyte(db, a.raw_name, a.suggested_slug)
         v_num, v_text = parse_value(a.value_raw)
         rl, rh, rtxt = parse_ref_range(a.ref_range_raw)
         out.append(MatchedResult(
@@ -299,3 +361,37 @@ async def build_matched_results(
             needs_review=True,  # sempre True al draft; confirm lo abbasserà
         ))
     return out
+
+
+async def load_catalog_for_llm(db: AsyncSession) -> list[dict[str, Any]]:
+    """Carica il catalogo analiti + alias in un formato compatto pronto per
+    il system prompt. Serve a far "vedere" al modello tutti gli analiti
+    disponibili così può restituire `suggested_slug` azzeccati."""
+    analyte_rows = (await db.execute(
+        text(
+            "SELECT id, slug, display_name_it, specimen FROM lab_analytes "
+            "ORDER BY specimen, category, display_name_it"
+        )
+    )).all()
+    analytes = [
+        {
+            "id": r[0],
+            "slug": r[1],
+            "display_name_it": r[2],
+            "specimen": r[3],
+            "aliases": [],
+        }
+        for r in analyte_rows
+    ]
+    by_id = {a["id"]: a for a in analytes}
+    alias_rows = (await db.execute(
+        text("SELECT analyte_id, alias FROM lab_analyte_aliases")
+    )).all()
+    for aid, alias in alias_rows:
+        if aid in by_id:
+            by_id[aid]["aliases"].append(alias)
+    # Rimuovi l'id dal dict ritornato (il prompt non ne ha bisogno)
+    return [
+        {k: v for k, v in a.items() if k != "id"}
+        for a in analytes
+    ]

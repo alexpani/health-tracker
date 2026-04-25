@@ -775,39 +775,138 @@ async def workout_records_facets(db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.get("/workouts/facets")
-async def workout_facets(db: AsyncSession = Depends(get_db)):
-    """
-    Returns distinct *effective types* (including metadata-derived variants like
-    treadmill_run, swim_pool) with counts, plus sources and distance range.
-    """
-    # Effective types with counts
-    et_stmt = text(f"""
-        SELECT {EFFECTIVE_TYPE_SQL} AS effective_type,
-               MIN(activity_type) AS activity_type,
-               MIN(activity_name) AS activity_name,
-               COUNT(*) AS count
-        FROM workouts
-        GROUP BY effective_type
-        ORDER BY count DESC
-    """)
-    et_rows = (await db.execute(et_stmt)).all()
+def _apply_workout_filters(
+    stmt,
+    *,
+    activity_type=None, effective_types=None,
+    start=None, end=None, years=None, sources=None,
+    distance_min=None, distance_max=None,
+    duration_min=None, duration_max=None,
+    pace_min=None, pace_max=None,
+    notes_contains=None, title_contains=None,
+):
+    """Apply the superset of workout filters. Callers pass None for the
+    axis they want to EXCLUDE (e.g. facets counting years pass years=None
+    so the bucket count doesn't self-restrict)."""
+    if activity_type:
+        stmt = stmt.where(Workout.activity_type.in_(activity_type))
+    if effective_types:
+        stmt = _apply_effective_type_filter(stmt, effective_types)
+    if start:
+        stmt = stmt.where(Workout.start_date >= start)
+    if end:
+        stmt = stmt.where(Workout.start_date <= end)
+    if years:
+        stmt = stmt.where(func.extract("year", Workout.start_date).in_(years))
+    if sources:
+        stmt = stmt.where(Workout.source_name.in_(sources))
+    if distance_min is not None:
+        stmt = stmt.where(Workout.total_distance >= distance_min)
+    if distance_max is not None:
+        stmt = stmt.where(Workout.total_distance <= distance_max)
+    if duration_min is not None:
+        stmt = stmt.where(Workout.duration >= duration_min)
+    if duration_max is not None:
+        stmt = stmt.where(Workout.duration <= duration_max)
+    if notes_contains:
+        stmt = stmt.where(Workout.notes.ilike(f"%{notes_contains}%"))
+    if title_contains:
+        stmt = stmt.where(Workout.title.ilike(f"%{title_contains}%"))
+    if pace_min is not None or pace_max is not None:
+        stmt = stmt.where(Workout.total_distance > 100)
+        stmt = stmt.where(Workout.duration.is_not(None))
+        stmt = stmt.where(Workout.duration > 0)
+        pace_expr = Workout.duration * 1000.0 / Workout.total_distance
+        if pace_min is not None:
+            stmt = stmt.where(pace_expr >= pace_min)
+        if pace_max is not None:
+            stmt = stmt.where(pace_expr <= pace_max)
+    return stmt
 
+
+@router.get("/workouts/facets")
+async def workout_facets(
+    activity_type: list[int] | None = Query(None),
+    effective_types: list[str] | None = Query(None),
+    start: datetime | None = None,
+    end: datetime | None = None,
+    years: list[int] | None = Query(None),
+    sources: list[str] | None = Query(None),
+    distance_min: float | None = None,
+    distance_max: float | None = None,
+    duration_min: float | None = None,
+    duration_max: float | None = None,
+    pace_min: float | None = None,
+    pace_max: float | None = None,
+    notes_contains: str | None = None,
+    title_contains: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns distinct effective types, sources, years — all with counts
+    **cross-aware**: each facet's bucket counts are computed excluding
+    the facet's own filter, so clicking an activity narrows year counts,
+    clicking a year narrows activity counts, etc. (Amazon-style.)
+
+    If no filter is passed, the response matches the old unfiltered
+    all-time counts.
+    """
+    base = dict(
+        activity_type=activity_type, effective_types=effective_types,
+        start=start, end=end, years=years, sources=sources,
+        distance_min=distance_min, distance_max=distance_max,
+        duration_min=duration_min, duration_max=duration_max,
+        pace_min=pace_min, pace_max=pace_max,
+        notes_contains=notes_contains, title_contains=title_contains,
+    )
+
+    # Years: exclude years filter
+    years_stmt = select(
+        func.extract("year", Workout.start_date).label("y"),
+        func.count().label("c"),
+    )
+    years_stmt = _apply_workout_filters(years_stmt, **{**base, "years": None})
+    years_stmt = years_stmt.group_by("y").order_by("y")
+    years_rows = [
+        {"year": int(r.y), "count": r.c}
+        for r in (await db.execute(years_stmt)).all()
+    ]
+
+    # Sources: exclude sources filter
     sources_stmt = select(Workout.source_name).distinct()
+    sources_stmt = _apply_workout_filters(sources_stmt, **{**base, "sources": None})
+    sources_list = [r[0] for r in (await db.execute(sources_stmt)).all() if r[0] is not None]
+
+    # Effective types: exclude effective_types filter. Bridge through the
+    # id-list so the EFFECTIVE_TYPE_SQL raw text query can be restricted
+    # to the filtered set.
+    ids_stmt = _apply_workout_filters(select(Workout.id), **{**base, "effective_types": None})
+    ids = [r[0] for r in (await db.execute(ids_stmt)).all()]
+    if ids:
+        et_stmt = text(f"""
+            SELECT {EFFECTIVE_TYPE_SQL} AS effective_type,
+                   MIN(activity_type) AS activity_type,
+                   MIN(activity_name) AS activity_name,
+                   COUNT(*) AS count
+            FROM workouts
+            WHERE id = ANY(:ids)
+            GROUP BY effective_type
+            ORDER BY count DESC
+        """).bindparams(ids=ids)
+        et_rows = (await db.execute(et_stmt)).all()
+    else:
+        et_rows = []
+
+    # Ranges: honor the current full filter set (this is context for the
+    # numeric range inputs, not a facet bucket).
     range_stmt = select(
         func.min(Workout.total_distance).label("dmin"),
         func.max(Workout.total_distance).label("dmax"),
         func.min(Workout.duration).label("durmin"),
         func.max(Workout.duration).label("durmax"),
     )
-    years_stmt = select(
-        func.extract("year", Workout.start_date).label("y"),
-        func.count().label("c"),
-    ).group_by("y").order_by("y")
-
-    sources = [r[0] for r in (await db.execute(sources_stmt)).all() if r[0] is not None]
+    range_stmt = _apply_workout_filters(range_stmt, **base)
     rng = (await db.execute(range_stmt)).first()
-    years = [{"year": int(r.y), "count": r.c} for r in (await db.execute(years_stmt)).all()]
 
     return {
         "effective_types": [
@@ -819,8 +918,8 @@ async def workout_facets(db: AsyncSession = Depends(get_db)):
             }
             for r in et_rows
         ],
-        "sources": sorted(sources),
-        "years": years,
+        "sources": sorted(sources_list),
+        "years": years_rows,
         "distance_min": float(rng.dmin) if rng and rng.dmin is not None else None,
         "distance_max": float(rng.dmax) if rng and rng.dmax is not None else None,
         "duration_min": float(rng.durmin) if rng and rng.durmin is not None else None,

@@ -285,11 +285,27 @@ export function useWorkouts(filters: WorkoutFilters = {}) {
   })
 }
 
-export function useWorkoutFacets() {
+export function useWorkoutFacets(filters: WorkoutFilters = {}) {
   return useQuery({
-    queryKey: ["workoutFacets"],
-    queryFn: () => apiGet<WorkoutFacets>("/api/v1/workouts/facets"),
-    staleTime: 5 * 60_000,
+    queryKey: ["workoutFacets", filters],
+    queryFn: () =>
+      apiGet<WorkoutFacets>("/api/v1/workouts/facets", {
+        start: filters.start,
+        end: filters.end,
+        years: filters.years as any,
+        effective_types: filters.effective_types,
+        sources: filters.sources,
+        distance_min: filters.distance_min,
+        distance_max: filters.distance_max,
+        duration_min: filters.duration_min,
+        duration_max: filters.duration_max,
+        pace_min: filters.pace_min,
+        pace_max: filters.pace_max,
+        notes_contains: filters.notes_contains,
+        title_contains: filters.title_contains,
+      }),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 }
 
@@ -417,6 +433,7 @@ export function useLabPanel(panelId: number | null | undefined) {
     queryKey: ["labPanel", panelId],
     queryFn: () => apiGet<LabPanelDetail>(`/api/v1/lab/panels/${panelId}`),
     enabled: panelId != null,
+    staleTime: 0,
   })
 }
 
@@ -441,8 +458,66 @@ export function useLabPatchResult() {
   return useMutation({
     mutationFn: ({ resultId, patch }: { resultId: number; patch: LabResultPatch }) =>
       apiPatch<{ ok: boolean; id: number }>(`/api/v1/lab/results/${resultId}`, patch),
-    onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: ["labPanel"] })
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["labPanel"] })
+      await qc.invalidateQueries({ queryKey: ["labMatrix"] })
+      await qc.invalidateQueries({ queryKey: ["labTimeseries"] })
+      await qc.invalidateQueries({ queryKey: ["labRecentOor"] })
+    },
+  })
+}
+
+export function useLabDeleteResult() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (resultId: number) =>
+      apiDelete<{ ok: boolean }>(`/api/v1/lab/results/${resultId}`),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["labPanel"] })
+      await qc.invalidateQueries({ queryKey: ["labMatrix"] })
+      await qc.invalidateQueries({ queryKey: ["labTimeseries"] })
+      await qc.invalidateQueries({ queryKey: ["labRecentOor"] })
+    },
+  })
+}
+
+export function useLabAddResult() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ panelId, raw_name }: { panelId: number; raw_name?: string }) =>
+      apiPost<{ id: number; panel_id: number; raw_name: string }>(
+        `/api/v1/lab/panels/${panelId}/results`,
+        { raw_name: raw_name ?? "Nuovo risultato" }
+      ),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["labPanel"] })
+      await qc.invalidateQueries({ queryKey: ["labPanels"] })
+      await qc.invalidateQueries({ queryKey: ["labMatrix"] })
+    },
+  })
+}
+
+export interface LabPanelPatch {
+  test_date?: string
+  lab_name?: string | null
+  notes?: string | null
+  specimen_types?: string[] | null
+  activity_text?: string | null
+  medications_text?: string | null
+  supplements_text?: string | null
+  nutrition_text?: string | null
+  diet_text?: string | null
+  workout_text?: string | null
+}
+
+export function useLabPatchPanel() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ panelId, patch }: { panelId: number; patch: LabPanelPatch }) =>
+      apiPatch<{ ok: boolean; id: number }>(`/api/v1/lab/panels/${panelId}`, patch),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["labPanel"] })
+      await qc.invalidateQueries({ queryKey: ["labPanels"] })
     },
   })
 }
@@ -474,6 +549,43 @@ export function useLabCreateAlias() {
     mutationFn: (body: LabAliasIn) =>
       apiPost<{ id: number; analyte_id: number; alias: string }>("/api/v1/lab/aliases", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["labAnalytes"] }),
+  })
+}
+
+export interface LabAnalyteCreate {
+  slug: string
+  display_name_it: string
+  category: string
+  specimen?: "blood" | "urine" | "other"
+  value_type?: "numeric" | "semi_quantitative" | "qualitative" | "textual"
+  unit_canonical?: string | null
+  ref_low?: number | null
+  ref_high?: number | null
+  ref_text?: string | null
+  aliases?: string[]
+}
+
+export function useLabCreateAnalyte() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: LabAnalyteCreate) =>
+      apiPost<{
+        id: number
+        slug: string
+        aliases_created: number
+        aliases_skipped: number
+        results_backfilled?: number
+      }>("/api/v1/lab/analytes", body),
+    onSuccess: async () => {
+      // Il backend fa backfill automatico sui result col raw_name combaciante:
+      // invalidiamo catalog, panels (per le righe mappate) e viste derivate.
+      await qc.invalidateQueries({ queryKey: ["labAnalytes"] })
+      await qc.invalidateQueries({ queryKey: ["labPanel"] })
+      await qc.invalidateQueries({ queryKey: ["labPanels"] })
+      await qc.invalidateQueries({ queryKey: ["labMatrix"] })
+      await qc.invalidateQueries({ queryKey: ["labTimeseries"] })
+      await qc.invalidateQueries({ queryKey: ["labRecentOor"] })
+    },
   })
 }
 

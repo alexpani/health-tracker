@@ -1,9 +1,17 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
-import { ArrowLeft, Plus, Check, AlertCircle } from "lucide-react"
+import { ArrowLeft, Plus, Check, AlertCircle, FlaskConical, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -14,15 +22,26 @@ import {
 } from "@/components/ui/table"
 import { API_URL } from "@/lib/api"
 import { formatDate } from "@/lib/utils"
+import { Textarea } from "@/components/ui/textarea"
 import {
+  useLabAddResult,
   useLabAnalytes,
   useLabConfirmPanel,
   useLabCreateAlias,
+  useLabCreateAnalyte,
+  useLabDeleteResult,
   useLabPanel,
+  useLabPatchPanel,
   useLabPatchResult,
   useLatestWeightBefore,
 } from "@/lib/queries"
-import type { LabAnalyte, LabResult } from "@/lib/types"
+import type {
+  LabAnalyte,
+  LabBodySnapshot,
+  LabPanelDetail,
+  LabResult,
+  LabResultPatch,
+} from "@/lib/types"
 
 export default function LabReview() {
   const params = useParams<{ id: string }>()
@@ -32,8 +51,13 @@ export default function LabReview() {
   const { data: panel, isLoading } = useLabPanel(panelId)
   const { data: analytes } = useLabAnalytes()
   const patch = useLabPatchResult()
+  const deleteResult = useLabDeleteResult()
+  const addResult = useLabAddResult()
   const confirm = useLabConfirmPanel()
   const createAlias = useLabCreateAlias()
+  const [showNewAnalyteForm, setShowNewAnalyteForm] = useState(false)
+  // ID della riga da cui stiamo creando un analita al volo (form inline).
+  const [createFromRowId, setCreateFromRowId] = useState<number | null>(null)
 
   const analyteById = useMemo(() => {
     const m = new Map<number, LabAnalyte>()
@@ -41,10 +65,13 @@ export default function LabReview() {
     return m
   }, [analytes])
 
-  const allMapped = useMemo(() => {
-    if (!panel) return false
-    return panel.results.every(r => r.analyte_id != null)
-  }, [panel])
+  const analytesAlpha = useMemo(
+    () =>
+      [...(analytes ?? [])].sort((a, b) =>
+        a.display_name_it.localeCompare(b.display_name_it, "it")
+      ),
+    [analytes]
+  )
 
   if (!panelId) return <p>ID non valido.</p>
   if (isLoading || !panel) return <p>Caricamento…</p>
@@ -54,15 +81,19 @@ export default function LabReview() {
 
   async function handleConfirm() {
     if (!panelId) return
+    if (unmatchedCount > 0) {
+      const ok = confirm.isPending
+        ? false
+        : window.confirm(
+            `${unmatchedCount} analit${unmatchedCount === 1 ? "a" : "i"} senza mapping. ` +
+              `Quelle righe resteranno "da rivedere" e NON appariranno in Matrice/Andamenti. ` +
+              `Il resto verrà confermato e sarà subito visibile. Procedo?`
+          )
+      if (!ok) return
+    }
     try {
-      const res = await confirm.mutateAsync(panelId)
-      alert(
-        `Confermato. ${res.out_of_range_count} valori fuori range.` +
-          (res.still_needs_review > 0
-            ? ` ${res.still_needs_review} ancora da rivedere (unità incompatibile).`
-            : "")
-      )
-      navigate(`/lab/panels/${panelId}/review`)
+      await confirm.mutateAsync(panelId)
+      navigate("/lab")
     } catch (e) {
       alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
     }
@@ -78,20 +109,7 @@ export default function LabReview() {
           </Link>
         </Button>
         <div className="flex-1">
-          <h1 className="text-xl font-semibold">
-            Referto del {formatDate(panel.test_date)}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {panel.lab_name ?? "Lab non specificato"} ·{" "}
-            {panel.specimen_types.join(", ") || "—"} ·{" "}
-            <span
-              className={
-                isConfirmed ? "text-emerald-600" : "text-amber-600"
-              }
-            >
-              {isConfirmed ? "Confermato" : "In revisione"}
-            </span>
-          </p>
+          <PanelHeader panel={panel} isConfirmed={isConfirmed} />
         </div>
         {panel.document_id != null && (
           <Button variant="outline" size="sm" asChild>
@@ -107,14 +125,52 @@ export default function LabReview() {
       </div>
 
       {!isConfirmed && unmatchedCount > 0 && (
-        <div className="flex items-center gap-2 rounded-md bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2 text-sm">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {unmatchedCount} analit{unmatchedCount === 1 ? "a" : "i"} senza mapping.
-          Completa tutte le righe prima di confermare.
+        <div className="rounded-md bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2 text-sm">
+          <div className="flex items-center gap-2 font-medium">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {unmatchedCount} analit{unmatchedCount === 1 ? "a senza mapping" : "i senza mapping"}:
+          </div>
+          <ul className="mt-1 ml-6 text-xs font-mono">
+            {panel.results
+              .filter(r => r.analyte_id == null)
+              .map(r => (
+                <li key={r.id}>{r.raw_name}</li>
+              ))}
+          </ul>
+          <p className="mt-2 text-xs">
+            Puoi confermare comunque: le righe mappate finiscono subito in
+            Matrice e Andamenti, quelle senza analita restano "da rivedere"
+            e potrai completarle tornando qui più tardi.
+          </p>
         </div>
       )}
 
-      <WeightAtSamplingCard testDate={panel.test_date} />
+      <BodySnapshotCard snapshot={panel.body_snapshot ?? null} testDate={panel.test_date} />
+
+      <ContextSection panel={panel} />
+
+      {!isConfirmed && (
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowNewAnalyteForm(v => !v)}
+          >
+            <FlaskConical className="h-4 w-4 mr-1" />
+            {showNewAnalyteForm ? "Chiudi" : "Nuovo analita (generico)"}
+          </Button>
+          {showNewAnalyteForm && (
+            <div className="mt-3">
+              <NewAnalyteForm
+                defaultSpecimen={panel.specimen_types[0] === "urine" ? "urine" : "blood"}
+                defaultDisplayName=""
+                defaultAlias={null}
+                onCreated={() => setShowNewAnalyteForm(false)}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -122,7 +178,7 @@ export default function LabReview() {
         </CardHeader>
         <CardContent>
           <datalist id="lab-analytes-list">
-            {analytes?.map(a => (
+            {analytesAlpha.map(a => (
               <option key={a.id} value={a.display_name_it} />
             ))}
           </datalist>
@@ -137,39 +193,106 @@ export default function LabReview() {
                 <TableHead>Range</TableHead>
                 <TableHead>Stato</TableHead>
                 <TableHead></TableHead>
+                <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {panel.results.map(r => (
+              {panel.results.flatMap(r => [
                 <ResultRow
                   key={r.id}
                   result={r}
-                  analytes={analytes ?? []}
+                  analytes={analytesAlpha}
                   analyteById={analyteById}
-                  readOnly={isConfirmed}
                   onPatch={async (resultId, patchBody) => {
                     await patch.mutateAsync({ resultId, patch: patchBody })
                   }}
+                  onDelete={async resultId => {
+                    if (!window.confirm("Eliminare questo risultato?")) return
+                    try {
+                      await deleteResult.mutateAsync(resultId)
+                    } catch (e) {
+                      alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
+                    }
+                  }}
+                  onCreateFromRow={() =>
+                    setCreateFromRowId(createFromRowId === r.id ? null : r.id)
+                  }
+                  creatingFromRow={createFromRowId === r.id}
                   onSaveAlias={async (analyteId, alias) => {
                     try {
                       await createAlias.mutateAsync({
                         analyte_id: analyteId,
                         alias,
                       })
-                      alert(`Alias "${alias}" salvato.`)
+                      // Nessun popup di conferma: il badge "alias noto" appare
+                      // in pochi ms grazie all'invalidazione della query.
                     } catch (e) {
                       const msg = e instanceof Error ? e.message : String(e)
-                      if (msg.includes("409")) {
-                        alert("Alias già esistente.")
-                      } else {
-                        alert(`Errore: ${msg}`)
+                      if (!msg.includes("409")) {
+                        alert(`Errore salvataggio alias: ${msg}`)
                       }
                     }
                   }}
-                />
-              ))}
+                />,
+                createFromRowId === r.id ? (
+                  <TableRow key={`${r.id}-create`}>
+                    <TableCell colSpan={8} className="bg-amber-50/40">
+                      <div className="mb-2 text-xs font-medium text-amber-900">
+                        Crea un nuovo analita a partire da "{r.raw_name}"
+                      </div>
+                      <NewAnalyteForm
+                        key={r.id}
+                        defaultSpecimen={
+                          panel.specimen_types[0] === "urine" ? "urine" : "blood"
+                        }
+                        defaultDisplayName={prettifyRawName(r.raw_name)}
+                        defaultAlias={r.raw_name}
+                        defaultUnit={r.unit_raw ?? ""}
+                        defaultRefLow={
+                          r.ref_low_raw != null ? String(r.ref_low_raw) : ""
+                        }
+                        defaultRefHigh={
+                          r.ref_high_raw != null ? String(r.ref_high_raw) : ""
+                        }
+                        defaultRefText={r.ref_text_raw ?? ""}
+                        onCreated={async analyteId => {
+                          // Assegna il nuovo analita alla riga di origine —
+                          // fallback al backfill backend (che salta se
+                          // l'utente ha rimosso il raw_name dagli alias).
+                          try {
+                            await patch.mutateAsync({
+                              resultId: r.id,
+                              patch: { analyte_id: analyteId },
+                            })
+                          } catch {
+                            // già invalidato dal create, nessun problema
+                          }
+                          setCreateFromRowId(null)
+                        }}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ) : null,
+              ])}
             </TableBody>
           </Table>
+          <div className="mt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await addResult.mutateAsync({ panelId: panel.id })
+                } catch (e) {
+                  alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
+                }
+              }}
+              disabled={addResult.isPending}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              {addResult.isPending ? "Aggiungo…" : "Aggiungi riga"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -178,10 +301,7 @@ export default function LabReview() {
           <Button variant="outline" onClick={() => navigate("/lab")}>
             Torna alla lista
           </Button>
-          <Button
-            onClick={handleConfirm}
-            disabled={!allMapped || confirm.isPending}
-          >
+          <Button onClick={handleConfirm} disabled={confirm.isPending}>
             <Check className="h-4 w-4 mr-1" />
             {confirm.isPending ? "Conferma in corso…" : "Conferma referto"}
           </Button>
@@ -195,29 +315,122 @@ function ResultRow({
   result,
   analytes,
   analyteById,
-  readOnly,
   onPatch,
+  onDelete,
   onSaveAlias,
+  onCreateFromRow,
+  creatingFromRow,
 }: {
   result: LabResult
   analytes: LabAnalyte[]
   analyteById: Map<number, LabAnalyte>
-  readOnly: boolean
-  onPatch: (resultId: number, patch: { analyte_id?: number | null }) => Promise<void>
+  onPatch: (resultId: number, patch: LabResultPatch) => Promise<void>
+  onDelete: (resultId: number) => Promise<void>
   onSaveAlias: (analyteId: number, alias: string) => Promise<void>
+  onCreateFromRow: () => void
+  creatingFromRow: boolean
 }) {
   const current = result.analyte_id != null ? analyteById.get(result.analyte_id) : undefined
   const [nameInput, setNameInput] = useState(current?.display_name_it ?? "")
+  // Edit inline di valore/unità/range — bufferizziamo in stato locale e
+  // committiamo al blur. Se il server aggiorna il result (es. re-fetch
+  // dopo PATCH), i valori locali restano sincronizzati via useEffect
+  // (vedi sotto).
+  const [valueInput, setValueInput] = useState(
+    result.value_numeric != null
+      ? String(result.value_numeric)
+      : result.value_text ?? ""
+  )
+  const [unitInput, setUnitInput] = useState(result.unit_raw ?? "")
+  const [refLowInput, setRefLowInput] = useState(
+    result.ref_low_raw != null ? String(result.ref_low_raw) : ""
+  )
+  const [refHighInput, setRefHighInput] = useState(
+    result.ref_high_raw != null ? String(result.ref_high_raw) : ""
+  )
+  const [refTextInput, setRefTextInput] = useState(result.ref_text_raw ?? "")
 
-  const valueDisplay =
-    result.value_numeric != null ? String(result.value_numeric) : result.value_text ?? "—"
-  const rangeDisplay =
-    result.ref_low_raw != null || result.ref_high_raw != null
-      ? `${result.ref_low_raw ?? "-"} – ${result.ref_high_raw ?? "-"}`
-      : result.ref_text_raw ?? ""
+  // Risincronizza gli input quando i dati server cambiano (es. dopo PATCH
+  // o re-ingest). Non tocca nameInput perché l'utente sta tipando lì.
+  useEffect(() => {
+    setValueInput(
+      result.value_numeric != null
+        ? String(result.value_numeric)
+        : result.value_text ?? ""
+    )
+    setUnitInput(result.unit_raw ?? "")
+    setRefLowInput(result.ref_low_raw != null ? String(result.ref_low_raw) : "")
+    setRefHighInput(result.ref_high_raw != null ? String(result.ref_high_raw) : "")
+    setRefTextInput(result.ref_text_raw ?? "")
+  }, [
+    result.value_numeric,
+    result.value_text,
+    result.unit_raw,
+    result.ref_low_raw,
+    result.ref_high_raw,
+    result.ref_text_raw,
+  ])
+
+  function parseNumericInput(s: string): number | null {
+    const t = s.trim().replace(",", ".")
+    if (t === "") return null
+    const n = Number(t)
+    return Number.isFinite(n) ? n : null
+  }
+
+  async function commitValue() {
+    const s = valueInput.trim()
+    const asNum = parseNumericInput(s)
+    // Se lo stato corrente del DB è uguale, no-op.
+    const dbNum = result.value_numeric
+    const dbTxt = result.value_text ?? ""
+    if (asNum != null) {
+      if (dbNum != null && Number(dbNum) === asNum && !dbTxt) return
+      await onPatch(result.id, { value_numeric: asNum, value_text: null })
+    } else {
+      if (dbTxt === s && dbNum == null) return
+      await onPatch(result.id, { value_numeric: null, value_text: s || null })
+    }
+  }
+
+  async function commitUnit() {
+    const s = unitInput.trim()
+    if ((result.unit_raw ?? "") === s) return
+    await onPatch(result.id, { unit_raw: s || null })
+  }
+
+  async function commitRefLow() {
+    const n = parseNumericInput(refLowInput)
+    if ((result.ref_low_raw ?? null) === n) return
+    await onPatch(result.id, { ref_low_raw: n })
+  }
+
+  async function commitRefHigh() {
+    const n = parseNumericInput(refHighInput)
+    if ((result.ref_high_raw ?? null) === n) return
+    await onPatch(result.id, { ref_high_raw: n })
+  }
+
+  async function commitRefText() {
+    const s = refTextInput.trim()
+    if ((result.ref_text_raw ?? "") === s) return
+    await onPatch(result.id, { ref_text_raw: s || null })
+  }
+
+  const [rawNameInput, setRawNameInput] = useState(result.raw_name)
+  useEffect(() => setRawNameInput(result.raw_name), [result.raw_name])
+  async function commitRawName() {
+    const s = rawNameInput.trim()
+    if (!s) {
+      setRawNameInput(result.raw_name)
+      return
+    }
+    if (s === result.raw_name) return
+    await onPatch(result.id, { raw_name: s })
+  }
+
 
   async function commitAnalyte() {
-    if (readOnly) return
     const trimmed = nameInput.trim()
     if (!trimmed) {
       await onPatch(result.id, { analyte_id: null })
@@ -231,36 +444,56 @@ function ResultRow({
         await onPatch(result.id, { analyte_id: matched.id })
       }
     } else {
-      alert(
-        `"${trimmed}" non è nel catalogo. Scegli un'opzione esistente (il catalogo si estende via POST /analytes in un'altra UI).`
-      )
-      setNameInput(current?.display_name_it ?? "")
+      // Nome non esistente: non tocchiamo il DB e non resettiamo — l'utente
+      // può usare il pulsante "Nuovo analita" in alto per crearlo.
+      // Manteniamo il testo digitato come hint visibile.
     }
   }
 
-  const stateBadge = result.needs_review ? (
-    <span className="text-xs rounded-full bg-amber-100 text-amber-800 px-2 py-0.5">
-      da rivedere
-    </span>
-  ) : result.out_of_range === true ? (
-    <span className="text-xs rounded-full bg-red-100 text-red-800 px-2 py-0.5">
-      fuori range
-    </span>
-  ) : result.out_of_range === false ? (
-    <span className="text-xs rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5">
-      ok
-    </span>
-  ) : (
-    <span className="text-xs text-muted-foreground">—</span>
-  )
+  // Priorità: non mappato (rosso) > fuori range (rosso) > ok (verde).
+  // Se `needs_review=true` ma l'analita è mappato, non mostriamo nulla di
+  // speciale: il flag è normale fra ingest e confirm, non è un warning
+  // per l'utente. Dopo il confirm resettiamo needs_review e compaiono i
+  // badge definitivi.
+  // Colori distinti per i 3 stati:
+  //  - senza analita → ambra (caso "mancante", serve review)
+  //  - fuori range   → rosso (valore reale fuori dai limiti, alert medico)
+  //  - ok            → verde
+  let stateBadge: JSX.Element
+  if (result.analyte_id == null) {
+    stateBadge = (
+      <span className="text-xs rounded-full bg-amber-100 text-amber-900 px-2 py-0.5">
+        senza analita
+      </span>
+    )
+  } else if (result.out_of_range === true) {
+    stateBadge = (
+      <span className="text-xs rounded-full bg-red-200 text-red-900 px-2 py-0.5 font-medium">
+        fuori range
+      </span>
+    )
+  } else if (result.out_of_range === false) {
+    stateBadge = (
+      <span className="text-xs rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5">
+        ok
+      </span>
+    )
+  } else {
+    stateBadge = <span className="text-xs text-muted-foreground">—</span>
+  }
 
   return (
     <TableRow>
-      <TableCell className="font-mono text-xs">{result.raw_name}</TableCell>
       <TableCell>
-        {readOnly ? (
-          <span>{current?.display_name_it ?? "—"}</span>
-        ) : (
+        <Input
+          value={rawNameInput}
+          onChange={e => setRawNameInput(e.target.value)}
+          onBlur={commitRawName}
+          className="h-8 text-xs font-mono w-full min-w-[140px]"
+        />
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1">
           <Input
             list="lab-analytes-list"
             value={nameInput}
@@ -269,51 +502,584 @@ function ResultRow({
             placeholder="Cerca analita…"
             className="h-8 text-sm"
           />
-        )}
+          {result.analyte_id == null && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onMouseDown={e => e.preventDefault()}
+              onClick={onCreateFromRow}
+              title={`Crea un nuovo analita a partire da "${result.raw_name}"`}
+              className={`shrink-0 border-amber-400 ${
+                creatingFromRow
+                  ? "bg-amber-200 text-amber-900"
+                  : "text-amber-700 hover:bg-amber-50"
+              }`}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              {creatingFromRow ? "chiudi" : "crea"}
+            </Button>
+          )}
+        </div>
       </TableCell>
-      <TableCell className="font-mono">{valueDisplay}</TableCell>
-      <TableCell>{result.unit_raw ?? "—"}</TableCell>
-      <TableCell className="text-xs text-muted-foreground">{rangeDisplay}</TableCell>
+      <TableCell>
+        <Input
+          value={valueInput}
+          onChange={e => setValueInput(e.target.value)}
+          onBlur={commitValue}
+          placeholder="valore"
+          className="h-8 text-sm font-mono w-24"
+          title="Modifica se l'OCR ha letto male"
+        />
+      </TableCell>
+      <TableCell>
+        <Input
+          value={unitInput}
+          onChange={e => setUnitInput(e.target.value)}
+          onBlur={commitUnit}
+          placeholder="—"
+          className="h-8 text-sm w-20"
+        />
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1 text-xs">
+          <Input
+            value={refLowInput}
+            onChange={e => setRefLowInput(e.target.value)}
+            onBlur={commitRefLow}
+            placeholder="min"
+            className="h-8 text-xs w-16 font-mono"
+          />
+          <span className="text-muted-foreground">–</span>
+          <Input
+            value={refHighInput}
+            onChange={e => setRefHighInput(e.target.value)}
+            onBlur={commitRefHigh}
+            placeholder="max"
+            className="h-8 text-xs w-16 font-mono"
+          />
+          <Input
+            value={refTextInput}
+            onChange={e => setRefTextInput(e.target.value)}
+            onBlur={commitRefText}
+            placeholder="range testuale"
+            className="h-8 text-xs w-32"
+          />
+        </div>
+      </TableCell>
       <TableCell>{stateBadge}</TableCell>
       <TableCell>
-        {!readOnly && current && result.raw_name && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onSaveAlias(current.id, result.raw_name)}
-            title={`Salva "${result.raw_name}" come alias di ${current.display_name_it}`}
-          >
-            <Plus className="h-3.5 w-3.5 mr-1" />
-            alias
-          </Button>
-        )}
+        {current && result.raw_name && <AliasAction analyte={current} rawName={result.raw_name} onSaveAlias={onSaveAlias} />}
+      </TableCell>
+      <TableCell>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onDelete(result.id)}
+          title="Elimina questo risultato"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
       </TableCell>
     </TableRow>
   )
 }
 
-function WeightAtSamplingCard({ testDate }: { testDate: string }) {
-  const { data, isLoading } = useLatestWeightBefore(testDate, 3)
-  if (isLoading) return null
-  if (!data?.data) {
+function AliasAction({
+  analyte,
+  rawName,
+  onSaveAlias,
+}: {
+  analyte: LabAnalyte
+  rawName: string
+  onSaveAlias: (analyteId: number, alias: string) => Promise<void>
+}) {
+  const aliases = analyte.aliases ?? []
+  const normalized = rawName.trim().toLowerCase()
+  const alreadyAlias = aliases.some(a => a.toLowerCase() === normalized)
+
+  const aliasTooltip =
+    aliases.length > 0
+      ? `Alias già noti per ${analyte.display_name_it}:\n${aliases.map(a => `• ${a}`).join("\n")}`
+      : `Nessun alias salvato per ${analyte.display_name_it}`
+
+  if (alreadyAlias) {
     return (
-      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        Peso al prelievo: nessun valore HK entro 3 giorni prima del {formatDate(testDate)}.
+      <span
+        className="text-xs text-emerald-700 inline-flex items-center gap-1"
+        title={aliasTooltip}
+      >
+        <Check className="h-3.5 w-3.5" />
+        alias noto
+      </span>
+    )
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => onSaveAlias(analyte.id, rawName)}
+      title={`Salva "${rawName}" come alias di ${analyte.display_name_it}.\n\n${aliasTooltip}`}
+    >
+      <Plus className="h-3.5 w-3.5 mr-1" />
+      alias
+    </Button>
+  )
+}
+
+function PanelHeader({
+  panel,
+  isConfirmed,
+}: {
+  panel: LabPanelDetail
+  isConfirmed: boolean
+}) {
+  const patchPanel = useLabPatchPanel()
+  const [editing, setEditing] = useState(false)
+  const [dateInput, setDateInput] = useState(panel.test_date)
+  const [labInput, setLabInput] = useState(panel.lab_name ?? "")
+
+  useEffect(() => {
+    setDateInput(panel.test_date)
+    setLabInput(panel.lab_name ?? "")
+  }, [panel.test_date, panel.lab_name])
+
+  async function save() {
+    const patch: { test_date?: string; lab_name?: string | null } = {}
+    if (dateInput !== panel.test_date) patch.test_date = dateInput
+    const newLab = labInput.trim()
+    if (newLab !== (panel.lab_name ?? "")) patch.lab_name = newLab || null
+    if (Object.keys(patch).length === 0) {
+      setEditing(false)
+      return
+    }
+    try {
+      await patchPanel.mutateAsync({ panelId: panel.id, patch })
+      setEditing(false)
+    } catch (e) {
+      alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div>
+        <h1 className="text-xl font-semibold flex items-center gap-2">
+          Referto del {formatDate(panel.test_date)}
+          <button
+            onClick={() => setEditing(true)}
+            className="text-xs font-normal text-muted-foreground hover:text-primary hover:underline"
+          >
+            modifica
+          </button>
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          {panel.lab_name ?? "Lab non specificato"} ·{" "}
+          {panel.specimen_types.join(", ") || "—"} ·{" "}
+          <span className={isConfirmed ? "text-emerald-600" : "text-amber-600"}>
+            {isConfirmed ? "Confermato" : "In revisione"}
+          </span>
+        </p>
       </div>
     )
   }
-  const sampleDate = data.data.start_date.slice(0, 10)
+
   return (
-    <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm flex items-center justify-between">
-      <span>
-        <span className="font-medium">Peso al prelievo:</span>{" "}
-        <span className="font-mono">
-          {data.data.value.toFixed(1)} {data.data.unit}
-        </span>
-      </span>
-      <span className="text-xs text-muted-foreground">
-        rilevato il {formatDate(sampleDate)} (Apple Health)
-      </span>
+    <div className="flex flex-wrap items-end gap-2">
+      <div>
+        <Label className="text-xs">Data prelievo</Label>
+        <Input
+          type="date"
+          value={dateInput}
+          onChange={e => setDateInput(e.target.value)}
+          className="h-8 text-sm w-40"
+        />
+      </div>
+      <div className="flex-1 min-w-[200px]">
+        <Label className="text-xs">Laboratorio</Label>
+        <Input
+          value={labInput}
+          onChange={e => setLabInput(e.target.value)}
+          placeholder="es. C.D.R."
+          className="h-8 text-sm"
+        />
+      </div>
+      <Button size="sm" onClick={save} disabled={patchPanel.isPending}>
+        {patchPanel.isPending ? "Salvo…" : "Salva"}
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          setDateInput(panel.test_date)
+          setLabInput(panel.lab_name ?? "")
+          setEditing(false)
+        }}
+      >
+        Annulla
+      </Button>
     </div>
+  )
+}
+
+function BodySnapshotCard({
+  snapshot,
+  testDate,
+}: {
+  snapshot: LabBodySnapshot | null
+  testDate: string
+}) {
+  const items: { label: string; value: string; when: string | null }[] = []
+  if (snapshot?.weight) {
+    items.push({
+      label: "Peso",
+      value: `${snapshot.weight.value.toFixed(1)} ${snapshot.weight.unit}`,
+      when: snapshot.weight.start_date.slice(0, 10),
+    })
+  }
+  if (snapshot?.body_fat) {
+    items.push({
+      label: "Massa grassa",
+      value: `${(snapshot.body_fat.value * 100).toFixed(1)} %`,
+      when: snapshot.body_fat.start_date.slice(0, 10),
+    })
+  }
+  if (snapshot?.bmi) {
+    items.push({
+      label: "BMI",
+      value: snapshot.bmi.value.toFixed(1),
+      when: snapshot.bmi.start_date.slice(0, 10),
+    })
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        Corpo al prelievo ({formatDate(testDate)}): nessun dato HK nei 30 giorni
+        precedenti.
+      </div>
+    )
+  }
+  return (
+    <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+      <div className="flex flex-wrap gap-x-6 gap-y-1">
+        {items.map(it => (
+          <div key={it.label} className="flex items-baseline gap-1">
+            <span className="font-medium">{it.label}:</span>
+            <span className="font-mono">{it.value}</span>
+            {it.when && (
+              <span className="text-xs text-muted-foreground">
+                (il {formatDate(it.when)})
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="text-xs text-muted-foreground mt-1">
+        Ultimi valori Apple Health ≤ data del prelievo ({formatDate(testDate)}). Non
+        modificabili.
+      </div>
+    </div>
+  )
+}
+
+const CONTEXT_FIELDS: {
+  key: keyof LabPanelDetail
+  label: string
+  placeholder: string
+}[] = [
+  { key: "activity_text", label: "Attività fisica", placeholder: "Es. corsa 3×/settimana…" },
+  { key: "medications_text", label: "Farmaci", placeholder: "Es. tamsulosina 0.4mg…" },
+  { key: "supplements_text", label: "Integratori", placeholder: "Es. vit D 2000 UI…" },
+  { key: "nutrition_text", label: "Alimentazione", placeholder: "Note generiche sull'alimentazione" },
+  {
+    key: "diet_text",
+    label: "Dieta (auto-fill da diario)",
+    placeholder: "Riassunto calorie/macro del giorno",
+  },
+  {
+    key: "workout_text",
+    label: "Workout (auto-fill da HealthKit)",
+    placeholder: "Attività del giorno o del giorno precedente",
+  },
+  { key: "notes", label: "Note libere", placeholder: "Altro…" },
+]
+
+function ContextSection({ panel }: { panel: LabPanelDetail }) {
+  const patch = useLabPatchPanel()
+  const [open, setOpen] = useState(false)
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      CONTEXT_FIELDS.map(f => [f.key as string, ((panel as any)[f.key] as string | null) ?? ""])
+    )
+  )
+  const [savingKey, setSavingKey] = useState<string | null>(null)
+
+  async function commit(key: string) {
+    const newVal = values[key] ?? ""
+    const stored = ((panel as any)[key] as string | null) ?? ""
+    if (newVal === stored) return
+    setSavingKey(key)
+    try {
+      await patch.mutateAsync({
+        panelId: panel.id,
+        patch: { [key]: newVal || null },
+      })
+    } catch (e) {
+      alert(`Errore salvataggio ${key}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
+  const filledCount = CONTEXT_FIELDS.filter(
+    f => ((panel as any)[f.key] as string | null)?.trim()
+  ).length
+
+  return (
+    <div className="border rounded">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-accent"
+      >
+        <span className="font-medium">
+          Contesto del prelievo{" "}
+          <span className="text-xs text-muted-foreground">
+            ({filledCount} / {CONTEXT_FIELDS.length} compilati)
+          </span>
+        </span>
+        <span className="text-xs text-muted-foreground">{open ? "chiudi" : "apri"}</span>
+      </button>
+      {open && (
+        <div className="border-t p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          {CONTEXT_FIELDS.map(f => (
+            <div key={f.key as string}>
+              <Label className="text-xs mb-1 block">{f.label}</Label>
+              <Textarea
+                value={values[f.key as string] ?? ""}
+                onChange={e =>
+                  setValues(prev => ({ ...prev, [f.key as string]: e.target.value }))
+                }
+                onBlur={() => commit(f.key as string)}
+                placeholder={f.placeholder}
+                className="text-sm min-h-[60px]"
+                disabled={savingKey === (f.key as string)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function prettifyRawName(raw: string): string {
+  // Converte "GLICEMIA a digiuno" → "Glicemia a digiuno"
+  // e "VIT.D (25OH VITD)" → "Vit.D (25OH VITD)" (mantiene maiuscole dentro parentesi)
+  const trimmed = raw.trim()
+  if (!trimmed) return ""
+  // Se tutto maiuscolo, mettiamo tutto minuscolo e capitalizziamo prima lettera
+  if (trimmed === trimmed.toUpperCase()) {
+    const lowered = trimmed.toLowerCase()
+    return lowered.charAt(0).toUpperCase() + lowered.slice(1)
+  }
+  return trimmed
+}
+
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 100)
+}
+
+function NewAnalyteForm({
+  defaultSpecimen,
+  defaultDisplayName,
+  defaultAlias,
+  defaultUnit = "",
+  defaultRefLow = "",
+  defaultRefHigh = "",
+  defaultRefText = "",
+  onCreated,
+}: {
+  defaultSpecimen: "blood" | "urine"
+  defaultDisplayName: string
+  defaultAlias: string | null
+  defaultUnit?: string
+  defaultRefLow?: string
+  defaultRefHigh?: string
+  defaultRefText?: string
+  onCreated: (analyteId: number, slug: string) => void
+}) {
+  const create = useLabCreateAnalyte()
+  const { data: allAnalytes } = useLabAnalytes()
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>()
+    allAnalytes?.forEach(a => set.add(a.category))
+    return Array.from(set).sort()
+  }, [allAnalytes])
+  const [displayName, setDisplayName] = useState(defaultDisplayName)
+  const [slug, setSlug] = useState(defaultDisplayName ? slugify(defaultDisplayName) : "")
+  const [slugTouched, setSlugTouched] = useState(false)
+  const [category, setCategory] = useState("")
+  const [specimen, setSpecimen] = useState<"blood" | "urine" | "other">(defaultSpecimen)
+  const [valueType, setValueType] =
+    useState<"numeric" | "semi_quantitative" | "qualitative" | "textual">("numeric")
+  const [unitCanonical, setUnitCanonical] = useState(defaultUnit)
+  const [refLow, setRefLow] = useState(defaultRefLow)
+  const [refHigh, setRefHigh] = useState(defaultRefHigh)
+  const [refText, setRefText] = useState(defaultRefText)
+  const [aliases, setAliases] = useState(defaultAlias ?? "")
+
+  function onNameChange(v: string) {
+    setDisplayName(v)
+    if (!slugTouched) setSlug(slugify(v))
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!displayName.trim() || !slug.trim() || !category.trim()) {
+      alert("Nome, slug e categoria sono obbligatori")
+      return
+    }
+    try {
+      const body = {
+        slug: slug.trim(),
+        display_name_it: displayName.trim(),
+        category: category.trim(),
+        specimen,
+        value_type: valueType,
+        unit_canonical: unitCanonical.trim() || null,
+        ref_low: refLow.trim() ? Number(refLow.replace(",", ".")) : null,
+        ref_high: refHigh.trim() ? Number(refHigh.replace(",", ".")) : null,
+        ref_text: refText.trim() || null,
+        aliases: aliases
+          .split(",")
+          .map(a => a.trim())
+          .filter(Boolean),
+      }
+      const res = await create.mutateAsync(body)
+      onCreated(res.id, res.slug)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      alert(`Errore creazione analita: ${msg}`)
+    }
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="rounded-md border bg-muted/30 p-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm"
+    >
+      <div>
+        <Label className="text-xs">Nome (italiano) *</Label>
+        <Input
+          value={displayName}
+          onChange={e => onNameChange(e.target.value)}
+          placeholder="es. Emoglobina glicata"
+          className="h-8"
+        />
+      </div>
+      <div>
+        <Label className="text-xs">Slug *</Label>
+        <Input
+          value={slug}
+          onChange={e => {
+            setSlug(e.target.value)
+            setSlugTouched(true)
+          }}
+          placeholder="es. hba1c"
+          className="h-8 font-mono"
+        />
+      </div>
+      <div>
+        <Label className="text-xs">Categoria *</Label>
+        <Input
+          value={category}
+          onChange={e => setCategory(e.target.value)}
+          list="lab-categories-list"
+          placeholder="es. metabolismo, ormoni, fegato…"
+          className="h-8"
+        />
+        <datalist id="lab-categories-list">
+          {categoryOptions.map(c => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+      </div>
+      <div>
+        <Label className="text-xs">Campione</Label>
+        <Select value={specimen} onValueChange={v => setSpecimen(v as typeof specimen)}>
+          <SelectTrigger className="h-8">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="blood">blood</SelectItem>
+            <SelectItem value="urine">urine</SelectItem>
+            <SelectItem value="other">other</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label className="text-xs">Tipo valore</Label>
+        <Select value={valueType} onValueChange={v => setValueType(v as typeof valueType)}>
+          <SelectTrigger className="h-8">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="numeric">numeric</SelectItem>
+            <SelectItem value="semi_quantitative">semi_quantitative</SelectItem>
+            <SelectItem value="qualitative">qualitative</SelectItem>
+            <SelectItem value="textual">textual</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label className="text-xs">Unità canonica</Label>
+        <Input
+          value={unitCanonical}
+          onChange={e => setUnitCanonical(e.target.value)}
+          placeholder="es. mg/dl"
+          className="h-8"
+        />
+      </div>
+      <div>
+        <Label className="text-xs">Range min</Label>
+        <Input value={refLow} onChange={e => setRefLow(e.target.value)} className="h-8" />
+      </div>
+      <div>
+        <Label className="text-xs">Range max</Label>
+        <Input value={refHigh} onChange={e => setRefHigh(e.target.value)} className="h-8" />
+      </div>
+      <div>
+        <Label className="text-xs">Range testuale</Label>
+        <Input
+          value={refText}
+          onChange={e => setRefText(e.target.value)}
+          placeholder="es. assente, negativo"
+          className="h-8"
+        />
+      </div>
+      <div className="md:col-span-3">
+        <Label className="text-xs">Alias iniziali (separati da virgola)</Label>
+        <Input
+          value={aliases}
+          onChange={e => setAliases(e.target.value)}
+          placeholder="es. HbA1c, Emoglobina glicata, A1c"
+          className="h-8"
+        />
+      </div>
+      <div className="md:col-span-3 flex justify-end gap-2">
+        <Button type="submit" size="sm" disabled={create.isPending}>
+          {create.isPending ? "Salvataggio…" : "Crea analita"}
+        </Button>
+      </div>
+    </form>
   )
 }

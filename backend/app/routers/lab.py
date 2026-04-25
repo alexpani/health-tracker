@@ -6,10 +6,16 @@ arriveranno in PR #2b.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+import logging
+import os
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+
+import httpx
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
@@ -20,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.models import HealthSample, Workout
 from app.models.lab import (
     LabAnalyte,
     LabAnalyteAlias,
@@ -28,6 +35,59 @@ from app.models.lab import (
     LabResult,
 )
 from app.services import lab_ingest, lab_units
+
+DIARIO_BASE_URL = os.environ.get("DIARIO_BASE_URL", "http://192.168.68.173:3000")
+
+
+async def _auto_fill_diet_text(test_date: date) -> str | None:
+    """Riassunto diario alimentare per `test_date` come contesto panel."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(
+                f"{DIARIO_BASE_URL}/api/external/daily-totals",
+                params={"from": test_date.isoformat(), "to": test_date.isoformat()},
+            )
+        if r.status_code != 200:
+            return None
+        rows = r.json() or []
+        day = next((row for row in rows if row.get("date") == test_date.isoformat()), None)
+        if day is None:
+            return None
+        target = day.get("kcal_target")
+        bits = [f"kcal {int(day.get('kcal', 0))}"]
+        if target:
+            bits.append(f"target {int(target)}")
+        for k, label in (("protein_g", "P"), ("fat_g", "G"), ("carbs_g", "C")):
+            v = day.get(k)
+            if v is not None:
+                bits.append(f"{label} {v:.0f}g")
+        return " · ".join(bits)
+    except Exception:
+        return None
+
+
+async def _auto_fill_workout_text(db: AsyncSession, test_date: date) -> str | None:
+    """Workout più rilevante del giorno del prelievo (o del giorno prima)."""
+    start_dt = datetime.combine(test_date - timedelta(days=1), time(0, 0), tzinfo=timezone.utc)
+    end_dt = datetime.combine(test_date, time(23, 59, 59), tzinfo=timezone.utc)
+    row = (await db.execute(
+        select(Workout)
+        .where(Workout.start_date >= start_dt, Workout.start_date <= end_dt)
+        .order_by(Workout.start_date.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    bits: list[str] = []
+    name = row.activity_name or f"Activity {row.activity_type}"
+    bits.append(name)
+    if row.duration:
+        bits.append(f"{int(row.duration / 60)} min")
+    if row.total_distance:
+        bits.append(f"{row.total_distance / 1000:.1f} km")
+    when = row.start_date.date().isoformat()
+    bits.append(when)
+    return " · ".join(bits)
 
 router = APIRouter(prefix="/api/v1/lab", tags=["lab"])
 
@@ -82,19 +142,19 @@ async def ingest_referto(
     else:
         doc = existing_doc
 
-    # 2) Extract PDF text
-    try:
-        raw_text = lab_ingest.extract_text_from_pdf(full_path)
-    except Exception as exc:
-        raise HTTPException(422, f"impossibile estrarre testo dal PDF: {exc}")
-
-    # 3) LLM parse — in caso di errore creiamo un panel vuoto con notes=parsing_failed
+    # 2) LLM parse del PDF (testuale o scannerizzato: Anthropic gestisce entrambi).
+    #    Passiamo il catalogo così il modello può restituire suggested_slug
+    #    per ciascun analita — migliora enormemente il matching delle urine
+    #    (dove le varianti di naming sono moltissime).
+    #    In caso di errore creiamo un panel vuoto con notes=parsing_failed.
     parsing_failed = False
     extracted: lab_ingest.ExtractedPanel | None = None
     try:
-        payload = lab_ingest.call_llm(raw_text)
+        catalog = await lab_ingest.load_catalog_for_llm(db)
+        payload = lab_ingest.call_llm(data, catalog=catalog)
         extracted = lab_ingest.parse_extracted_panel(payload)
     except Exception:
+        logger.exception("lab/ingest: LLM parsing failed")
         parsing_failed = True
 
     # 4) Create panel + results
@@ -114,6 +174,22 @@ async def ingest_referto(
         panel_kwargs["lab_name"] = extracted.lab_name
         panel_kwargs["specimen_types"] = extracted.specimen_types
         matched = await lab_ingest.build_matched_results(db, extracted.analytes)
+
+    # Auto-fill dei campi di contesto se possibile (silent fallback su None).
+    td_for_context = panel_kwargs.get("test_date")
+    if td_for_context is not None:
+        try:
+            diet = await _auto_fill_diet_text(td_for_context)
+            if diet:
+                panel_kwargs["diet_text"] = diet
+        except Exception:
+            logger.debug("diet auto-fill skipped", exc_info=True)
+        try:
+            wk = await _auto_fill_workout_text(db, td_for_context)
+            if wk:
+                panel_kwargs["workout_text"] = wk
+        except Exception:
+            logger.debug("workout auto-fill skipped", exc_info=True)
 
     panel = LabPanel(**panel_kwargs)
     db.add(panel)
@@ -182,6 +258,23 @@ async def list_panels(
     stmt = stmt.order_by(LabPanel.test_date.desc(), LabPanel.id.desc()).offset(offset).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
 
+    panel_ids = [p.id for p in rows]
+    unmapped_by_panel: dict[int, int] = {pid: 0 for pid in panel_ids}
+    total_by_panel: dict[int, int] = {pid: 0 for pid in panel_ids}
+    if panel_ids:
+        agg_rows = (await db.execute(
+            select(
+                LabResult.panel_id,
+                func.count().label("total"),
+                func.count().filter(LabResult.analyte_id.is_(None)).label("unmapped"),
+            )
+            .where(LabResult.panel_id.in_(panel_ids))
+            .group_by(LabResult.panel_id)
+        )).all()
+        for pid, tot, unm in agg_rows:
+            total_by_panel[pid] = tot
+            unmapped_by_panel[pid] = unm
+
     return {
         "total": total,
         "offset": offset,
@@ -196,6 +289,8 @@ async def list_panels(
                 "notes": p.notes,
                 "document_id": p.document_id,
                 "confirmed_at": p.confirmed_at.isoformat() if p.confirmed_at else None,
+                "results_count": total_by_panel.get(p.id, 0),
+                "unmapped_count": unmapped_by_panel.get(p.id, 0),
             }
             for p in rows
         ],
@@ -205,6 +300,27 @@ async def list_panels(
 # ---------------------------------------------------------------------------
 # GET /panels/{id}
 # ---------------------------------------------------------------------------
+
+async def _latest_hk_value(
+    db: AsyncSession, type_: str, before: datetime, window_days: int = 30,
+) -> dict[str, Any] | None:
+    lower = before - timedelta(days=window_days)
+    row = (await db.execute(
+        select(HealthSample)
+        .where(HealthSample.type == type_)
+        .where(HealthSample.start_date <= before)
+        .where(HealthSample.start_date >= lower)
+        .order_by(HealthSample.start_date.desc(), HealthSample.id.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    return {
+        "value": float(row.value),
+        "unit": row.unit,
+        "start_date": row.start_date.isoformat(),
+    }
+
 
 @router.get("/panels/{panel_id}")
 async def get_panel(
@@ -221,6 +337,14 @@ async def get_panel(
         select(LabResult).where(LabResult.panel_id == panel_id).order_by(LabResult.id)
     )).scalars().all()
 
+    # Body snapshot: ultimo peso, massa grassa, BMI con start_date ≤ test_date
+    end_of_day = datetime.combine(panel.test_date, time(23, 59, 59), tzinfo=timezone.utc)
+    body_snapshot = {
+        "weight": await _latest_hk_value(db, "HKQuantityTypeIdentifierBodyMass", end_of_day),
+        "body_fat": await _latest_hk_value(db, "HKQuantityTypeIdentifierBodyFatPercentage", end_of_day),
+        "bmi": await _latest_hk_value(db, "HKQuantityTypeIdentifierBodyMassIndex", end_of_day),
+    }
+
     return {
         "id": panel.id,
         "test_date": panel.test_date.isoformat(),
@@ -230,6 +354,13 @@ async def get_panel(
         "notes": panel.notes,
         "document_id": panel.document_id,
         "confirmed_at": panel.confirmed_at.isoformat() if panel.confirmed_at else None,
+        "activity_text": panel.activity_text,
+        "medications_text": panel.medications_text,
+        "supplements_text": panel.supplements_text,
+        "nutrition_text": panel.nutrition_text,
+        "diet_text": panel.diet_text,
+        "workout_text": panel.workout_text,
+        "body_snapshot": body_snapshot,
         "results": [
             {
                 "id": r.id,
@@ -297,6 +428,19 @@ async def list_analytes(
     if category:
         stmt = stmt.where(LabAnalyte.category == category)
     rows = (await db.execute(stmt)).scalars().all()
+    analyte_ids = [a.id for a in rows]
+
+    # Carica tutti gli alias in una sola query, raggruppati per analyte_id.
+    aliases_by_id: dict[int, list[str]] = {aid: [] for aid in analyte_ids}
+    if analyte_ids:
+        alias_rows = (await db.execute(
+            select(LabAnalyteAlias.analyte_id, LabAnalyteAlias.alias)
+            .where(LabAnalyteAlias.analyte_id.in_(analyte_ids))
+            .order_by(LabAnalyteAlias.analyte_id, LabAnalyteAlias.alias)
+        )).all()
+        for aid, alias in alias_rows:
+            aliases_by_id[aid].append(alias)
+
     return [
         {
             "id": a.id,
@@ -309,9 +453,85 @@ async def list_analytes(
             "ref_low": float(a.ref_low) if a.ref_low is not None else None,
             "ref_high": float(a.ref_high) if a.ref_high is not None else None,
             "ref_text": a.ref_text,
+            "aliases": aliases_by_id.get(a.id, []),
         }
         for a in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Helper: applica unit matching + out_of_range a un singolo result
+# ---------------------------------------------------------------------------
+
+def _apply_confirm_logic(result: LabResult, analyte: LabAnalyte) -> None:
+    """Aggiorna in place `result.unit_normalized`, `result.out_of_range`,
+    `result.needs_review` dato il suo analita. Usato dal confirm panel e
+    dal backfill automatico (POST /analytes, POST /aliases)."""
+    result.unit_normalized = None
+    result.out_of_range = None
+
+    if analyte.value_type == "numeric":
+        if result.value_numeric is None:
+            result.needs_review = True
+            return
+        if analyte.unit_canonical is None:
+            result.unit_normalized = result.unit_raw
+            result.out_of_range = lab_units.numeric_out_of_range(
+                result.value_numeric, result.ref_low_raw, result.ref_high_raw,
+            )
+            result.needs_review = False
+        elif lab_units.units_equivalent(result.unit_raw, analyte.unit_canonical):
+            result.unit_normalized = analyte.unit_canonical
+            result.out_of_range = lab_units.numeric_out_of_range(
+                result.value_numeric, analyte.ref_low, analyte.ref_high,
+            )
+            result.needs_review = False
+        else:
+            # Unità incompatibile: lasciamo il flag review su, usando i range raw
+            # come hint visivo nel frattempo.
+            result.out_of_range = lab_units.numeric_out_of_range(
+                result.value_numeric, result.ref_low_raw, result.ref_high_raw,
+            )
+            result.needs_review = True
+    elif analyte.value_type in ("qualitative", "semi_quantitative"):
+        result.out_of_range = lab_units.qualitative_out_of_range(
+            result.value_text, analyte.ref_text,
+        )
+        result.needs_review = result.out_of_range is None
+    elif analyte.value_type == "textual":
+        result.out_of_range = None
+        result.needs_review = False
+
+
+async def _backfill_analyte_for_aliases(
+    db: AsyncSession, analyte: LabAnalyte, alias_strings: list[str],
+) -> int:
+    """Per ogni `lab_results` con `analyte_id=NULL` il cui `raw_name` combacia
+    (case-insensitive) con uno dei `alias_strings` passati O con
+    `analyte.display_name_it`: assegna l'analita e, per i result in panel già
+    `confirmed`, applica anche la logica di range/unit. Ritorna il count di
+    result aggiornati."""
+    needles = {analyte.display_name_it.lower(), *(a.lower() for a in alias_strings if a)}
+    needles = {n for n in needles if n}
+    if not needles:
+        return 0
+
+    # Trova i result candidati (con JOIN su panel per conoscere lo status)
+    candidates = (await db.execute(
+        select(LabResult, LabPanel.status)
+        .join(LabPanel, LabResult.panel_id == LabPanel.id)
+        .where(LabResult.analyte_id.is_(None))
+        .where(func.lower(LabResult.raw_name).in_(needles))
+    )).all()
+    count = 0
+    for result, panel_status in candidates:
+        result.analyte_id = analyte.id
+        if panel_status == "confirmed":
+            _apply_confirm_logic(result, analyte)
+        # Per panel ancora draft: non tocchiamo out_of_range/needs_review,
+        # li calcolerà il confirm quando l'utente chiuderà la review.
+        count += 1
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -323,13 +543,21 @@ async def confirm_panel(
     panel_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Promuove un panel `draft → confirmed`. Per ogni result:
-    - se l'analita è numerico e l'unità matcha quella canonica → copia il valore
-      in `unit_normalized` e calcola `out_of_range` con i range dell'analita;
+    """Promuove un panel `draft → confirmed`.
+
+    Per ogni result mappato (analyte_id presente):
+    - se l'analita è numerico e l'unità matcha quella canonica → copia il
+      valore in `unit_normalized` e calcola `out_of_range` con i range
+      dell'analita;
     - se l'unità non matcha (e non è equivalente) → `needs_review=True`,
-      `unit_normalized=NULL`: si confronta comunque con i range raw, se presenti;
+      `unit_normalized=NULL`: confronta comunque coi range raw, se presenti;
     - se l'analita è qualitativo → confronto testo/testo con `ref_text`.
-    Rifiuta il confirm se almeno un result non ha `analyte_id`.
+
+    I result senza analita (`analyte_id=NULL`) restano con `needs_review=True`
+    e vengono naturalmente esclusi da Matrice/Andamenti (i filtri usano
+    `analyte_id`). Il panel si conferma comunque, così i valori mappati
+    diventano subito visibili; i non-mappati possono essere completati in
+    seguito tornando sulla review.
     """
     panel = (await db.execute(
         select(LabPanel).where(LabPanel.id == panel_id)
@@ -342,13 +570,6 @@ async def confirm_panel(
     results = (await db.execute(
         select(LabResult).where(LabResult.panel_id == panel_id)
     )).scalars().all()
-    unmatched = [r.id for r in results if r.analyte_id is None]
-    if unmatched:
-        raise HTTPException(
-            400,
-            f"review incompleta: {len(unmatched)} result senza analita "
-            f"(ids: {unmatched[:10]}{'…' if len(unmatched) > 10 else ''})",
-        )
 
     # Carica gli analiti una sola volta
     analyte_ids = {r.analyte_id for r in results if r.analyte_id is not None}
@@ -361,10 +582,16 @@ async def confirm_panel(
 
     updated_out_of_range = 0
     still_needs_review = 0
+    unmapped_count = 0
     for r in results:
         a = analytes.get(r.analyte_id)  # type: ignore[arg-type]
         if a is None:
-            continue  # già filtrato sopra, ma safe
+            # Result senza analita: resta da rivedere, fuori da Matrice/Andamenti
+            r.needs_review = True
+            r.out_of_range = None
+            r.unit_normalized = None
+            unmapped_count += 1
+            continue
 
         r.needs_review = False
         r.unit_normalized = None
@@ -420,6 +647,7 @@ async def confirm_panel(
         "results_count": len(results),
         "out_of_range_count": updated_out_of_range,
         "still_needs_review": still_needs_review,
+        "unmapped_count": unmapped_count,
     }
 
 
@@ -432,6 +660,12 @@ class PanelPatch(BaseModel):
     lab_name: str | None = None
     notes: str | None = None
     specimen_types: list[str] | None = None
+    activity_text: str | None = None
+    medications_text: str | None = None
+    supplements_text: str | None = None
+    nutrition_text: str | None = None
+    diet_text: str | None = None
+    workout_text: str | None = None
 
 
 @router.patch("/panels/{panel_id}")
@@ -503,9 +737,13 @@ async def delete_panel(
 
 class ResultPatch(BaseModel):
     analyte_id: int | None = None
+    raw_name: str | None = None
     value_numeric: Decimal | None = None
     value_text: str | None = None
     unit_raw: str | None = None
+    ref_low_raw: Decimal | None = None
+    ref_high_raw: Decimal | None = None
+    ref_text_raw: str | None = None
     notes: str | None = None
 
 
@@ -523,22 +761,109 @@ async def patch_result(
 
     data = body.model_dump(exclude_unset=True)
     # Verifica analyte_id se fornito
+    new_analyte: LabAnalyte | None = None
     if "analyte_id" in data and data["analyte_id"] is not None:
-        exists = (await db.execute(
-            select(LabAnalyte.id).where(LabAnalyte.id == data["analyte_id"])
+        new_analyte = (await db.execute(
+            select(LabAnalyte).where(LabAnalyte.id == data["analyte_id"])
         )).scalar_one_or_none()
-        if exists is None:
+        if new_analyte is None:
             raise HTTPException(400, "analyte_id inesistente")
 
     for k, v in data.items():
         setattr(result, k, v)
 
-    # Qualsiasi PATCH rimette il result in review: il confirm lo risettarà.
-    result.needs_review = True
-    result.unit_normalized = None
-    result.out_of_range = None
+    # Se il panel è già confermato e la riga ha un analita, riapplica subito
+    # la logica di unit/out_of_range così la Matrice/Andamenti restano
+    # coerenti senza obbligare l'utente a rifare il confirm.
+    panel_status = (await db.execute(
+        select(LabPanel.status).where(LabPanel.id == result.panel_id)
+    )).scalar_one()
+
+    if panel_status == "confirmed" and result.analyte_id is not None:
+        analyte = new_analyte
+        if analyte is None or analyte.id != result.analyte_id:
+            analyte = (await db.execute(
+                select(LabAnalyte).where(LabAnalyte.id == result.analyte_id)
+            )).scalar_one()
+        _apply_confirm_logic(result, analyte)
+    else:
+        # Panel ancora draft: lasciamo il confirm a ricalcolare tutto alla fine.
+        result.needs_review = True
+        result.unit_normalized = None
+        result.out_of_range = None
+
     await db.commit()
     return {"ok": True, "id": result.id}
+
+
+class NewResultIn(BaseModel):
+    raw_name: str = "Nuovo risultato"
+    analyte_id: int | None = None
+    value_numeric: Decimal | None = None
+    value_text: str | None = None
+    unit_raw: str | None = None
+    ref_low_raw: Decimal | None = None
+    ref_high_raw: Decimal | None = None
+    ref_text_raw: str | None = None
+    notes: str | None = None
+
+
+@router.post("/panels/{panel_id}/results", status_code=201)
+async def add_result(
+    panel_id: int,
+    body: NewResultIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Aggiunge un risultato a un panel esistente (righe mancate dall'OCR)."""
+    panel = (await db.execute(
+        select(LabPanel).where(LabPanel.id == panel_id)
+    )).scalar_one_or_none()
+    if panel is None:
+        raise HTTPException(404, "panel non trovato")
+
+    result = LabResult(
+        panel_id=panel_id,
+        raw_name=body.raw_name.strip() or "Nuovo risultato",
+        analyte_id=body.analyte_id,
+        value_numeric=body.value_numeric,
+        value_text=body.value_text,
+        unit_raw=body.unit_raw,
+        ref_low_raw=body.ref_low_raw,
+        ref_high_raw=body.ref_high_raw,
+        ref_text_raw=body.ref_text_raw,
+        notes=body.notes,
+        needs_review=True,
+    )
+    db.add(result)
+    await db.flush()
+
+    # Se il panel è già confirmed e abbiamo un analyte_id, applica subito OOR
+    if panel.status == "confirmed" and result.analyte_id is not None:
+        analyte = (await db.execute(
+            select(LabAnalyte).where(LabAnalyte.id == result.analyte_id)
+        )).scalar_one_or_none()
+        if analyte is not None:
+            _apply_confirm_logic(result, analyte)
+
+    await db.commit()
+    await db.refresh(result)
+    return {"id": result.id, "panel_id": result.panel_id, "raw_name": result.raw_name}
+
+
+@router.delete("/results/{result_id}")
+async def delete_result(
+    result_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Elimina un singolo risultato (es. valore errato nel referto)."""
+    result = (await db.execute(
+        select(LabResult).where(LabResult.id == result_id)
+    )).scalar_one_or_none()
+    if result is None:
+        raise HTTPException(404, "result non trovato")
+    await db.delete(result)
+    await db.commit()
+    return {"ok": True, "deleted_result_id": result_id}
 
 
 # ---------------------------------------------------------------------------
@@ -561,15 +886,25 @@ async def create_alias(
     if analyte is None:
         raise HTTPException(400, "analyte_id inesistente")
 
-    alias = LabAnalyteAlias(analyte_id=body.analyte_id, alias=body.alias.strip())
+    alias_str = body.alias.strip()
+    alias = LabAnalyteAlias(analyte_id=body.analyte_id, alias=alias_str)
     db.add(alias)
     try:
-        await db.commit()
+        await db.flush()
     except IntegrityError:
         await db.rollback()
         raise HTTPException(409, "alias già presente")
+
+    # Backfill: mappa i result esistenti con raw_name matching a questo analita
+    backfilled = await _backfill_analyte_for_aliases(db, analyte, [alias_str])
+    await db.commit()
     await db.refresh(alias)
-    return {"id": alias.id, "analyte_id": alias.analyte_id, "alias": alias.alias}
+    return {
+        "id": alias.id,
+        "analyte_id": alias.analyte_id,
+        "alias": alias.alias,
+        "results_backfilled": backfilled,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -621,6 +956,7 @@ async def create_analyte(
 
     created_aliases = 0
     skipped_aliases = 0
+    created_alias_strings: list[str] = []
     for raw in body.aliases:
         a = raw.strip()
         if not a:
@@ -629,15 +965,24 @@ async def create_analyte(
         try:
             await db.commit()
             created_aliases += 1
+            created_alias_strings.append(a)
         except IntegrityError:
             await db.rollback()
             skipped_aliases += 1
+
+    # Backfill sui result esistenti senza analita: il match usa
+    # display_name_it + tutti gli alias appena creati.
+    backfilled = await _backfill_analyte_for_aliases(
+        db, analyte, created_alias_strings
+    )
+    await db.commit()
 
     return {
         "id": analyte.id,
         "slug": analyte.slug,
         "aliases_created": created_aliases,
         "aliases_skipped": skipped_aliases,
+        "results_backfilled": backfilled,
     }
 
 
@@ -701,7 +1046,13 @@ async def get_matrix(
     ]
 
     if not panels or not analytes:
-        return {"analytes": analytes, "panels": panels, "cells": {}}
+        return {
+            "analytes": analytes,
+            "panels": panels,
+            "cells": {},
+            "panel_weights": {},
+            "panel_context": {},
+        }
 
     analyte_ids = [a["id"] for a in analytes]
     panel_ids = [p["id"] for p in panels]
@@ -727,7 +1078,66 @@ async def get_matrix(
             "needs_review": r.needs_review,
         }
 
-    return {"analytes": analytes, "panels": panels, "cells": cells}
+    # Peso corporeo (HKBodyMass) per ciascun panel: ultimo sample noto con
+    # start_date <= test_date. Aggiungiamo anche sample_date per poter
+    # distinguere lato UI quando il peso è "del giorno" vs "di giorni prima".
+    panel_weights: dict[int, dict[str, Any]] = {}
+    if panels:
+        for p in panels:
+            pid = p["id"]
+            td = date.fromisoformat(p["test_date"])
+            end_dt = datetime.combine(td, datetime.max.time(), tzinfo=timezone.utc)
+            ws = (await db.execute(
+                select(HealthSample)
+                .where(HealthSample.type == "HKQuantityTypeIdentifierBodyMass")
+                .where(HealthSample.start_date <= end_dt)
+                .order_by(HealthSample.start_date.desc(), HealthSample.id.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+            if ws is not None:
+                panel_weights[pid] = {
+                    "value_numeric": float(ws.value),
+                    "value_text": None,
+                    "unit": ws.unit or "kg",
+                    "out_of_range": None,
+                    "needs_review": False,
+                    "sample_date": ws.start_date.date().isoformat(),
+                }
+
+    # Note di contesto per panel (attività, farmaci, etc.). Ci servono
+    # nella Matrice come righe editabili sotto il peso.
+    ctx_rows = (await db.execute(
+        select(
+            LabPanel.id,
+            LabPanel.activity_text,
+            LabPanel.medications_text,
+            LabPanel.supplements_text,
+            LabPanel.nutrition_text,
+            LabPanel.diet_text,
+            LabPanel.workout_text,
+            LabPanel.notes,
+        ).where(LabPanel.id.in_(panel_ids))
+    )).all()
+    panel_context: dict[int, dict[str, str | None]] = {
+        r.id: {
+            "activity_text": r.activity_text,
+            "medications_text": r.medications_text,
+            "supplements_text": r.supplements_text,
+            "nutrition_text": r.nutrition_text,
+            "diet_text": r.diet_text,
+            "workout_text": r.workout_text,
+            "notes": r.notes,
+        }
+        for r in ctx_rows
+    }
+
+    return {
+        "analytes": analytes,
+        "panels": panels,
+        "cells": cells,
+        "panel_weights": panel_weights,
+        "panel_context": panel_context,
+    }
 
 
 # ---------------------------------------------------------------------------
