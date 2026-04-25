@@ -196,6 +196,7 @@ export interface CorrelatedSample {
 export interface AggregatedPoint {
   period_start: string
   avg: number
+  sum: number | null
   min: number
   max: number
   count: number

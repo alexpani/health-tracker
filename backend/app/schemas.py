@@ -87,6 +87,7 @@ class SampleOut(BaseModel):
 class AggregatedPoint(BaseModel):
     period_start: datetime
     avg: float
+    sum: float | None = None
     min: float
     max: float
     count: int

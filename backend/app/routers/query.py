@@ -99,6 +99,7 @@ async def query_samples(
             select(
                 period,
                 func.avg(HealthSample.value).label("avg"),
+                func.sum(HealthSample.value).label("sum"),
                 func.min(HealthSample.value).label("min"),
                 func.max(HealthSample.value).label("max"),
                 func.count().label("count"),
@@ -133,6 +134,7 @@ async def query_samples(
                 AggregatedPoint(
                     period_start=r.period_start,
                     avg=round(r.avg, 2),
+                    sum=round(float(r.sum), 2) if r.sum is not None else None,
                     min=round(r.min, 2),
                     max=round(r.max, 2),
                     count=r.count,
