@@ -19,6 +19,23 @@ from app.schemas import (
 
 router = APIRouter(prefix="/api/v1", tags=["query"])
 
+# Cumulative quantity types where Apple Watch + iPhone double-count
+# overlapping intervals. Apple Salute resolves this with a priority
+# de-dup (Watch wins). For these types we mirror that behavior in the
+# aggregated query.
+DEDUP_PRIORITY_TYPES: set[str] = {
+    "HKQuantityTypeIdentifierStepCount",
+    "HKQuantityTypeIdentifierDistanceWalkingRunning",
+    "HKQuantityTypeIdentifierDistanceCycling",
+    "HKQuantityTypeIdentifierDistanceSwimming",
+    "HKQuantityTypeIdentifierFlightsClimbed",
+    "HKQuantityTypeIdentifierActiveEnergyBurned",
+    "HKQuantityTypeIdentifierBasalEnergyBurned",
+    "HKQuantityTypeIdentifierAppleExerciseTime",
+    "HKQuantityTypeIdentifierAppleStandTime",
+    "HKQuantityTypeIdentifierAppleMoveTime",
+}
+
 
 @router.get("/samples")
 async def query_samples(
@@ -95,28 +112,114 @@ async def query_samples(
         trunc = trunc_map[aggregation]
         period = func.date_trunc(trunc, HealthSample.start_date).label("period_start")
 
-        stmt = (
-            select(
-                period,
-                func.avg(HealthSample.value).label("avg"),
-                func.sum(HealthSample.value).label("sum"),
-                func.min(HealthSample.value).label("min"),
-                func.max(HealthSample.value).label("max"),
-                func.count().label("count"),
+        if type in DEDUP_PRIORITY_TYPES:
+            # Apple Salute-style dedup: Watch wins. Load Watch intervals in
+            # range once, then drop iPhone samples that overlap any Watch
+            # interval. Aggregation is done in Python on the candidate set.
+            watch_stmt = select(HealthSample.start_date, HealthSample.end_date).where(
+                HealthSample.type == type,
+                HealthSample.source_name.ilike("Apple%Watch%"),
             )
-            .where(HealthSample.type == type)
-            .group_by(period)
-            .order_by(period.desc())
-        )
-        if start:
-            stmt = stmt.where(HealthSample.start_date >= start)
-        if end:
-            stmt = stmt.where(HealthSample.start_date <= end)
-        stmt = apply_filters(stmt)
-        stmt = stmt.offset(offset).limit(limit)
+            if start:
+                watch_stmt = watch_stmt.where(HealthSample.start_date >= start)
+            if end:
+                watch_stmt = watch_stmt.where(HealthSample.start_date <= end)
+            watch_intervals = sorted(
+                ((r.start_date, r.end_date) for r in (await db.execute(watch_stmt)).all()),
+                key=lambda p: p[0],
+            )
 
-        result = await db.execute(stmt)
-        rows = result.all()
+            cand_stmt = select(
+                period,
+                HealthSample.value,
+                HealthSample.source_name,
+                HealthSample.start_date,
+                HealthSample.end_date,
+            ).where(HealthSample.type == type)
+            if start:
+                cand_stmt = cand_stmt.where(HealthSample.start_date >= start)
+            if end:
+                cand_stmt = cand_stmt.where(HealthSample.start_date <= end)
+            cand_stmt = apply_filters(cand_stmt)
+            cand_rows = (await db.execute(cand_stmt)).all()
+
+            def watch_overlap_seconds(s_start, s_end) -> float:
+                """Total seconds of (s_start, s_end) covered by any watch interval."""
+                total = 0.0
+                for w_start, w_end in watch_intervals:
+                    if w_start >= s_end:
+                        break
+                    if w_end <= s_start:
+                        continue
+                    a = max(w_start, s_start)
+                    b = min(w_end, s_end)
+                    if b > a:
+                        total += (b - a).total_seconds()
+                return total
+
+            buckets: dict = {}
+            for r in cand_rows:
+                src_norm = (r.source_name or "").replace("\u00a0", " ").lower()
+                is_watch = "apple" in src_norm and "watch" in src_norm
+                v = float(r.value)
+                if not is_watch:
+                    s_dur = (r.end_date - r.start_date).total_seconds()
+                    if s_dur <= 0:
+                        # Point sample: drop if it lands inside a watch interval
+                        if watch_overlap_seconds(r.start_date, r.start_date) > 0:
+                            continue
+                    else:
+                        cov = watch_overlap_seconds(r.start_date, r.end_date)
+                        keep_frac = max(0.0, 1.0 - cov / s_dur)
+                        if keep_frac <= 0.0:
+                            continue
+                        v = v * keep_frac
+                p = r.period_start
+                b = buckets.setdefault(p, {"sum": 0.0, "count": 0, "min": v, "max": v})
+                b["sum"] += v
+                b["count"] += 1
+                if v < b["min"]:
+                    b["min"] = v
+                if v > b["max"]:
+                    b["max"] = v
+
+            sorted_periods = sorted(buckets.items(), key=lambda x: x[0], reverse=True)
+            sliced = sorted_periods[offset:offset + limit]
+
+            class _Row:
+                __slots__ = ("period_start", "avg", "sum", "min", "max", "count")
+            rows = []
+            for p, b in sliced:
+                row = _Row()
+                row.period_start = p
+                row.avg = b["sum"] / b["count"] if b["count"] else 0.0
+                row.sum = b["sum"]
+                row.min = b["min"]
+                row.max = b["max"]
+                row.count = b["count"]
+                rows.append(row)
+        else:
+            stmt = (
+                select(
+                    period,
+                    func.avg(HealthSample.value).label("avg"),
+                    func.sum(HealthSample.value).label("sum"),
+                    func.min(HealthSample.value).label("min"),
+                    func.max(HealthSample.value).label("max"),
+                    func.count().label("count"),
+                )
+                .where(HealthSample.type == type)
+                .group_by(period)
+                .order_by(period.desc())
+            )
+            if start:
+                stmt = stmt.where(HealthSample.start_date >= start)
+            if end:
+                stmt = stmt.where(HealthSample.start_date <= end)
+            stmt = apply_filters(stmt)
+            stmt = stmt.offset(offset).limit(limit)
+            result = await db.execute(stmt)
+            rows = result.all()
 
         # Get unit
         unit_stmt = (
