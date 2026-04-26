@@ -377,16 +377,20 @@ async def _fetch_regimens_active(db: AsyncSession, d: date_cls) -> list[Regimen]
 
 async def _fetch_diet_plan(d: date_cls) -> dict | None:
     """Recupera il piano alimentare attivo nel giorno dal diario-alimentare.
-    Strategia:
-    - `daily-totals?from=d&to=d` → contiene `kcal_target` snapshot del piano
-       in vigore quel giorno (anche per giorni passati).
-    - `active-plan` → fornisce il NOME del piano corrente. Per giorni recenti
-       e' la stessa cosa; per giorni lontani il nome potrebbe non riflettere
-       il piano effettivamente in vigore (limite del diario, che non espone
-       una storia dei piani via API). Mostriamo comunque cio' che abbiamo.
 
-    Ritorna None se diario irraggiungibile o nessun piano attivo / dato del
-    giorno.
+    L'autorita' e' `daily-totals?from=d&to=d`: il diario ritorna
+    `kcal_target` solo per giorni in cui c'era un piano attivo (snapshot
+    storico). Se per quel giorno il diario non ha record / non ha un
+    `kcal_target`, *non c'era piano*: ritorniamo None.
+
+    `active-plan` ci da' il NOME e i grammi-target del piano CORRENTE; lo
+    usiamo solo quando il `kcal_target` storico del giorno combacia col
+    piano corrente (allora siamo confidenti che e' lo stesso piano).
+    Altrimenti mostriamo "Piano alimentare" generico, segnalando che il
+    nome storico non e' conosciuto.
+
+    Ritorna None se: diario irraggiungibile, oppure nessun piano in vigore
+    quel giorno.
     """
     iso = d.isoformat()
     target: float | None = None
@@ -396,7 +400,6 @@ async def _fetch_diet_plan(d: date_cls) -> dict | None:
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            # daily-totals snapshot del giorno (autorevole: cambia coi piani storici)
             r1 = await client.get(
                 f"{DIARIO_BASE_URL}/api/external/daily-totals",
                 params={"from": iso, "to": iso},
@@ -405,7 +408,6 @@ async def _fetch_diet_plan(d: date_cls) -> dict | None:
                 arr = r1.json()
                 if isinstance(arr, list) and arr:
                     target = arr[0].get("kcal_target")
-            # active-plan (best effort per il nome)
             r2 = await client.get(f"{DIARIO_BASE_URL}/api/external/active-plan")
             if r2.status_code == 200:
                 p = r2.json()
@@ -418,22 +420,22 @@ async def _fetch_diet_plan(d: date_cls) -> dict | None:
     except Exception:
         return None
 
-    # Se non abbiamo nemmeno il target del giorno, non c'e' un piano in vigore.
-    if target is None and plan_kcal is None:
+    # Niente target storico → nessun piano attivo quel giorno → niente da mostrare.
+    if target is None:
         return None
 
+    # Stesso target del piano corrente? probabile sia lo stesso piano:
+    # mostriamo nome + macros. Altrimenti generico, senza nome.
+    same_as_current = (
+        plan_kcal is not None and abs(target - plan_kcal) < 1e-3
+    )
     return {
-        "name": name or "Piano alimentare",
-        "kcal_target": target if target is not None else plan_kcal,
-        "protein_g": macros["protein_g"],
-        "fat_g": macros["fat_g"],
-        "carbs_g": macros["carbs_g"],
-        # Se il target del giorno differisce da quello del piano corrente,
-        # vuol dire che e' un giorno passato con un piano diverso e non
-        # abbiamo il nome storico — segnaliamo all'UI.
-        "name_is_historic_guess": (
-            target is not None and plan_kcal is not None and abs(target - plan_kcal) > 1e-3
-        ),
+        "name": name if same_as_current else "Piano alimentare",
+        "kcal_target": target,
+        "protein_g": macros["protein_g"] if same_as_current else None,
+        "fat_g": macros["fat_g"] if same_as_current else None,
+        "carbs_g": macros["carbs_g"] if same_as_current else None,
+        "name_is_historic_guess": not same_as_current,
     }
 
 
