@@ -88,6 +88,7 @@ Alembic revision migrations folder is mounted as a volume so migrations persist 
 - `IngestBlacklist` — UUIDs never to insert; auto-populated by trigger on DELETE from `health_samples`.
 - `SyncLog` — per-batch sync audit entries (device_id, sample_count, synced_at).
 - `DiarioHkSync` — mapping `(date, dietary_type) → hk_uuid + value + pending_write_id`. Tracks which daily diario totals have been mirrored to Apple Salute so the reconciler can detect changes (delete old HK sample + write new one) while skipping unchanged days.
+- `Regimen` — periodi di farmaci/integratori/dieta/allenamento. Colonne: `kind` (`medication`|`supplement`|`diet`|`training`), `name`, `start_date` (nullable = "iniziato prima del tracking"), `end_date` (nullable = "in corso"), `dose` (free-text), `notes`, `source` (`manual`|`lab_backfill`). UNIQUE index parziale `(kind, name, end_date) WHERE source='lab_backfill'` per rendere idempotente il re-run dello script di backfill dai panel lab confermati. Letta dalla pagina dashboard `/day/:date` (regimi attivi quel giorno) e `/regimens` (gestione lista). Niente HK / iOS — feature solo dashboard.
 - `DailyStat` — totali giornalieri pre-calcolati da `HKStatisticsCollectionQuery` lato iOS per i 9 tipi cumulative attivita' (Steps, Distance{WalkingRunning,Cycling,Swimming}, FlightsClimbed, {Active,Basal}EnergyBurned, Apple{Exercise,Stand,Move}Time). HealthKit applica internamente il dedup proprietario tra Watch e iPhone, quindi `value` combacia con i numeri dei widget di Apple Salute. UNIQUE su `(type, date, COALESCE(source, '_all_'))`. V1 scrive solo `source=NULL` (= totale aggregato cross-source). Tabella **additiva**: i sample raw restano in `health_samples` per workout splits, "Esplora", correlazione body, ecc. — la dashboard legge da qui solo per il chart Activity aggregato giornaliero.
 
 ### Alembic Migrations
@@ -105,6 +106,7 @@ Ordered history (most recent last):
 10. workout_activities (`alembic/versions/871fe89fe31f_workout_activities.py`) — adds `workouts.activities` JSONB for per-interval lap/segment data extracted from `HKWorkoutActivity`/`HKWorkoutEvent`.
 11. diario_hk_sync (`alembic/versions/6677af61441c_diario_hk_sync.py`) — adds `diario_hk_sync` table mapping `(date, dietary_type)` to the HK sample UUID written via the pending-write queue, for idempotent diario→Apple Salute reconciliation.
 12. daily_stats (`alembic/versions/3af6d8e91a02_daily_stats.py`) — adds `daily_stats` table for HK pre-aggregated daily totals (HKStatisticsCollectionQuery). UNIQUE su `(type, date, COALESCE(source, '_all_'))`.
+13. regimens (`alembic/versions/4be0fa72c1d3_regimens.py`) — adds `regimens` table per farmaci/integratori/dieta/allenamento con start/end date opzionali. UNIQUE parziale `(kind, name, end_date) WHERE source='lab_backfill'` per backfill idempotente.
 
 ### Routers
 
@@ -120,6 +122,8 @@ Ordered history (most recent last):
 - `diario.py` — read-only proxy to `diario-alimentare` + `/sync-to-hk` reconciler (see Diario section below).
 - `stretching.py` — read-only proxy to `alexpani/stretching` (`/sessions`, `/sessions/{id}`, `/routines`, `/exercises`). No writes, no HK sync.
 - `daily_stats.py` — `POST /api/v1/daily-stats/batch` (upsert su `(type, date, COALESCE(source, '_all_'))`) + `GET /api/v1/daily-stats?type=&start=&end=&source=` (default `source IS NULL`). Alimentato dalla pipeline iOS `HKStatisticsCollectionQuery → /daily-stats/batch`.
+- `regimens.py` — CRUD `POST/GET/PATCH/DELETE /api/v1/regimens` per farmaci/integratori/dieta/allenamento. Filtri: `kind`, `active_on=YYYY-MM-DD` (regimi attivi in quel giorno: `(start IS NULL OR start <= D) AND (end IS NULL OR end >= D)`), `include_ended`, `source`.
+- `day.py` — endpoint aggregato `GET /api/v1/day/{YYYY-MM-DD}` che ritorna in un singolo JSON: `activity` (da `daily_stats`, 9 tipi cumulative), `body` (latest sample per tipo <= EOD del giorno), `vitals` (AVG/MIN/MAX su HR + AVG sugli altri tipi vitali), `nutrition` (diario alimentare proxy + HK dietary fallback), `sleep` (CategorySample sleepAnalysis chiusi nel giorno con breakdown stages), `workouts` (start_date nel giorno), `lab_panels` (test_date == giorno con result count e out_of_range count), `regimens_active`. Tutte le query in parallelo via `asyncio.gather`. Riusa solo modelli/tabelle esistenti — niente nuova logica di calcolo.
 
 ### Main API Endpoints
 
@@ -327,6 +331,8 @@ docker compose up -d --build   # → http://192.168.68.190
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - `/explore` — universal browser: pick any sample type with full filter bar + chart + raw table
 - `/insert` — form to queue body/nutrition writes for Apple Health
+- `/day` (redirect a `/day/<oggi>`) e `/day/:date` — **Calendario / vista giorno**. Header sticky con frecce ←/→ (anche da tastiera), `<input type="date">` per saltare a una data, pulsante "Oggi". Card grid con: Attivita' (passi/distanza/calorie/exercise/stand/move/flights da `daily_stats`), Corpo (latest sample <= EOD), Vitali (HR avg/min/max + AVG SpO2/HRV/BP/temp), Nutrizione (4 progress bar kcal/proteine/grassi/carbo dal diario o HK fallback + acqua/caffeina/fibre), Sonno (totale + breakdown stages + ora inizio/fine), Workout (lista cliccabile a `/workouts/:uuid`), Laboratorio (panel con `test_date == giorno`, link a review), Regimi attivi (chip per kind con dose, click → modal edit, pulsante "+ Aggiungi" precompilato con `start_date=giorno`). URL stateful: la data e' nel path, link condivisibili. Backed by `GET /api/v1/day/{date}`.
+- `/regimens` — **Regimi** (farmaci/integratori/dieta/allenamento). Filtri chip per `kind` + toggle "mostra terminati". Sezione "In corso" e "Terminati", entrambe raggruppate per kind in card-tabella (Nome / Dose / Periodo / Note / Modifica). Voci `source='lab_backfill'` mostrano badge "da lab". Modal `RegimenForm` per create/edit/delete (riutilizzato anche su `/day`). Backed by CRUD `/api/v1/regimens`.
 - `/settings` — ingest rules CRUD (add, edit min/max, toggle active, delete, reset stats), blacklist UUID list with remove
 
 ### Filter Persistence

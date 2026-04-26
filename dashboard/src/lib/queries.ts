@@ -6,6 +6,7 @@ import type {
   CategorySample,
   CorrelatedSample,
   DailyStatPoint,
+  DaySnapshot,
   DiarioDailyTotal,
   DiarioPlan,
   LabAliasIn,
@@ -23,6 +24,8 @@ import type {
   IngestRule,
   LatestSampleResponse,
   PendingWrite,
+  Regimen,
+  RegimenKind,
   RulesSummary,
   SampleFacets,
   SamplesResponse,
@@ -60,6 +63,84 @@ export function useSamples(opts: SamplesQuery, enabled = true) {
     staleTime: 30_000,
     refetchInterval: 60_000,
     placeholderData: keepPreviousData,
+  })
+}
+
+// --- Day snapshot ---
+
+export function useDaySnapshot(date: string, enabled = true) {
+  return useQuery({
+    queryKey: ["daySnapshot", date],
+    queryFn: () => apiGet<DaySnapshot>(`/api/v1/day/${date}`),
+    enabled: enabled && !!date,
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
+  })
+}
+
+// --- Regimens ---
+
+export interface RegimenInput {
+  kind: RegimenKind
+  name: string
+  start_date?: string | null
+  end_date?: string | null
+  dose?: string | null
+  notes?: string | null
+}
+
+export interface RegimensFilters {
+  kind?: RegimenKind
+  active_on?: string
+  include_ended?: boolean
+  source?: "manual" | "lab_backfill"
+}
+
+export function useRegimens(filters: RegimensFilters = {}) {
+  return useQuery({
+    queryKey: ["regimens", filters],
+    queryFn: () =>
+      apiGet<Regimen[]>("/api/v1/regimens", {
+        kind: filters.kind,
+        active_on: filters.active_on,
+        include_ended: filters.include_ended === undefined ? undefined : (filters.include_ended ? "true" : "false"),
+        source: filters.source,
+      }),
+    staleTime: 30_000,
+  })
+}
+
+export function useCreateRegimen() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: RegimenInput) => apiPost<Regimen>("/api/v1/regimens", input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["regimens"] })
+      qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+    },
+  })
+}
+
+export function useUpdateRegimen() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: number; patch: Partial<RegimenInput> }) =>
+      apiPatch<Regimen>(`/api/v1/regimens/${id}`, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["regimens"] })
+      qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+    },
+  })
+}
+
+export function useDeleteRegimen() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => apiDelete<{ ok: boolean; id: number }>(`/api/v1/regimens/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["regimens"] })
+      qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+    },
   })
 }
 

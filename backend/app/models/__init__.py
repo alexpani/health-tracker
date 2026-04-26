@@ -1,5 +1,5 @@
 import uuid as uuid_mod
-from datetime import datetime
+from datetime import date as date_cls, datetime
 
 from sqlalchemy import BigInteger, Boolean, Date, DateTime, Double, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -224,6 +224,39 @@ class DailyStat(Base):
 
     __table_args__ = (
         Index("idx_daily_stats_type_date", "type", "date"),
+    )
+
+
+class Regimen(Base):
+    """Periodi di farmaci, integratori, piani alimentari, piani di
+    allenamento. Una riga per "ho preso/seguito X dal giorno A al giorno B".
+    `start_date=NULL` = "iniziato prima del tracking / ignoto".
+    `end_date=NULL`   = "in corso adesso".
+    `source='manual'` per l'inserimento dall'UI, `'lab_backfill'` per gli
+    import retroattivi dai campi context dei panel lab confermati.
+    """
+    __tablename__ = "regimens"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    start_date: Mapped[date_cls | None] = mapped_column(Date)
+    end_date: Mapped[date_cls | None] = mapped_column(Date)
+    dose: Mapped[str | None] = mapped_column(String(150))
+    notes: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="manual", server_default="manual"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_regimens_kind", "kind"),
+        Index("idx_regimens_dates", "start_date", "end_date"),
     )
 
 
