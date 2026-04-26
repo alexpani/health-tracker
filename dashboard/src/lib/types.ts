@@ -318,7 +318,7 @@ export interface Regimen {
   end_date: string | null
   dose: string | null
   notes: string | null
-  source: "manual" | "lab_backfill"
+  source: "manual" | "lab_backfill" | "diario"
   created_at: string
   updated_at: string
 }
@@ -418,7 +418,7 @@ export interface DaySnapshot {
     end_date: string | null
     dose: string | null
     notes: string | null
-    source: "manual" | "lab_backfill"
+    source: "manual" | "lab_backfill" | "diario"
   }>
 }
 

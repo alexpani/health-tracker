@@ -37,11 +37,12 @@ from app.models import Regimen
 from app.models.lab import LabPanel
 
 
+# NOTE: i piani alimentari NON vengono importati come regimens — quelli
+# sono gestiti dall'app diario-alimentare. I campi `diet_text` /
+# `nutrition_text` dei panel lab sono ignorati qui.
 FIELD_TO_KIND = {
     "medications_text": "medication",
     "supplements_text": "supplement",
-    "diet_text": "diet",
-    "nutrition_text": "diet",
     "workout_text": "training",
 }
 

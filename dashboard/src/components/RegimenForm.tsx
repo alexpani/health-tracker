@@ -15,6 +15,10 @@ const KIND_LABELS: Record<RegimenKind, string> = {
   training: "Piano di allenamento",
 }
 
+// I piani alimentari arrivano dall'app `diario-alimentare` — non si
+// inseriscono a mano qui. Tutto il resto si.
+const MANUAL_KINDS: RegimenKind[] = ["medication", "supplement", "training"]
+
 interface Props {
   /** Quando passato, il form e' in modalita' edit */
   regimen?: Regimen | null
@@ -27,7 +31,13 @@ interface Props {
 
 export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: Props) {
   const isEdit = !!regimen
-  const [kind, setKind] = useState<RegimenKind>(regimen?.kind ?? defaults?.kind ?? "medication")
+  const initialKind: RegimenKind = (() => {
+    const k = regimen?.kind ?? defaults?.kind ?? "medication"
+    // Edit di un piano alimentare? lascia diet per visualizzazione.
+    if (regimen?.kind === "diet") return "diet"
+    return MANUAL_KINDS.includes(k) ? k : "medication"
+  })()
+  const [kind, setKind] = useState<RegimenKind>(initialKind)
   const [name, setName] = useState(regimen?.name ?? "")
   const [startDate, setStartDate] = useState(regimen?.start_date ?? defaults?.start_date ?? "")
   const [endDate, setEndDate] = useState(regimen?.end_date ?? "")
@@ -94,7 +104,14 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
   }
 
   return (
-    <Card>
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8"
+      onClick={onClose}
+    >
+      <Card
+        className="w-full max-w-lg shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
       <CardHeader>
         <CardTitle>{isEdit ? "Modifica regime" : "Nuovo regime"}</CardTitle>
       </CardHeader>
@@ -104,11 +121,19 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
           <Select value={kind} onValueChange={v => setKind(v as RegimenKind)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {Object.entries(KIND_LABELS).map(([k, label]) => (
-                <SelectItem key={k} value={k}>{label}</SelectItem>
+              {MANUAL_KINDS.map(k => (
+                <SelectItem key={k} value={k}>{KIND_LABELS[k]}</SelectItem>
               ))}
+              {kind === "diet" && (
+                <SelectItem value="diet">{KIND_LABELS.diet}</SelectItem>
+              )}
             </SelectContent>
           </Select>
+          {kind === "diet" && (
+            <p className="text-xs text-muted-foreground">
+              I piani alimentari sono gestiti nell'app diario-alimentare.
+            </p>
+          )}
         </div>
 
         <div className="grid gap-2">
@@ -157,7 +182,8 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
           </div>
         </div>
       </CardContent>
-    </Card>
+      </Card>
+    </div>
   )
 }
 

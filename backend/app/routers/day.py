@@ -360,15 +360,81 @@ async def _fetch_lab_panels(db: AsyncSession, d: date_cls) -> list[dict]:
 
 
 async def _fetch_regimens_active(db: AsyncSession, d: date_cls) -> list[Regimen]:
+    """Regimi manuali attivi nel giorno. Escludiamo `kind='diet'`: i piani
+    alimentari vengono dal diario-alimentare via `_fetch_diet_plan`,
+    non si inseriscono a mano."""
     rows = (
         await db.execute(
             select(Regimen)
+            .where(Regimen.kind != "diet")
             .where(or_(Regimen.start_date.is_(None), Regimen.start_date <= d))
             .where(or_(Regimen.end_date.is_(None), Regimen.end_date >= d))
             .order_by(Regimen.kind.asc(), Regimen.name.asc())
         )
     ).scalars().all()
     return list(rows)
+
+
+async def _fetch_diet_plan(d: date_cls) -> dict | None:
+    """Recupera il piano alimentare attivo nel giorno dal diario-alimentare.
+    Strategia:
+    - `daily-totals?from=d&to=d` → contiene `kcal_target` snapshot del piano
+       in vigore quel giorno (anche per giorni passati).
+    - `active-plan` → fornisce il NOME del piano corrente. Per giorni recenti
+       e' la stessa cosa; per giorni lontani il nome potrebbe non riflettere
+       il piano effettivamente in vigore (limite del diario, che non espone
+       una storia dei piani via API). Mostriamo comunque cio' che abbiamo.
+
+    Ritorna None se diario irraggiungibile o nessun piano attivo / dato del
+    giorno.
+    """
+    iso = d.isoformat()
+    target: float | None = None
+    name: str | None = None
+    plan_kcal: float | None = None
+    macros: dict[str, float | None] = {"protein_g": None, "fat_g": None, "carbs_g": None}
+
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            # daily-totals snapshot del giorno (autorevole: cambia coi piani storici)
+            r1 = await client.get(
+                f"{DIARIO_BASE_URL}/api/external/daily-totals",
+                params={"from": iso, "to": iso},
+            )
+            if r1.status_code == 200:
+                arr = r1.json()
+                if isinstance(arr, list) and arr:
+                    target = arr[0].get("kcal_target")
+            # active-plan (best effort per il nome)
+            r2 = await client.get(f"{DIARIO_BASE_URL}/api/external/active-plan")
+            if r2.status_code == 200:
+                p = r2.json()
+                if isinstance(p, dict):
+                    name = p.get("name")
+                    plan_kcal = p.get("kcal_target")
+                    macros["protein_g"] = p.get("protein_g")
+                    macros["fat_g"] = p.get("fat_g")
+                    macros["carbs_g"] = p.get("carbs_g")
+    except Exception:
+        return None
+
+    # Se non abbiamo nemmeno il target del giorno, non c'e' un piano in vigore.
+    if target is None and plan_kcal is None:
+        return None
+
+    return {
+        "name": name or "Piano alimentare",
+        "kcal_target": target if target is not None else plan_kcal,
+        "protein_g": macros["protein_g"],
+        "fat_g": macros["fat_g"],
+        "carbs_g": macros["carbs_g"],
+        # Se il target del giorno differisce da quello del piano corrente,
+        # vuol dire che e' un giorno passato con un piano diverso e non
+        # abbiamo il nome storico — segnaliamo all'UI.
+        "name_is_historic_guess": (
+            target is not None and plan_kcal is not None and abs(target - plan_kcal) > 1e-3
+        ),
+    }
 
 
 @router.get("/{day_str}")
@@ -378,16 +444,60 @@ async def get_day(day_str: str, db: AsyncSession = Depends(get_db)):
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date, expected YYYY-MM-DD")
 
-    activity, body, vitals, nutrition, sleep, workouts, lab_panels, regimens = await asyncio.gather(
-        _fetch_activity(db, d),
-        _fetch_body(db, d),
-        _fetch_vitals(db, d),
-        _fetch_nutrition(db, d),
-        _fetch_sleep(db, d),
-        _fetch_workouts(db, d),
-        _fetch_lab_panels(db, d),
-        _fetch_regimens_active(db, d),
-    )
+    # NB: AsyncSession non e' concurrency-safe; tutte le query DB sono
+    # serializzate. Anche le chiamate HTTP (diario) le facciamo in
+    # sequenza per evitare interazioni col session lifecycle.
+    activity = await _fetch_activity(db, d)
+    body = await _fetch_body(db, d)
+    vitals = await _fetch_vitals(db, d)
+    nutrition = await _fetch_nutrition(db, d)
+    sleep = await _fetch_sleep(db, d)
+    workouts = await _fetch_workouts(db, d)
+    lab_panels = await _fetch_lab_panels(db, d)
+    regimens = await _fetch_regimens_active(db, d)
+    diet_plan = await _fetch_diet_plan(d)
+
+    regimens_active: list[dict] = [
+        {
+            "id": r.id,
+            "kind": r.kind,
+            "name": r.name,
+            "start_date": r.start_date.isoformat() if r.start_date else None,
+            "end_date": r.end_date.isoformat() if r.end_date else None,
+            "dose": r.dose,
+            "notes": r.notes,
+            "source": r.source,
+        }
+        for r in regimens
+    ]
+
+    # Inietta il piano alimentare dal diario come regimen sintetico
+    # (id=-1, source='diario'). L'UI lo mostra sotto "Piano alimentare"
+    # senza permetterne l'edit (l'editing avviene nel diario-alimentare).
+    if diet_plan is not None:
+        kcal = diet_plan.get("kcal_target")
+        dose_parts: list[str] = []
+        if kcal is not None:
+            dose_parts.append(f"{round(kcal)} kcal/die")
+        if diet_plan.get("protein_g") is not None:
+            dose_parts.append(f"P {round(diet_plan['protein_g'])}g")
+        if diet_plan.get("fat_g") is not None:
+            dose_parts.append(f"F {round(diet_plan['fat_g'])}g")
+        if diet_plan.get("carbs_g") is not None:
+            dose_parts.append(f"C {round(diet_plan['carbs_g'])}g")
+        notes = None
+        if diet_plan.get("name_is_historic_guess"):
+            notes = "Nome del piano corrente (il diario non espone i piani storici)."
+        regimens_active.append({
+            "id": -1,
+            "kind": "diet",
+            "name": diet_plan["name"],
+            "start_date": None,
+            "end_date": None,
+            "dose": " · ".join(dose_parts) or None,
+            "notes": notes,
+            "source": "diario",
+        })
 
     return {
         "date": d.isoformat(),
@@ -398,17 +508,5 @@ async def get_day(day_str: str, db: AsyncSession = Depends(get_db)):
         "sleep": sleep,
         "workouts": workouts,
         "lab_panels": lab_panels,
-        "regimens_active": [
-            {
-                "id": r.id,
-                "kind": r.kind,
-                "name": r.name,
-                "start_date": r.start_date.isoformat() if r.start_date else None,
-                "end_date": r.end_date.isoformat() if r.end_date else None,
-                "dose": r.dose,
-                "notes": r.notes,
-                "source": r.source,
-            }
-            for r in regimens
-        ],
+        "regimens_active": regimens_active,
     }

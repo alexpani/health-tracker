@@ -430,17 +430,35 @@ function RegimensCard({
               <div key={kind}>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">{KIND_LABELS[kind]}</p>
                 <div className="flex flex-wrap gap-2">
-                  {grouped[kind].map(r => (
-                    <button
-                      key={r.id}
-                      onClick={() => onEdit(r.id)}
-                      className="text-sm px-2.5 py-1 rounded-full border bg-secondary hover:bg-accent"
-                    >
-                      {r.name}
-                      {r.dose && <span className="ml-1 text-xs text-muted-foreground">{r.dose}</span>}
-                      {r.source === "lab_backfill" && <span className="ml-1 text-xs">📑</span>}
-                    </button>
-                  ))}
+                  {grouped[kind].map(r => {
+                    const isDiario = r.source === "diario"
+                    const className = "text-sm px-2.5 py-1 rounded-full border bg-secondary " +
+                      (isDiario ? "cursor-default" : "hover:bg-accent")
+                    const content = (
+                      <>
+                        {r.name}
+                        {r.dose && <span className="ml-1 text-xs text-muted-foreground">{r.dose}</span>}
+                        {r.source === "lab_backfill" && <span className="ml-1 text-xs">📑</span>}
+                        {isDiario && <span className="ml-1 text-xs" title="Dal diario alimentare">🍽</span>}
+                      </>
+                    )
+                    if (isDiario) {
+                      return (
+                        <span key={`diario-${r.name}`} className={className}>
+                          {content}
+                        </span>
+                      )
+                    }
+                    return (
+                      <button
+                        key={r.id}
+                        onClick={() => onEdit(r.id)}
+                        className={className}
+                      >
+                        {content}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             ))}
