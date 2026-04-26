@@ -10,9 +10,29 @@ import {
   timeRangeToDates,
 } from "@/components/controls/TimeRangeSelector"
 import { AggregationSelector } from "@/components/controls/AggregationSelector"
-import { useSamples } from "@/lib/queries"
+import { useDailyStats, useSamples } from "@/lib/queries"
 import { getMeta } from "@/lib/healthkit"
-import type { AdvancedFilters, Aggregation, Sample, TimeRange } from "@/lib/types"
+import type { AdvancedFilters, AggregatedPoint, Aggregation, Sample, TimeRange } from "@/lib/types"
+
+/** Tipi cumulative attivita' per cui leggiamo i totali pre-calcolati da
+ *  HealthKit (HKStatisticsCollectionQuery, gli stessi numeri dei widget di
+ *  Apple Salute) anziche' fare SUM dei sample raw. */
+const DAILY_STATS_TYPES: ReadonlySet<string> = new Set([
+  "HKQuantityTypeIdentifierStepCount",
+  "HKQuantityTypeIdentifierDistanceWalkingRunning",
+  "HKQuantityTypeIdentifierDistanceCycling",
+  "HKQuantityTypeIdentifierDistanceSwimming",
+  "HKQuantityTypeIdentifierFlightsClimbed",
+  "HKQuantityTypeIdentifierActiveEnergyBurned",
+  "HKQuantityTypeIdentifierBasalEnergyBurned",
+  "HKQuantityTypeIdentifierAppleExerciseTime",
+  "HKQuantityTypeIdentifierAppleStandTime",
+  "HKQuantityTypeIdentifierAppleMoveTime",
+])
+
+function isDailyStatsType(type: string): boolean {
+  return DAILY_STATS_TYPES.has(type)
+}
 
 interface Props {
   title: string
@@ -31,6 +51,11 @@ export function TypeBrowser({ title, subtitle, types }: Props) {
   const effectiveStart = advanced.start ?? dates.start
   const effectiveEnd = advanced.end ?? dates.end
 
+  // Se il tipo attivo e' uno dei 9 cumulative attivita' E l'aggregazione e'
+  // giornaliera, leggiamo dai totali HKStatisticsCollectionQuery (Apple-
+  // compatible). Altrimenti SUM/AVG dei sample raw via /samples.
+  const useDailyStatsBranch = aggregation === "daily" && isDailyStatsType(activeType)
+
   const aggQuery = useSamples({
     type: activeType,
     start: effectiveStart,
@@ -41,7 +66,29 @@ export function TypeBrowser({ title, subtitle, types }: Props) {
     value_min: advanced.value_min,
     value_max: advanced.value_max,
     limit: 2000,
-  })
+  }, !useDailyStatsBranch)
+
+  // /api/v1/daily-stats vuole date YYYY-MM-DD (no time). Convertiamo qui.
+  const dailyStart = effectiveStart ? effectiveStart.slice(0, 10) : undefined
+  const dailyEnd = effectiveEnd ? effectiveEnd.slice(0, 10) : undefined
+  const dailyStatsQuery = useDailyStats(activeType, dailyStart, dailyEnd, useDailyStatsBranch)
+
+  // Adapter: DailyStatPoint -> AggregatedPoint (il chart usa .sum per i
+  // tipi cumulative). Date YYYY-MM-DD viene parsata come midnight locale.
+  const dailyStatsAsAggregated: AggregatedPoint[] = useMemo(() => {
+    if (!useDailyStatsBranch || !dailyStatsQuery.data) return []
+    // Ordine DESC per coerenza con il branch /samples (TimeSeriesChart fa
+    // poi reverse() interno).
+    const sorted = [...dailyStatsQuery.data].sort((a, b) => (a.date < b.date ? 1 : -1))
+    return sorted.map(p => ({
+      period_start: `${p.date}T00:00:00`,
+      avg: p.value,
+      sum: p.value,
+      min: p.value,
+      max: p.value,
+      count: 1,
+    }))
+  }, [useDailyStatsBranch, dailyStatsQuery.data])
   const rawQuery = useSamples({
     type: activeType,
     start: effectiveStart,
@@ -102,8 +149,19 @@ export function TypeBrowser({ title, subtitle, types }: Props) {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {aggQuery.isLoading && <div className="h-72 animate-pulse bg-muted rounded" />}
-                {aggQuery.data && (
+                {(useDailyStatsBranch ? dailyStatsQuery.isLoading : aggQuery.isLoading) && (
+                  <div className="h-72 animate-pulse bg-muted rounded" />
+                )}
+                {useDailyStatsBranch && dailyStatsQuery.data && (
+                  <TimeSeriesChart
+                    type={t}
+                    data={dailyStatsAsAggregated}
+                    aggregation="daily"
+                    chartType={chartType}
+                    height={320}
+                  />
+                )}
+                {!useDailyStatsBranch && aggQuery.data && (
                   <TimeSeriesChart
                     type={t}
                     data={aggQuery.data.data}

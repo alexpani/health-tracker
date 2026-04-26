@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date as date_cls, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -204,6 +204,30 @@ class DeletionPlanIn(BaseModel):
 class DeletionPlanOut(BaseModel):
     total: int
     by_type: dict[str, int]
+
+
+# --- Daily statistics (HKStatisticsCollectionQuery) ---
+
+
+class DailyStatIn(BaseModel):
+    type: str
+    date: date_cls
+    value: float
+    source: str | None = None  # default "_all_" / NULL = totale aggregato HK
+
+
+class DailyStatsBatchIn(BaseModel):
+    items: list[DailyStatIn] = Field(max_length=10000)
+
+
+class DailyStatOut(BaseModel):
+    date: date_cls
+    value: float
+    source: str | None = None
+
+
+class DailyStatsBatchResult(BaseModel):
+    upserted: int
 
 
 class PendingDeletionOut(BaseModel):

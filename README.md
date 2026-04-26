@@ -62,7 +62,7 @@ React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui + Recharts + TanStack Qu
 
 **Pages:**
 - **Home** — today's metrics, weekly charts, last 3 workouts, sync status, last 10 sync sessions table
-- **Attivita** — steps, distance, flights, calories (tabbed)
+- **Attivita** — steps, distance, flights, calories (tabbed). Per i 9 tipi cumulative (Steps, Distance{Walking,Cycling,Swimming}, FlightsClimbed, {Active,Basal}Energy, Apple{Exercise,Stand,Move}Time) il chart aggregato giornaliero legge i totali pre-calcolati da `HKStatisticsCollectionQuery` (tabella `daily_stats`), che combaciano coi widget di Apple Salute (HK applica internamente il dedup Watch+iPhone).
 - **Vitali** — HR, HRV, SpO2, BP, respiratory, temperature, glucose
 - **Corpo** — weight, BMI, body fat, lean mass, height, waist. **Left sidebar filters** with year chips (2001→today, click to jump to a full year), preset ranges, source chips and weight range. **Multi-line chart** with per-series autoscale Y-axes, multi-metric tooltip and **drag-to-select** popover showing the delta for every active metric in the selected interval. **Weight variation cards** (last month / last year / all-time / selected range). **Paginated table** with all raw samples (50/page). Row-level delete with correlated-samples confirmation.
 - **Sonno** — sleep analysis, stacked bar chart per night

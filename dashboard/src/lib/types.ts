@@ -297,6 +297,15 @@ export interface AdvancedFilters {
   value_max?: number
 }
 
+/** Pre-calculated daily total from HKStatisticsCollectionQuery (the same
+ *  numbers Apple Salute shows in its widgets). Only the 9 cumulative
+ *  activity types feed this table — see backend `daily_stats`. */
+export interface DailyStatPoint {
+  date: string         // YYYY-MM-DD (local day)
+  value: number
+  source: string | null
+}
+
 export interface DiarioPlan {
   name: string
   kcal_target: number

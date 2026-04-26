@@ -5,6 +5,7 @@ import type {
   BlacklistEntry,
   CategorySample,
   CorrelatedSample,
+  DailyStatPoint,
   DiarioDailyTotal,
   DiarioPlan,
   LabAliasIn,
@@ -58,6 +59,16 @@ export function useSamples(opts: SamplesQuery, enabled = true) {
     enabled,
     staleTime: 30_000,
     refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useDailyStats(type: string, start?: string, end?: string, enabled = true) {
+  return useQuery({
+    queryKey: ["dailyStats", type, start, end],
+    queryFn: () => apiGet<DailyStatPoint[]>("/api/v1/daily-stats", { type, start, end }),
+    enabled: enabled && !!type,
+    staleTime: 60_000,
     placeholderData: keepPreviousData,
   })
 }

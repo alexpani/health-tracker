@@ -151,6 +151,17 @@ final class SyncService {
         let categoryNormal = HealthKitManager.categoryTypes.filter { !deferredTypes.contains($0.rawValue) }
         let categoryDeferred = HealthKitManager.categoryTypes.filter { deferredTypes.contains($0.rawValue) }
 
+        // PASS -1: daily statistics via HKStatisticsCollectionQuery for the 9
+        // cumulative activity types. HealthKit applies its proprietary dedup
+        // (Watch wins over iPhone) so the totals match what Apple Salute
+        // shows in its widgets — additive to the raw-samples sync below.
+        if !shouldStop {
+            currentType = "Daily statistics"
+            typeProgress = 0
+            currentWindowDate = nil
+            await syncDailyStats()
+        }
+
         // PASS 0: body-metric types via anchored queries (catches retroactive
         // writes from Withings etc. that the windowed path would miss).
         for (typeId, unit) in Self.anchoredQuantityTypes {
@@ -461,6 +472,94 @@ final class SyncService {
             let msg = "Workouts: anchored sync failed - \(error.localizedDescription)"
             syncLog.append(msg)
             logger.error("\(msg)")
+        }
+    }
+
+    /// I 9 tipi cumulative attivita' per cui sincronizziamo i totali
+    /// giornalieri pre-calcolati da `HKStatisticsCollectionQuery`. Sono gli
+    /// stessi numeri che Apple Salute mostra nei suoi widget (HK applica
+    /// internamente il dedup Watch+iPhone proprietario).
+    static let dailyStatsTypes: [(HKQuantityTypeIdentifier, HKUnit)] = [
+        (.stepCount,                .count()),
+        (.distanceWalkingRunning,   .meter()),
+        (.distanceCycling,          .meter()),
+        (.distanceSwimming,         .meter()),
+        (.flightsClimbed,           .count()),
+        (.activeEnergyBurned,       .kilocalorie()),
+        (.basalEnergyBurned,        .kilocalorie()),
+        (.appleExerciseTime,        .minute()),
+        (.appleStandTime,           .minute()),
+        (.appleMoveTime,            .minute()),
+    ]
+
+    @MainActor
+    private func syncDailyStats() async {
+        let totalTypes = Double(Self.dailyStatsTypes.count)
+        var done = 0
+        var grandTotal = 0
+
+        // ISO local-date formatter (yyyy-MM-dd in current calendar)
+        let dayFmt = DateFormatter()
+        dayFmt.calendar = Calendar(identifier: .gregorian)
+        dayFmt.locale = Locale(identifier: "en_US_POSIX")
+        dayFmt.timeZone = TimeZone.current
+        dayFmt.dateFormat = "yyyy-MM-dd"
+
+        // Lower bound for first sync — well before the user's first device.
+        let firstSyncFloor: Date = {
+            var c = DateComponents()
+            c.year = 2014; c.month = 1; c.day = 1
+            return Calendar.current.date(from: c) ?? Date.distantPast
+        }()
+
+        let now = Date()
+
+        for (typeId, unit) in Self.dailyStatsTypes {
+            if shouldStop { return }
+            currentType = "Daily " + typeId.rawValue.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")
+
+            let anchorKey = "lastDailyStatsAt_\(typeId.rawValue)"
+            let lastAt = UserDefaults.standard.object(forKey: anchorKey) as? Date
+
+            // Re-pull last 3 days every time: the Watch can backfill samples
+            // hours/days late, so HK's daily totals can change retroactively.
+            let from: Date = {
+                if let lastAt {
+                    return Calendar.current.date(byAdding: .day, value: -3, to: lastAt) ?? lastAt
+                }
+                return firstSyncFloor
+            }()
+            // End-of-today (exclusive upper bound)
+            let to = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: now)) ?? now
+
+            do {
+                let points = try await healthKitManager.fetchDailyStatistics(
+                    type: typeId, unit: unit, from: from, to: to
+                )
+                // Skip empty days — HKStatisticsCollectionQuery returns 0 for
+                // days where the Watch wasn't worn, polluting the chart.
+                let nonZero = points.filter { $0.value > 0 }
+                if !nonZero.isEmpty {
+                    let payload = nonZero.map { (date: dayFmt.string(from: $0.date), value: $0.value) }
+                    let upserted = try await apiClient.postDailyStats(type: typeId.rawValue, points: payload)
+                    grandTotal += upserted
+                    let msg = "\(currentType): \(upserted) days"
+                    syncLog.append(msg)
+                    logger.info("\(msg)")
+                }
+                UserDefaults.standard.set(now, forKey: anchorKey)
+            } catch {
+                let msg = "\(currentType): failed - \(error.localizedDescription)"
+                syncLog.append(msg)
+                logger.error("\(msg)")
+            }
+
+            done += 1
+            typeProgress = Double(done) / totalTypes
+        }
+
+        if grandTotal > 0 {
+            logger.info("Daily statistics: \(grandTotal) total days upserted")
         }
     }
 

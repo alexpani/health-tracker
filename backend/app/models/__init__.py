@@ -203,4 +203,28 @@ class DiarioHkSync(Base):
     )
 
 
+class DailyStat(Base):
+    """Daily totals pre-calcolati da HKStatisticsCollectionQuery lato iOS.
+    Una riga per (type, date, source). source='_all_' o NULL = totale
+    cross-source che HealthKit deduplica internamente fra Watch e iPhone
+    (questi sono i numeri che appaiono nei widget di Apple Salute)."""
+    __tablename__ = "daily_stats"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    type: Mapped[str] = mapped_column(String(100), nullable=False)
+    date: Mapped[datetime] = mapped_column(Date, nullable=False)
+    value: Mapped[float] = mapped_column(Double, nullable=False)
+    source: Mapped[str | None] = mapped_column(String(200))
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_daily_stats_type_date", "type", "date"),
+    )
+
+
 from . import lab  # noqa: E402, F401  — registra i modelli lab su Base.metadata

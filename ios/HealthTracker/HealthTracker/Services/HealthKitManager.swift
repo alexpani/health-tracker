@@ -661,6 +661,51 @@ actor HealthKitManager {
         return (payloads, deletedUUIDs, newAnchor)
     }
 
+    /// Esegue una `HKStatisticsCollectionQuery` con bucket giornalieri (anchor =
+    /// inizio del giorno locale di `from`) e ritorna i totali pre-calcolati per
+    /// ciascun giorno. E' la stessa API che alimenta i widget di Apple Salute:
+    /// HealthKit applica internamente il dedup proprietario tra Watch e iPhone,
+    /// quindi i numeri tornati combaciano con quelli mostrati in Salute.
+    /// Usa `.cumulativeSum` (i 9 tipi attivita' sono tutti cumulative).
+    func fetchDailyStatistics(
+        type: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        from: Date,
+        to: Date
+    ) async throws -> [DailyStatPoint] {
+        guard let qt = HKQuantityType.quantityType(forIdentifier: type) else { return [] }
+        let calendar = Calendar.current
+        let anchor = calendar.startOfDay(for: from)
+        let interval = DateComponents(day: 1)
+
+        // NOTE: nessun predicate temporale. `HKStatisticsCollectionQuery` con
+        // `intervalComponents = 1 day` + `anchor = startOfDay(from)` gestisce
+        // gia' il bucketing. Aggiungere `.strictStartDate` taglia sample che
+        // attraversano la mezzanotte e produce numeri diversi da Apple Salute.
+        // L'enumeration `from...to` sotto limita i risultati alla finestra.
+        let stats: [HKStatistics] = try await withCheckedThrowingContinuation { cont in
+            let q = HKStatisticsCollectionQuery(
+                quantityType: qt,
+                quantitySamplePredicate: nil,
+                options: [.cumulativeSum],
+                anchorDate: anchor,
+                intervalComponents: interval
+            )
+            q.initialResultsHandler = { _, results, error in
+                if let error { cont.resume(throwing: error); return }
+                var out: [HKStatistics] = []
+                results?.enumerateStatistics(from: from, to: to) { s, _ in out.append(s) }
+                cont.resume(returning: out)
+            }
+            healthStore.execute(q)
+        }
+
+        return stats.compactMap { s in
+            guard let q = s.sumQuantity() else { return nil }
+            return DailyStatPoint(date: s.startDate, value: q.doubleValue(for: unit))
+        }
+    }
+
     func fetchWorkouts(since: Date?, until: Date? = nil) async throws -> [WorkoutPayload] {
         let predicate: NSPredicate? = (since != nil || until != nil)
             ? HKQuery.predicateForSamples(withStart: since, end: until, options: .strictStartDate)
