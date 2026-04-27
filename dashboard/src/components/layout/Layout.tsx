@@ -9,12 +9,26 @@ export default function Layout() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Top bar with hamburger */}
+      {/* Top bar:
+          - mobile/tablet (<lg): hamburger + titolo, drawer al click
+          - desktop (lg+): nav orizzontale fissa con tutte le voci */}
       <header className="border-b bg-card/50 sticky top-0 z-40 flex items-center gap-3 px-4 h-12">
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(true)} aria-label="Menu">
+        {/* Hamburger: solo <lg */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 lg:hidden"
+          onClick={() => setOpen(true)}
+          aria-label="Menu"
+        >
           <Menu className="h-5 w-5" />
         </Button>
-        <span className="text-sm font-semibold">Health Dashboard</span>
+        <span className="text-sm font-semibold whitespace-nowrap">Health Dashboard</span>
+
+        {/* Nav orizzontale: solo lg+ */}
+        <div className="hidden lg:flex flex-1 min-w-0">
+          <Sidebar orientation="horizontal" />
+        </div>
       </header>
 
       {/* Main content full-width */}
@@ -24,9 +38,9 @@ export default function Layout() {
         </div>
       </main>
 
-      {/* Drawer navigation */}
+      {/* Drawer navigation (solo <lg) */}
       {open && (
-        <div className="fixed inset-0 z-50">
+        <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setOpen(false)} />
           <div className="absolute left-0 top-0 bottom-0 w-64 bg-card shadow-xl flex flex-col">
             <div className="h-12 flex items-center justify-between px-4 border-b">

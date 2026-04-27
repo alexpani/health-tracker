@@ -41,9 +41,40 @@ const navItems = [
 
 interface Props {
   onNavigate?: () => void
+  orientation?: "vertical" | "horizontal"
 }
 
-export default function Sidebar({ onNavigate }: Props) {
+export default function Sidebar({ onNavigate, orientation = "vertical" }: Props) {
+  if (orientation === "horizontal") {
+    // Top bar nav: scrolla orizzontalmente sopra a 16 voci, niente wrap.
+    return (
+      <nav className="flex-1 overflow-x-auto">
+        <ul className="flex items-center gap-0.5 px-2 h-full">
+          {navItems.map(item => (
+            <li key={item.to} className="shrink-0">
+              <NavLink
+                to={item.to}
+                end={item.end}
+                onClick={onNavigate}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap",
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  )
+                }
+              >
+                <item.icon className="h-4 w-4" />
+                {item.label}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    )
+  }
+
   return (
     <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
       {navItems.map(item => (
