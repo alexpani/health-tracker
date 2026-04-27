@@ -3,14 +3,16 @@ import HealthKit
 import SwiftData
 import os
 
-/// Persisted summary of the last completed sync
-struct LastSyncSummary: Codable {
+/// Persisted summary of a single completed sync
+struct LastSyncSummary: Codable, Identifiable, Hashable {
     var startedAt: Date
     var completedAt: Date
     var durationSeconds: Double
     var totalSamples: Int
     var log: [String]
     var wasInterrupted: Bool
+
+    var id: Date { startedAt }
 }
 
 @Observable
@@ -22,6 +24,10 @@ final class SyncService {
     var lastSyncTotalSamples: Int = 0
     var lastSyncLog: [String] = []        // preserved summary of the last completed sync
     var lastSyncWasInterrupted: Bool = false
+    /// Storico delle ultime N sync completate (capped a `maxRecentSyncs`,
+    /// piu' recente prima). Persistito su UserDefaults insieme alla last
+    /// sync. Mostrato in `SyncStatusView`.
+    var recentSyncs: [LastSyncSummary] = []
     var currentType: String = ""
     var progress: Double = 0
     var typeProgress: Double = 0          // progress within current type (0..1)
@@ -44,6 +50,8 @@ final class SyncService {
     private let deferredTypes: Set<String> = []
 
     private let lastSyncKey = "last_sync_summary_v1"
+    private let recentSyncsKey = "recent_syncs_v1"
+    private let maxRecentSyncs = 5
 
     init() {
         loadLastSyncSummary()
@@ -54,8 +62,22 @@ final class SyncService {
     }
 
     private func loadLastSyncSummary() {
-        guard let data = UserDefaults.standard.data(forKey: lastSyncKey) else { return }
-        guard let summary = try? JSONDecoder().decode(LastSyncSummary.self, from: data) else { return }
+        // Storico recenti (piu' nuovo prima)
+        if let data = UserDefaults.standard.data(forKey: recentSyncsKey),
+           let arr = try? JSONDecoder().decode([LastSyncSummary].self, from: data) {
+            recentSyncs = arr
+        }
+        // Last sync (back-compat con il vecchio singleton)
+        if let last = recentSyncs.first {
+            applyToLatest(last)
+        } else if let data = UserDefaults.standard.data(forKey: lastSyncKey),
+                  let summary = try? JSONDecoder().decode(LastSyncSummary.self, from: data) {
+            recentSyncs = [summary]
+            applyToLatest(summary)
+        }
+    }
+
+    private func applyToLatest(_ summary: LastSyncSummary) {
         lastSyncStartedAt = summary.startedAt
         lastSyncDate = summary.completedAt
         lastSyncDurationSeconds = summary.durationSeconds
@@ -73,6 +95,16 @@ final class SyncService {
             log: syncLog,
             wasInterrupted: interrupted
         )
+        // Prepend, cap at maxRecentSyncs
+        recentSyncs.insert(summary, at: 0)
+        if recentSyncs.count > maxRecentSyncs {
+            recentSyncs.removeLast(recentSyncs.count - maxRecentSyncs)
+        }
+        if let data = try? JSONEncoder().encode(recentSyncs) {
+            UserDefaults.standard.set(data, forKey: recentSyncsKey)
+        }
+        // Mantieni anche la chiave singleton per back-compat con eventuali
+        // letture vecchie (puo' essere rimossa in futuro).
         if let data = try? JSONEncoder().encode(summary) {
             UserDefaults.standard.set(data, forKey: lastSyncKey)
         }
@@ -151,36 +183,84 @@ final class SyncService {
         let categoryNormal = HealthKitManager.categoryTypes.filter { !deferredTypes.contains($0.rawValue) }
         let categoryDeferred = HealthKitManager.categoryTypes.filter { deferredTypes.contains($0.rawValue) }
 
-        // PASS 0: body-metric types via anchored queries (catches retroactive
-        // writes from Withings etc. that the windowed path would miss).
-        for (typeId, unit) in Self.anchoredQuantityTypes {
-            if shouldStop { break }
-            currentType = typeId.rawValue.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")
+        // PASS -1: daily statistics via HKStatisticsCollectionQuery for the 9
+        // cumulative activity types. HealthKit applies its proprietary dedup
+        // (Watch wins over iPhone) so the totals match what Apple Salute
+        // shows in its widgets — additive to the raw-samples sync below.
+        if !shouldStop {
+            currentType = "Daily statistics"
             typeProgress = 0
             currentWindowDate = nil
-            await syncQuantityTypeAnchored(typeId: typeId, unit: unit)
-            completedTypes += 1
+            await syncDailyStats()
+        }
+
+        // PASS 0: body-metric + Watch cumulative types via anchored queries.
+        // Parallelizziamo: HKAnchoredObjectQuery per tipo e' indipendente,
+        // HKHealthStore e' thread-safe. Con 16 tipi che spesso non hanno
+        // nuovi sample, in serie ci stavano tipo 5-10s per gli overhead di
+        // HK; in parallelo ~1s.
+        if !shouldStop {
+            currentType = "Anchored quantity types"
+            typeProgress = 0
+            currentWindowDate = nil
+            await withTaskGroup(of: Void.self) { group in
+                for (typeId, unit) in Self.anchoredQuantityTypes {
+                    if shouldStop { break }
+                    group.addTask { [self] in
+                        await syncQuantityTypeAnchored(typeId: typeId, unit: unit)
+                    }
+                }
+            }
+            completedTypes += Self.anchoredQuantityTypes.count
             progress = Double(completedTypes) / Double(totalTypes)
         }
 
-        // PASS 1: light/normal types (windowed)
-        for (typeId, unit) in quantityNormal {
-            if shouldStop { break }
-            currentType = typeId.rawValue.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")
+        // PASS 1: tipi normali (windowed). Parallelizziamo a gruppi limitati
+        // (max 4 in volo) per evitare di saturare HK / il backend con troppe
+        // POST concorrenti.
+        if !shouldStop {
+            currentType = "Quantity types"
             typeProgress = 0
-            currentWindowDate = nil
-            await syncQuantityType(typeId: typeId, unit: unit)
-            completedTypes += 1
+            await withTaskGroup(of: Void.self) { group in
+                var inflight = 0
+                let maxInflight = 4
+                for (typeId, unit) in quantityNormal {
+                    if shouldStop { break }
+                    if inflight >= maxInflight {
+                        await group.next()
+                        inflight -= 1
+                    }
+                    group.addTask { [self] in
+                        await syncQuantityType(typeId: typeId, unit: unit)
+                    }
+                    inflight += 1
+                }
+                while await group.next() != nil {}
+            }
+            completedTypes += quantityNormal.count
             progress = Double(completedTypes) / Double(totalTypes)
         }
 
-        for typeId in categoryNormal {
-            if shouldStop { break }
-            currentType = typeId.rawValue.replacingOccurrences(of: "HKCategoryTypeIdentifier", with: "")
+        if !shouldStop {
+            currentType = "Category types"
             typeProgress = 0
-            currentWindowDate = nil
-            await syncCategoryType(typeId: typeId)
-            completedTypes += 1
+            await withTaskGroup(of: Void.self) { group in
+                var inflight = 0
+                let maxInflight = 4
+                for typeId in categoryNormal {
+                    if shouldStop { break }
+                    if inflight >= maxInflight {
+                        await group.next()
+                        inflight -= 1
+                    }
+                    group.addTask { [self] in
+                        await syncCategoryType(typeId: typeId)
+                    }
+                    inflight += 1
+                }
+                while await group.next() != nil {}
+            }
+            completedTypes += categoryNormal.count
             progress = Double(completedTypes) / Double(totalTypes)
         }
 
@@ -464,6 +544,103 @@ final class SyncService {
         }
     }
 
+    /// I 9 tipi cumulative attivita' per cui sincronizziamo i totali
+    /// giornalieri pre-calcolati da `HKStatisticsCollectionQuery`. Sono gli
+    /// stessi numeri che Apple Salute mostra nei suoi widget (HK applica
+    /// internamente il dedup Watch+iPhone proprietario).
+    static let dailyStatsTypes: [(HKQuantityTypeIdentifier, HKUnit)] = [
+        (.stepCount,                .count()),
+        (.distanceWalkingRunning,   .meter()),
+        (.distanceCycling,          .meter()),
+        (.distanceSwimming,         .meter()),
+        (.flightsClimbed,           .count()),
+        (.activeEnergyBurned,       .kilocalorie()),
+        (.basalEnergyBurned,        .kilocalorie()),
+        (.appleExerciseTime,        .minute()),
+        (.appleStandTime,           .minute()),
+        (.appleMoveTime,            .minute()),
+    ]
+
+    @MainActor
+    private func syncDailyStats() async {
+        let totalTypes = Double(Self.dailyStatsTypes.count)
+        var done = 0
+        var grandTotal = 0
+
+        // ISO local-date formatter (yyyy-MM-dd in current calendar)
+        let dayFmt = DateFormatter()
+        dayFmt.calendar = Calendar(identifier: .gregorian)
+        dayFmt.locale = Locale(identifier: "en_US_POSIX")
+        dayFmt.timeZone = TimeZone.current
+        dayFmt.dateFormat = "yyyy-MM-dd"
+
+        // Lower bound for first sync — well before the user's first device.
+        let firstSyncFloor: Date = {
+            var c = DateComponents()
+            c.year = 2014; c.month = 1; c.day = 1
+            return Calendar.current.date(from: c) ?? Date.distantPast
+        }()
+
+        let now = Date()
+
+        // I 9 tipi sono indipendenti: 9 HKStatisticsCollectionQuery + 9
+        // POST in parallelo. Cosi' restiamo nei ~500ms anche con 3 giorni
+        // di rewind per ciascuno (in serie erano ~3-5s).
+        let endOfToday = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: now)) ?? now
+
+        await withTaskGroup(of: (String, Int).self) { group in
+            for (typeId, unit) in Self.dailyStatsTypes {
+                if shouldStop { break }
+                let anchorKey = "lastDailyStatsAt_\(typeId.rawValue)"
+                let lastAt = UserDefaults.standard.object(forKey: anchorKey) as? Date
+                let from: Date = {
+                    if let lastAt {
+                        return Calendar.current.date(byAdding: .day, value: -3, to: lastAt) ?? lastAt
+                    }
+                    return firstSyncFloor
+                }()
+                let typeName = typeId.rawValue.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")
+
+                group.addTask { [self, dayFmt] in
+                    do {
+                        let points = try await healthKitManager.fetchDailyStatistics(
+                            type: typeId, unit: unit, from: from, to: endOfToday
+                        )
+                        let nonZero = points.filter { $0.value > 0 }
+                        var upserted = 0
+                        if !nonZero.isEmpty {
+                            let payload = nonZero.map { (date: dayFmt.string(from: $0.date), value: $0.value) }
+                            upserted = try await apiClient.postDailyStats(type: typeId.rawValue, points: payload)
+                        }
+                        UserDefaults.standard.set(now, forKey: anchorKey)
+                        return (typeName, upserted)
+                    } catch {
+                        return (typeName, -1)
+                    }
+                }
+            }
+
+            for await (typeName, upserted) in group {
+                done += 1
+                typeProgress = Double(done) / totalTypes
+                if upserted > 0 {
+                    grandTotal += upserted
+                    let msg = "Daily \(typeName): \(upserted) days"
+                    syncLog.append(msg)
+                    logger.info("\(msg)")
+                } else if upserted < 0 {
+                    let msg = "Daily \(typeName): failed"
+                    syncLog.append(msg)
+                    logger.error("\(msg)")
+                }
+            }
+        }
+
+        if grandTotal > 0 {
+            logger.info("Daily statistics: \(grandTotal) total days upserted")
+        }
+    }
+
     /// Quantity types synced via HKAnchoredObjectQuery instead of the plain
     /// windowed HKSampleQuery. These types are often written retroactively
     /// into HealthKit by third-party sources (Withings for weight; Lifesum,
@@ -487,6 +664,22 @@ final class SyncService {
         (.dietaryCarbohydrates,  .gram()),
         (.dietaryFatTotal,       .gram()),
         (.dietaryProtein,        .gram()),
+        // Apple Watch cumulative activity types — Watch writes samples to
+        // HealthKit retroactively when it syncs with the iPhone (often
+        // hours after the activity). The windowed lastSyncDate path with
+        // .strictStartDate misses any sample that arrives in HealthKit
+        // after the previous sync's "now" moved past its startDate. This
+        // showed up as daily kcal/steps totals being 5–25% lower than
+        // Apple Salute.
+        (.activeEnergyBurned,        .kilocalorie()),
+        (.basalEnergyBurned,         .kilocalorie()),
+        (.stepCount,                 .count()),
+        (.distanceWalkingRunning,    .meter()),
+        (.distanceCycling,           .meter()),
+        (.flightsClimbed,            .count()),
+        (.appleExerciseTime,         .minute()),
+        (.appleStandTime,            .minute()),
+        (.appleMoveTime,             .minute()),
     ]
 
     static var anchoredQuantityIds: Set<String> {

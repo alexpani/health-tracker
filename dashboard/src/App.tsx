@@ -15,6 +15,8 @@ import Fitness from "@/pages/Fitness"
 import Insert from "@/pages/Insert"
 import Lab from "@/pages/Lab"
 import LabReview from "@/pages/LabReview"
+import Day from "@/pages/Day"
+import Regimens from "@/pages/Regimens"
 import Settings from "@/pages/Settings"
 
 export default function App() {
@@ -36,6 +38,9 @@ export default function App() {
         <Route path="/insert" element={<Insert />} />
         <Route path="/lab" element={<Lab />} />
         <Route path="/lab/panels/:id/review" element={<LabReview />} />
+        <Route path="/day" element={<Day />} />
+        <Route path="/day/:date" element={<Day />} />
+        <Route path="/regimens" element={<Regimens />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>

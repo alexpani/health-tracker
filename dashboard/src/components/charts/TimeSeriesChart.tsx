@@ -37,10 +37,13 @@ export function TimeSeriesChart({ type, data, aggregation, chartType = "line", h
     )
   }
 
+  const useSum = meta.aggregateBy === "sum"
   const formatted = isAggregated(data)
     ? [...data].reverse().map(d => ({
         time: d.period_start,
-        value: d.avg * meta.unitMultiplier,
+        // Cumulative types (steps, distance, calories, dietary) plot the
+        // bucket SUM. Measurements (HR, weight, ...) plot the AVG.
+        value: ((useSum && d.sum != null ? d.sum : d.avg)) * meta.unitMultiplier,
         min: d.min * meta.unitMultiplier,
         max: d.max * meta.unitMultiplier,
         count: d.count,

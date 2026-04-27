@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date as date_cls, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -87,6 +87,7 @@ class SampleOut(BaseModel):
 class AggregatedPoint(BaseModel):
     period_start: datetime
     avg: float
+    sum: float | None = None
     min: float
     max: float
     count: int
@@ -203,6 +204,84 @@ class DeletionPlanIn(BaseModel):
 class DeletionPlanOut(BaseModel):
     total: int
     by_type: dict[str, int]
+
+
+# --- Regimens (medications / supplements / diet / training periods) ---
+
+
+class RegimenIn(BaseModel):
+    kind: str           # 'medication' | 'supplement' | 'diet' | 'training'
+    name: str
+    start_date: date_cls | None = None
+    end_date: date_cls | None = None
+    dose: str | None = None
+    notes: str | None = None
+
+
+class RegimenPatch(BaseModel):
+    kind: str | None = None
+    name: str | None = None
+    start_date: date_cls | None = None
+    end_date: date_cls | None = None
+    dose: str | None = None
+    notes: str | None = None
+    # use a sentinel via Field default to distinguish "set to null" vs "leave alone"
+    # in Pydantic v2 we rely on `model_dump(exclude_unset=True)` at the router
+    # level so any explicit null IS persisted. None == unset == "leave alone".
+
+
+class RegimenOut(BaseModel):
+    id: int
+    kind: str
+    name: str
+    start_date: date_cls | None
+    end_date: date_cls | None
+    dose: str | None
+    notes: str | None
+    source: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# --- Day snapshot (calendar / day-view aggregator) ---
+
+
+class DaySnapshot(BaseModel):
+    date: date_cls
+    activity: dict
+    body: dict
+    vitals: dict
+    nutrition: dict
+    sleep: dict | None
+    workouts: list[dict]
+    lab_panels: list[dict]
+    regimens_active: list[RegimenOut]
+
+
+# --- Daily statistics (HKStatisticsCollectionQuery) ---
+
+
+class DailyStatIn(BaseModel):
+    type: str
+    date: date_cls
+    value: float
+    source: str | None = None  # default "_all_" / NULL = totale aggregato HK
+
+
+class DailyStatsBatchIn(BaseModel):
+    items: list[DailyStatIn] = Field(max_length=10000)
+
+
+class DailyStatOut(BaseModel):
+    date: date_cls
+    value: float
+    source: str | None = None
+
+
+class DailyStatsBatchResult(BaseModel):
+    upserted: int
 
 
 class PendingDeletionOut(BaseModel):

@@ -1,0 +1,457 @@
+import { useEffect, useMemo, useState } from "react"
+import { Link, useNavigate, useParams } from "react-router-dom"
+import {
+  ChevronLeft,
+  ChevronRight,
+  Activity,
+  Dumbbell,
+  FlaskConical,
+  Heart,
+  Apple as AppleIcon,
+  Moon,
+  Pill,
+  Scale,
+  Plus,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { useDaySnapshot } from "@/lib/queries"
+import type { DaySnapshot, RegimenKind, Regimen } from "@/lib/types"
+import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
+
+function todayLocal(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+function shiftDate(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() + days)
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`
+}
+
+function formatDateIT(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number)
+  const dt = new Date(y, m - 1, d)
+  return dt.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+}
+
+function fmt(n: number | null | undefined, frac = 0): string {
+  if (n == null || !Number.isFinite(n)) return "—"
+  return n.toLocaleString("it-IT", { maximumFractionDigits: frac })
+}
+
+function fmtDuration(seconds: number | null | undefined): string {
+  if (!seconds) return "—"
+  const m = Math.round(seconds / 60)
+  if (m < 60) return `${m}'`
+  const h = Math.floor(m / 60)
+  const mm = m % 60
+  return `${h}h ${mm}'`
+}
+
+function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
+}
+
+export default function Day() {
+  const params = useParams()
+  const navigate = useNavigate()
+  const today = todayLocal()
+  const date = params.date ?? today
+
+  // Redirect /day → /day/<oggi>
+  useEffect(() => {
+    if (!params.date) {
+      navigate(`/day/${today}`, { replace: true })
+    }
+  }, [params.date, today, navigate])
+
+  // Keyboard nav ←/→
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (e.key === "ArrowLeft") navigate(`/day/${shiftDate(date, -1)}`)
+      if (e.key === "ArrowRight") navigate(`/day/${shiftDate(date, 1)}`)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [date, navigate])
+
+  const q = useDaySnapshot(date)
+  const data = q.data
+
+  const isFuture = date > today
+
+  const [showAddRegimen, setShowAddRegimen] = useState(false)
+  const [editRegimenId, setEditRegimenId] = useState<number | null>(null)
+  const editRegimen: Regimen | null = useMemo(() => {
+    if (editRegimenId == null || !data) return null
+    const r = data.regimens_active.find(x => x.id === editRegimenId)
+    if (!r) return null
+    return {
+      ...r,
+      created_at: "",
+      updated_at: "",
+    }
+  }, [editRegimenId, data])
+
+  return (
+    <div className="space-y-6">
+      {/* Header navigazione */}
+      <div className="flex items-center justify-between gap-2 sticky top-0 z-10 bg-background py-2">
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="icon" onClick={() => navigate(`/day/${shiftDate(date, -1)}`)} aria-label="Giorno precedente">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <h1 className="text-2xl font-bold tracking-tight capitalize px-3">
+            {formatDateIT(date)}
+          </h1>
+          <Button variant="outline" size="icon" onClick={() => navigate(`/day/${shiftDate(date, 1)}`)} aria-label="Giorno successivo">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            type="date"
+            value={date}
+            onChange={e => e.target.value && navigate(`/day/${e.target.value}`)}
+            className="w-[180px]"
+          />
+          <Button variant={date === today ? "default" : "outline"} onClick={() => navigate(`/day/${today}`)}>
+            Oggi
+          </Button>
+        </div>
+      </div>
+
+      {q.isLoading && !data && <div className="h-72 animate-pulse bg-muted rounded" />}
+      {data && (
+        <>
+          {isFuture && (
+            <Card>
+              <CardContent className="py-6 text-center text-muted-foreground">
+                Giorno futuro: nessun dato disponibile.
+              </CardContent>
+            </Card>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <ActivityCard data={data} />
+            <BodyCard data={data} />
+            <VitalsCard data={data} />
+            <NutritionCard data={data} />
+            <SleepCard data={data} />
+            <WorkoutsCard data={data} />
+            <LabCard data={data} />
+            <RegimensCard
+              data={data}
+              onAdd={() => { setShowAddRegimen(true); setEditRegimenId(null) }}
+              onEdit={id => { setEditRegimenId(id); setShowAddRegimen(false) }}
+            />
+          </div>
+
+          {showAddRegimen && (
+            <RegimenForm
+              defaults={{ start_date: date }}
+              onClose={() => setShowAddRegimen(false)}
+            />
+          )}
+          {editRegimen && (
+            <RegimenForm
+              regimen={editRegimen}
+              onClose={() => setEditRegimenId(null)}
+            />
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---------- Sub-cards ----------
+
+/** Card compatta: header + content con padding ridotto. */
+function DayCard({
+  icon: Icon,
+  title,
+  action,
+  children,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  action?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between p-3 pb-1 space-y-0">
+        <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+          <Icon className="h-4 w-4" /> {title}
+        </CardTitle>
+        {action}
+      </CardHeader>
+      <CardContent className="p-3 pt-1">
+        {children}
+      </CardContent>
+    </Card>
+  )
+}
+
+function StatRow({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="flex justify-between items-baseline py-0.5 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium tabular-nums">
+        {value}
+        {sub && <span className="ml-1 text-xs text-muted-foreground">{sub}</span>}
+      </span>
+    </div>
+  )
+}
+
+function ActivityCard({ data }: { data: DaySnapshot }) {
+  const a = data.activity
+  return (
+    <DayCard icon={Activity} title="Attivita'">
+      <StatRow label="Passi" value={fmt(a.steps)} />
+      <StatRow label="Distanza" value={a.distance_walking_running_m != null ? fmt(a.distance_walking_running_m / 1000, 2) : "—"} sub="km" />
+      {a.distance_cycling_m != null && a.distance_cycling_m > 0 && (
+        <StatRow label="Ciclismo" value={fmt(a.distance_cycling_m / 1000, 2)} sub="km" />
+      )}
+      {a.distance_swimming_m != null && a.distance_swimming_m > 0 && (
+        <StatRow label="Nuoto" value={fmt(a.distance_swimming_m, 0)} sub="m" />
+      )}
+      <StatRow label="Cal. attive" value={fmt(a.active_kcal)} sub="kcal" />
+      <StatRow label="Cal. basali" value={fmt(a.basal_kcal)} sub="kcal" />
+      <StatRow label="Esercizio" value={fmt(a.exercise_min)} sub="min" />
+      <StatRow label="Stand" value={fmt(a.stand_min)} sub="min" />
+      {a.move_min != null && <StatRow label="Move" value={fmt(a.move_min)} sub="min" />}
+      <StatRow label="Piani" value={fmt(a.flights)} />
+    </DayCard>
+  )
+}
+
+function BodyCard({ data }: { data: DaySnapshot }) {
+  const b = data.body
+  const v = (x: { value: number } | null, frac = 1) => x ? fmt(x.value, frac) : "—"
+  return (
+    <DayCard icon={Scale} title="Corpo">
+      <StatRow label="Peso" value={v(b.weight_kg, 2)} sub="kg" />
+      <StatRow label="BMI" value={v(b.bmi, 1)} />
+      <StatRow label="Grasso" value={b.body_fat_pct ? fmt(b.body_fat_pct.value * 100, 1) : "—"} sub="%" />
+      <StatRow label="Massa magra" value={v(b.lean_mass_kg, 2)} sub="kg" />
+      <StatRow label="Vita" value={b.waist_m ? fmt(b.waist_m.value * 100, 1) : "—"} sub="cm" />
+      <StatRow label="Altezza" value={b.height_m ? fmt(b.height_m.value * 100, 0) : "—"} sub="cm" />
+      <p className="text-[10px] text-muted-foreground mt-1">Ultimi valori al termine del giorno.</p>
+    </DayCard>
+  )
+}
+
+function VitalsCard({ data }: { data: DaySnapshot }) {
+  const v = data.vitals
+  return (
+    <DayCard icon={Heart} title="Vitali">
+      <StatRow label="HR media" value={fmt(v.hr_avg, 0)} sub="bpm" />
+      <StatRow label="HR min/max" value={`${fmt(v.hr_min, 0)} / ${fmt(v.hr_max, 0)}`} sub="bpm" />
+      <StatRow label="HR riposo" value={fmt(v.resting_hr_avg, 0)} sub="bpm" />
+      <StatRow label="HRV" value={fmt(v.hrv_ms_avg, 0)} sub="ms" />
+      <StatRow label="SpO₂" value={v.spo2_avg != null ? fmt(v.spo2_avg * 100, 1) : "—"} sub="%" />
+      <StatRow label="Pressione" value={v.bp_systolic_avg && v.bp_diastolic_avg ? `${fmt(v.bp_systolic_avg, 0)}/${fmt(v.bp_diastolic_avg, 0)}` : "—"} sub="mmHg" />
+      <StatRow label="Respiro" value={fmt(v.respiratory_rate_avg, 1)} sub="/min" />
+      <StatRow label="Temperatura" value={fmt(v.temp_c_avg, 1)} sub="°C" />
+    </DayCard>
+  )
+}
+
+function NutritionCard({ data }: { data: DaySnapshot }) {
+  const n = data.nutrition
+  const Bar = ({ label, value, target, unit }: { label: string; value: number | null; target: number | null; unit: string }) => {
+    const pct = value != null && target ? Math.min(100, (value / target) * 100) : 0
+    return (
+      <div className="py-1">
+        <div className="flex justify-between text-xs">
+          <span className="text-muted-foreground">{label}</span>
+          <span className="tabular-nums">
+            {fmt(value)}
+            {target != null && <span className="text-muted-foreground"> / {fmt(target)}</span>}
+            <span className="ml-0.5 text-muted-foreground">{unit}</span>
+          </span>
+        </div>
+        {target != null && (
+          <div className="h-1 bg-muted rounded-full overflow-hidden mt-0.5">
+            <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+          </div>
+        )}
+      </div>
+    )
+  }
+  return (
+    <DayCard icon={AppleIcon} title="Nutrizione">
+      <Bar label="Calorie" value={n.kcal} target={n.kcal_target} unit="kcal" />
+      <Bar label="Proteine" value={n.protein_g} target={null} unit="g" />
+      <Bar label="Grassi" value={n.fat_g} target={null} unit="g" />
+      <Bar label="Carboidrati" value={n.carbs_g} target={null} unit="g" />
+      {(n.water_l != null || n.caffeine_g != null || n.fiber_g != null) && (
+        <div className="pt-1 mt-1 border-t">
+          {n.water_l != null && <StatRow label="Acqua" value={fmt(n.water_l, 2)} sub="L" />}
+          {n.caffeine_g != null && <StatRow label="Caffeina" value={fmt(n.caffeine_g * 1000, 0)} sub="mg" />}
+          {n.fiber_g != null && <StatRow label="Fibre" value={fmt(n.fiber_g, 1)} sub="g" />}
+        </div>
+      )}
+      <p className="text-[10px] text-muted-foreground mt-1">
+        {n.diario_present ? "Fonte: diario" : "Fonte: HealthKit"}
+      </p>
+    </DayCard>
+  )
+}
+
+function SleepCard({ data }: { data: DaySnapshot }) {
+  const s = data.sleep
+  return (
+    <DayCard icon={Moon} title="Sonno">
+      {!s ? (
+        <p className="text-xs text-muted-foreground">Nessun dato.</p>
+      ) : (
+        <>
+          <StatRow label="Dormito" value={fmtDuration((s.asleep_min ?? 0) * 60)} />
+          {s.deep_min != null && <StatRow label="Profondo" value={fmtDuration(s.deep_min * 60)} />}
+          {s.rem_min != null && <StatRow label="REM" value={fmtDuration(s.rem_min * 60)} />}
+          {s.core_min != null && <StatRow label="Core" value={fmtDuration(s.core_min * 60)} />}
+          {s.awake_min != null && <StatRow label="Sveglio" value={fmtDuration(s.awake_min * 60)} />}
+          <StatRow label="Orario" value={`${fmtTime(s.start)} → ${fmtTime(s.end)}`} />
+        </>
+      )}
+    </DayCard>
+  )
+}
+
+function WorkoutsCard({ data }: { data: DaySnapshot }) {
+  return (
+    <DayCard icon={Dumbbell} title="Workout">
+      {data.workouts.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Nessun workout.</p>
+      ) : (
+        <ul className="space-y-1">
+          {data.workouts.map(w => (
+            <li key={w.uuid}>
+              <Link to={`/workouts/${w.uuid}`} className="block hover:bg-accent rounded p-1 -mx-1">
+                <div className="flex justify-between items-baseline text-sm">
+                  <span className="font-medium truncate">{w.title || w.activity_name || "Workout"}</span>
+                  <span className="text-xs text-muted-foreground ml-2 shrink-0">{fmtTime(w.start_date)}</span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {fmtDuration(w.duration)}
+                  {w.total_distance != null && ` · ${fmt(w.total_distance / 1000, 2)} km`}
+                  {w.total_energy_burned != null && ` · ${fmt(w.total_energy_burned, 0)} kcal`}
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </DayCard>
+  )
+}
+
+function LabCard({ data }: { data: DaySnapshot }) {
+  if (data.lab_panels.length === 0) return null
+  return (
+    <DayCard icon={FlaskConical} title="Laboratorio">
+      <ul className="space-y-1">
+        {data.lab_panels.map(p => (
+          <li key={p.id}>
+            <Link to={`/lab/panels/${p.id}/review`} className="block hover:bg-accent rounded p-1 -mx-1">
+              <div className="flex justify-between items-baseline text-sm">
+                <span className="font-medium truncate">{p.lab_name || `Panel #${p.id}`}</span>
+                <span className="text-[10px] ml-2 shrink-0">
+                  {p.status === "confirmed" ? "✓" : "da rivedere"}
+                </span>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {p.results_count} analiti
+                {p.out_of_range_count > 0 && (
+                  <span className="ml-1 text-destructive">· {p.out_of_range_count} fuori range</span>
+                )}
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </DayCard>
+  )
+}
+
+function RegimensCard({
+  data,
+  onAdd,
+  onEdit,
+}: {
+  data: DaySnapshot
+  onAdd: () => void
+  onEdit: (id: number) => void
+}) {
+  const grouped: Record<RegimenKind, typeof data.regimens_active> = {
+    medication: [],
+    supplement: [],
+    diet: [],
+    training: [],
+  }
+  for (const r of data.regimens_active) grouped[r.kind].push(r)
+
+  return (
+    <DayCard
+      icon={Pill}
+      title="Regimi attivi"
+      action={
+        <Button variant="outline" size="sm" className="h-7 px-2" onClick={onAdd}>
+          <Plus className="h-3.5 w-3.5 mr-1" /> Aggiungi
+        </Button>
+      }
+    >
+      {data.regimens_active.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Nessun regime attivo.</p>
+      ) : (
+        <div className="space-y-2">
+          {(Object.keys(grouped) as RegimenKind[]).map(kind => grouped[kind].length > 0 && (
+            <div key={kind}>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-0.5">{KIND_LABELS[kind]}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {grouped[kind].map(r => {
+                  const isDiario = r.source === "diario"
+                  const className = "text-xs px-2 py-0.5 rounded-full border bg-secondary " +
+                    (isDiario ? "cursor-default" : "hover:bg-accent")
+                  const content = (
+                    <>
+                      {r.name}
+                      {r.dose && <span className="ml-1 text-muted-foreground">{r.dose}</span>}
+                      {r.source === "lab_backfill" && <span className="ml-1">📑</span>}
+                      {isDiario && <span className="ml-1" title="Dal diario alimentare">🍽</span>}
+                    </>
+                  )
+                  if (isDiario) {
+                    return (
+                      <span key={`diario-${r.name}`} className={className}>
+                        {content}
+                      </span>
+                    )
+                  }
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => onEdit(r.id)}
+                      className={className}
+                    >
+                      {content}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </DayCard>
+  )
+}

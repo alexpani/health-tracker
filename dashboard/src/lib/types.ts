@@ -196,6 +196,7 @@ export interface CorrelatedSample {
 export interface AggregatedPoint {
   period_start: string
   avg: number
+  sum: number | null
   min: number
   max: number
   count: number
@@ -294,6 +295,131 @@ export interface AdvancedFilters {
   devices?: string[]
   value_min?: number
   value_max?: number
+}
+
+/** Pre-calculated daily total from HKStatisticsCollectionQuery (the same
+ *  numbers Apple Salute shows in its widgets). Only the 9 cumulative
+ *  activity types feed this table — see backend `daily_stats`. */
+export interface DailyStatPoint {
+  date: string         // YYYY-MM-DD (local day)
+  value: number
+  source: string | null
+}
+
+// --- Regimens (medications / supplements / diet / training periods) ---
+
+export type RegimenKind = "medication" | "supplement" | "diet" | "training"
+
+export interface Regimen {
+  id: number
+  kind: RegimenKind
+  name: string
+  start_date: string | null
+  end_date: string | null
+  dose: string | null
+  notes: string | null
+  source: "manual" | "lab_backfill" | "diario"
+  created_at: string
+  updated_at: string
+}
+
+// --- Day snapshot ---
+
+export interface DayBodyValue {
+  value: number
+  unit: string
+  start_date: string
+}
+
+export interface DaySnapshot {
+  date: string
+  activity: {
+    steps: number | null
+    distance_walking_running_m: number | null
+    distance_cycling_m: number | null
+    distance_swimming_m: number | null
+    flights: number | null
+    active_kcal: number | null
+    basal_kcal: number | null
+    exercise_min: number | null
+    stand_min: number | null
+    move_min: number | null
+  }
+  body: {
+    weight_kg: DayBodyValue | null
+    bmi: DayBodyValue | null
+    body_fat_pct: DayBodyValue | null
+    lean_mass_kg: DayBodyValue | null
+    waist_m: DayBodyValue | null
+    height_m: DayBodyValue | null
+  }
+  vitals: {
+    hr_avg: number | null
+    hr_min: number | null
+    hr_max: number | null
+    hrv_ms_avg: number | null
+    spo2_avg: number | null
+    bp_systolic_avg: number | null
+    bp_diastolic_avg: number | null
+    respiratory_rate_avg: number | null
+    temp_c_avg: number | null
+    resting_hr_avg: number | null
+  }
+  nutrition: {
+    kcal: number | null
+    kcal_target: number | null
+    protein_g: number | null
+    fat_g: number | null
+    carbs_g: number | null
+    kcal_hk: number | null
+    fiber_g: number | null
+    sugar_g: number | null
+    water_l: number | null
+    caffeine_g: number | null
+    diario_present: boolean
+  }
+  sleep: {
+    in_bed_min: number | null
+    asleep_min: number | null
+    core_min: number | null
+    deep_min: number | null
+    rem_min: number | null
+    awake_min: number | null
+    start: string
+    end: string
+  } | null
+  workouts: Array<{
+    uuid: string
+    activity_type: number
+    activity_name: string | null
+    duration: number | null
+    total_distance: number | null
+    total_energy_burned: number | null
+    start_date: string
+    end_date: string
+    source_name: string | null
+    title: string | null
+    notes: string | null
+  }>
+  lab_panels: Array<{
+    id: number
+    test_date: string
+    lab_name: string | null
+    specimen_types: string[]
+    status: string
+    results_count: number
+    out_of_range_count: number
+  }>
+  regimens_active: Array<{
+    id: number
+    kind: RegimenKind
+    name: string
+    start_date: string | null
+    end_date: string | null
+    dose: string | null
+    notes: string | null
+    source: "manual" | "lab_backfill" | "diario"
+  }>
 }
 
 export interface DiarioPlan {

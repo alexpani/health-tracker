@@ -89,6 +89,13 @@ struct WorkoutActivityPayload {
     }
 }
 
+/// Un punto giornaliero di `HKStatisticsCollectionQuery`. La data e' il
+/// midnight locale del bucket; il valore e' il totale aggregato HK.
+struct DailyStatPoint {
+    let date: Date
+    let value: Double
+}
+
 struct WorkoutPayload {
     let uuid: String
     let activityType: Int
@@ -300,6 +307,18 @@ actor APIClient {
         let body: [String: Any] = ["uuids": uuids.map { $0.uuidString }]
         let resp: Resp = try await post(path: "/api/v1/samples/bulk-delete-by-uuids", body: body)
         return resp.deleted
+    }
+
+    /// Upsert dei totali giornalieri pre-calcolati da HKStatisticsCollectionQuery
+    /// nella tabella backend `daily_stats`. Idempotente.
+    func postDailyStats(type: String, points: [(date: String, value: Double)]) async throws -> Int {
+        if points.isEmpty { return 0 }
+        struct Resp: Decodable { let upserted: Int }
+        let body: [String: Any] = [
+            "items": points.map { ["type": type, "date": $0.date, "value": $0.value] }
+        ]
+        let resp: Resp = try await post(path: "/api/v1/daily-stats/batch", body: body)
+        return resp.upserted
     }
 
     func checkConnection() async -> Bool {

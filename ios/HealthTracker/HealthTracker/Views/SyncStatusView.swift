@@ -135,57 +135,17 @@ struct SyncStatusView: View {
                         }
                     }
                 } else {
-                    // Persistent summary of the last completed sync
-                    if syncService.lastSyncLog.isEmpty && syncService.lastSyncDate == nil {
-                        Section("Ultima sync") {
-                            Text("Nessuna sync effettuata in questa sessione.")
+                    // Storico delle ultime 5 sync (la prima espansa di default).
+                    if syncService.recentSyncs.isEmpty {
+                        Section("Sync recenti") {
+                            Text("Nessuna sync effettuata.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     } else {
-                        Section("Ultima sync") {
-                            if syncService.lastSyncWasInterrupted {
-                                HStack {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.orange)
-                                    Text("Interrotta")
-                                        .foregroundStyle(.orange)
-                                }
-                            }
-                            if let started = syncService.lastSyncStartedAt {
-                                HStack {
-                                    Text("Iniziata")
-                                    Spacer()
-                                    Text(started, format: .dateTime.day().month().year().hour().minute())
-                                        .foregroundStyle(.secondary)
-                                        .monospacedDigit()
-                                }
-                            }
-                            if let duration = syncService.lastSyncDurationSeconds {
-                                HStack {
-                                    Text("Durata")
-                                    Spacer()
-                                    Text(formatDuration(duration))
-                                        .foregroundStyle(.secondary)
-                                        .monospacedDigit()
-                                }
-                            }
-                            HStack {
-                                Text("Campioni inviati")
-                                Spacer()
-                                Text(syncService.lastSyncTotalSamples.formatted())
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                            }
-                        }
-
-                        if !syncService.lastSyncLog.isEmpty {
-                            Section("Log ultima sync") {
-                                ForEach(syncService.lastSyncLog, id: \.self) { entry in
-                                    Text(entry)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                        Section("Ultime \(syncService.recentSyncs.count) sync") {
+                            ForEach(syncService.recentSyncs) { summary in
+                                SyncHistoryRow(summary: summary)
                             }
                         }
                     }
@@ -196,6 +156,73 @@ struct SyncStatusView: View {
                 checkingConnection = true
                 serverConnected = await APIClient().checkConnection()
                 checkingConnection = false
+            }
+        }
+    }
+}
+
+/// Riga espandibile di una singola sync nello storico recenti.
+private struct SyncHistoryRow: View {
+    let summary: LastSyncSummary
+    @State private var isExpanded: Bool = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Iniziata")
+                    Spacer()
+                    Text(summary.startedAt, format: .dateTime.day().month().year().hour().minute())
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                HStack {
+                    Text("Durata")
+                    Spacer()
+                    Text(formatDuration(summary.durationSeconds))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                HStack {
+                    Text("Campioni")
+                    Spacer()
+                    Text(summary.totalSamples.formatted())
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                if !summary.log.isEmpty {
+                    Divider().padding(.vertical, 4)
+                    ForEach(summary.log, id: \.self) { entry in
+                        Text(entry)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.top, 4)
+        } label: {
+            HStack {
+                if summary.wasInterrupted {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(summary.completedAt, style: .relative)
+                        .font(.subheadline)
+                    Text(summary.completedAt, format: .dateTime.day().month().hour().minute())
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(summary.totalSamples.formatted()) campioni")
+                        .font(.caption)
+                        .monospacedDigit()
+                    Text(formatDuration(summary.durationSeconds))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
             }
         }
     }

@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		273884A5DAE0C2EC5AA193D5 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 586C397DF309584058618D21 /* DashboardView.swift */; };
 		32AEC81BA1B30951B54E49A4 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC5DF57A8D3D04EEADD97F8 /* SettingsView.swift */; };
 		3A39797E4504AB5A6A822F83 /* HealthTrackerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5E1835B5C8F30F9D4BD65B4 /* HealthTrackerApp.swift */; };
 		4548E28E934C123E620D305C /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530A32699A717CF84543FA74 /* BackgroundTaskManager.swift */; };
@@ -27,7 +26,6 @@
 		46126F0450B493E6B724CFFD /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		4DC5DF57A8D3D04EEADD97F8 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		530A32699A717CF84543FA74 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
-		586C397DF309584058618D21 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		5BEC369264AB7988CB443F12 /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
 		6D98CF1A3E203B0805534D5C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		831ADC7ADC3C000F57AAFC09 /* SyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncState.swift; sourceTree = "<group>"; };
@@ -67,7 +65,6 @@
 			isa = PBXGroup;
 			children = (
 				253684C4C0B0773872A1613B /* ContentView.swift */,
-				586C397DF309584058618D21 /* DashboardView.swift */,
 				4DC5DF57A8D3D04EEADD97F8 /* SettingsView.swift */,
 				CF9EB56B6D00C2BACFBE883A /* SyncStatusView.swift */,
 			);
@@ -178,7 +175,6 @@
 				4548E28E934C123E620D305C /* BackgroundTaskManager.swift in Sources */,
 				4D96AC4424EEAA398ED6CB14 /* Constants.swift in Sources */,
 				691355C902F6DC39D831A355 /* ContentView.swift in Sources */,
-				273884A5DAE0C2EC5AA193D5 /* DashboardView.swift in Sources */,
 				C110D0EF6A9380D7CBFC9EB6 /* HealthKitManager.swift in Sources */,
 				3A39797E4504AB5A6A822F83 /* HealthTrackerApp.swift in Sources */,
 				32AEC81BA1B30951B54E49A4 /* SettingsView.swift in Sources */,

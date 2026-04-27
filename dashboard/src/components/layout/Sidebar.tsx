@@ -2,12 +2,14 @@ import { NavLink } from "react-router-dom"
 import {
   Activity as ActivityIcon,
   Apple,
+  CalendarDays,
   Compass,
   Dumbbell,
   FlaskConical,
   Heart,
   Home,
   Moon,
+  Pill,
   PlusCircle,
   Scale,
   Settings as SettingsIcon,
@@ -20,6 +22,7 @@ import { cn } from "@/lib/utils"
 
 const navItems = [
   { to: "/", label: "Home", icon: Home, end: true },
+  { to: "/day", label: "Calendario", icon: CalendarDays },
   { to: "/activity", label: "Attivita", icon: ActivityIcon },
   { to: "/vitals", label: "Vitali", icon: Heart },
   { to: "/body", label: "Corpo", icon: Scale },
@@ -32,6 +35,7 @@ const navItems = [
   { to: "/lab", label: "Laboratorio", icon: FlaskConical },
   { to: "/explore", label: "Esplora", icon: Compass },
   { to: "/insert", label: "Inserisci", icon: PlusCircle },
+  { to: "/regimens", label: "Regimi", icon: Pill },
   { to: "/settings", label: "Impostazioni", icon: SettingsIcon },
 ]
 

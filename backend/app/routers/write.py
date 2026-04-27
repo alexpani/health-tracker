@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import DiarioHkSync, PendingWrite
+from app.routers.diario import auto_reconcile_if_due
 from app.schemas import ConfirmIn, FailIn, PendingWriteOut, WriteIn
 
 router = APIRouter(prefix="/api/v1/write", tags=["write"])
@@ -62,6 +63,11 @@ async def list_pending(
     limit: int = Query(100, le=1000),
     db: AsyncSession = Depends(get_db),
 ):
+    # Auto-reconcile diario→HK before serving the queue, so iOS picks up
+    # diary changes without a manual button press. Throttled to at most
+    # once every 2 minutes; failures (diario down) are swallowed.
+    await auto_reconcile_if_due(db)
+
     stmt = (
         select(PendingWrite)
         .where(PendingWrite.status == "pending")

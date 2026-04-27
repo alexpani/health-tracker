@@ -1,8 +1,10 @@
 import Foundation
 import HealthKit
+import os
 
 actor HealthKitManager {
     let healthStore = HKHealthStore()
+    private static let logger = Logger(subsystem: "com.healthtracker", category: "healthkit")
 
     // All quantity types we want to read
     static let quantityTypes: [(HKQuantityTypeIdentifier, HKUnit)] = [
@@ -139,37 +141,57 @@ actor HealthKitManager {
     /// (requires background delivery). The callback should trigger a quick sync.
     func startObservingNewSamples(onChange: @escaping @Sendable () async -> Void) {
         let store = self.healthStore
+        let log = Self.logger
 
-        let runCallback = { (completion: @escaping HKObserverQueryCompletionHandler) in
+        let runCallback = { (typeName: String, completion: @escaping HKObserverQueryCompletionHandler) in
+            log.info("HKObserverQuery fired: \(typeName)")
             Task {
                 await onChange()
                 completion()
             }
         }
 
+        let bgCompletion: (String) -> (Bool, Error?) -> Void = { name in
+            return { success, error in
+                if success {
+                    log.info("BG delivery enabled: \(name)")
+                } else {
+                    log.error("BG delivery FAILED for \(name): \(error?.localizedDescription ?? "unknown")")
+                }
+            }
+        }
+
+        var registered = 0
         for (identifier, _) in Self.quantityTypes {
             guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else { continue }
+            let name = identifier.rawValue
             let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, _ in
-                runCallback(completion)
+                runCallback(name, completion)
             }
             store.execute(query)
-            store.enableBackgroundDelivery(for: type, frequency: .hourly) { _, _ in }
+            registered += 1
+            store.enableBackgroundDelivery(for: type, frequency: .hourly, withCompletion: bgCompletion(name))
         }
 
         for identifier in Self.categoryTypes {
             guard let type = HKCategoryType.categoryType(forIdentifier: identifier) else { continue }
+            let name = identifier.rawValue
             let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, _ in
-                runCallback(completion)
+                runCallback(name, completion)
             }
             store.execute(query)
-            store.enableBackgroundDelivery(for: type, frequency: .hourly) { _, _ in }
+            registered += 1
+            store.enableBackgroundDelivery(for: type, frequency: .hourly, withCompletion: bgCompletion(name))
         }
 
         let workoutQuery = HKObserverQuery(sampleType: .workoutType(), predicate: nil) { _, completion, _ in
-            runCallback(completion)
+            runCallback("HKWorkoutType", completion)
         }
         store.execute(workoutQuery)
-        store.enableBackgroundDelivery(for: .workoutType(), frequency: .hourly) { _, _ in }
+        registered += 1
+        store.enableBackgroundDelivery(for: .workoutType(), frequency: .hourly, withCompletion: bgCompletion("HKWorkoutType"))
+
+        log.info("HKObserverQuery setup: \(registered) types registered (BG delivery requested)")
     }
 
     func requestAuthorization() async throws {
@@ -659,6 +681,51 @@ actor HealthKitManager {
 
         let deletedUUIDs = deleted.map { $0.uuid }
         return (payloads, deletedUUIDs, newAnchor)
+    }
+
+    /// Esegue una `HKStatisticsCollectionQuery` con bucket giornalieri (anchor =
+    /// inizio del giorno locale di `from`) e ritorna i totali pre-calcolati per
+    /// ciascun giorno. E' la stessa API che alimenta i widget di Apple Salute:
+    /// HealthKit applica internamente il dedup proprietario tra Watch e iPhone,
+    /// quindi i numeri tornati combaciano con quelli mostrati in Salute.
+    /// Usa `.cumulativeSum` (i 9 tipi attivita' sono tutti cumulative).
+    func fetchDailyStatistics(
+        type: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        from: Date,
+        to: Date
+    ) async throws -> [DailyStatPoint] {
+        guard let qt = HKQuantityType.quantityType(forIdentifier: type) else { return [] }
+        let calendar = Calendar.current
+        let anchor = calendar.startOfDay(for: from)
+        let interval = DateComponents(day: 1)
+
+        // NOTE: nessun predicate temporale. `HKStatisticsCollectionQuery` con
+        // `intervalComponents = 1 day` + `anchor = startOfDay(from)` gestisce
+        // gia' il bucketing. Aggiungere `.strictStartDate` taglia sample che
+        // attraversano la mezzanotte e produce numeri diversi da Apple Salute.
+        // L'enumeration `from...to` sotto limita i risultati alla finestra.
+        let stats: [HKStatistics] = try await withCheckedThrowingContinuation { cont in
+            let q = HKStatisticsCollectionQuery(
+                quantityType: qt,
+                quantitySamplePredicate: nil,
+                options: [.cumulativeSum],
+                anchorDate: anchor,
+                intervalComponents: interval
+            )
+            q.initialResultsHandler = { _, results, error in
+                if let error { cont.resume(throwing: error); return }
+                var out: [HKStatistics] = []
+                results?.enumerateStatistics(from: from, to: to) { s, _ in out.append(s) }
+                cont.resume(returning: out)
+            }
+            healthStore.execute(q)
+        }
+
+        return stats.compactMap { s in
+            guard let q = s.sumQuantity() else { return nil }
+            return DailyStatPoint(date: s.startDate, value: q.doubleValue(for: unit))
+        }
     }
 
     func fetchWorkouts(since: Date?, until: Date? = nil) async throws -> [WorkoutPayload] {

@@ -75,41 +75,28 @@ async def daily_totals(
     return r.json()
 
 
-@router.post("/sync-to-hk")
-async def sync_to_hk(
-    from_: str | None = Query(None, alias="from", description="YYYY-MM-DD, default 2010-01-01 (all history)"),
-    to: str | None = Query(None, description="YYYY-MM-DD, default today"),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Reconcile the diario-alimentare daily totals against what we've already
-    written to Apple Health (tracked in `diario_hk_sync`). For every diff
-    between the current diary value and the tracked value, enqueue a
-    PendingDeletion (for the old hk_uuid, if any) and a PendingWrite (for
-    the new value). The iOS Health Tracker app will process these via its
-    existing pending-write/pending-delete loop at the next sync.
-
-    This endpoint is idempotent: re-running it when nothing has changed
-    produces no new queue entries.
-    """
-    # Date range
+async def reconcile_diario_to_hk(
+    db: AsyncSession,
+    *,
+    from_: str | None = None,
+    to: str | None = None,
+) -> dict:
+    """Compare diario-alimentare daily totals against the `diario_hk_sync`
+    tracking and enqueue PendingDeletion/PendingWrite for every drift.
+    Idempotent: returns {queued_writes:0, queued_deletions:0, unchanged:N}
+    when nothing has changed. Used both by the explicit POST endpoint and
+    automatically by GET /api/v1/write/pending so the iOS app picks up
+    diario changes without any manual button press."""
     end_date = to or datetime.now(timezone.utc).date().isoformat()
     start_date = from_ or "2010-01-01"
 
-    # 1. Fetch diario daily totals
     url = f"{DIARIO_BASE_URL}/api/external/daily-totals"
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            r = await client.get(url, params={"from": start_date, "to": end_date})
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"diario-alimentare unreachable: {e}")
-    if r.status_code >= 400:
-        raise HTTPException(502, f"diario-alimentare error {r.status_code}")
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        r = await client.get(url, params={"from": start_date, "to": end_date})
+    r.raise_for_status()
     diary_rows: list[dict] = r.json()
 
-    # 2. Load existing tracking rows into a dict for quick lookup
-    tracked_stmt = select(DiarioHkSync)
-    tracked_rows = (await db.execute(tracked_stmt)).scalars().all()
+    tracked_rows = (await db.execute(select(DiarioHkSync))).scalars().all()
     tracked: dict[tuple[date_cls, str], DiarioHkSync] = {
         (row.date, row.type): row for row in tracked_rows
     }
@@ -121,33 +108,29 @@ async def sync_to_hk(
     for entry in diary_rows:
         day_str = entry["date"]
         day = date_cls.fromisoformat(day_str)
-        # Build aware datetimes for the whole day (used for HK sample start/end).
         start_dt = datetime.combine(day, time(0, 0, 0), tzinfo=timezone.utc)
         end_dt = datetime.combine(day, time(23, 59, 59), tzinfo=timezone.utc)
 
         for diary_field, hk_type, unit in _DIETARY_SYNC_MAP:
             value = float(entry.get(diary_field) or 0.0)
             if value <= 0:
-                continue  # don't create zero-value samples
+                continue
 
             track = tracked.get((day, hk_type))
 
-            # Unchanged within tolerance? skip.
             if track is not None and abs(track.value - value) < _VALUE_TOLERANCE:
                 unchanged += 1
                 continue
 
-            # Need to (re)write. Queue delete of the previous one if present.
             if track is not None and track.hk_uuid is not None:
                 db.add(PendingDeletion(
                     hk_uuid=track.hk_uuid,
                     type=hk_type,
-                    source_sample_id=None,  # HK-only, no backend health_samples row
+                    source_sample_id=None,
                     status="pending",
                 ))
                 queued_deletes += 1
 
-            # Queue the new write.
             pw = PendingWrite(
                 type=hk_type,
                 value=value,
@@ -159,18 +142,13 @@ async def sync_to_hk(
                 status="pending",
             )
             db.add(pw)
-            # Need pw.id before committing → flush
             await db.flush()
             queued_writes += 1
 
-            # Upsert the tracking row: clear hk_uuid, link the new pending_write
             if track is None:
                 track = DiarioHkSync(
-                    date=day,
-                    type=hk_type,
-                    value=value,
-                    hk_uuid=None,
-                    pending_write_id=pw.id,
+                    date=day, type=hk_type, value=value,
+                    hk_uuid=None, pending_write_id=pw.id,
                 )
                 db.add(track)
             else:
@@ -186,3 +164,43 @@ async def sync_to_hk(
         "unchanged": unchanged,
         "days_considered": len(diary_rows),
     }
+
+
+# In-memory throttle for auto-reconcile triggered by /write/pending.
+# Keyed on a single shared timestamp; no per-tenant key (single-user app).
+_LAST_AUTO_RECONCILE_AT: datetime | None = None
+_AUTO_RECONCILE_THROTTLE_SECONDS = 120  # at most once every 2 minutes
+
+
+async def auto_reconcile_if_due(db: AsyncSession) -> dict | None:
+    """Called by GET /write/pending. Reconciles if it hasn't happened
+    in the last _AUTO_RECONCILE_THROTTLE_SECONDS, otherwise no-op.
+    Swallows network errors so a temporarily-down diario doesn't break
+    the iOS sync loop."""
+    global _LAST_AUTO_RECONCILE_AT
+    now = datetime.now(timezone.utc)
+    if _LAST_AUTO_RECONCILE_AT is not None and (now - _LAST_AUTO_RECONCILE_AT).total_seconds() < _AUTO_RECONCILE_THROTTLE_SECONDS:
+        return None
+    try:
+        result = await reconcile_diario_to_hk(db)
+        _LAST_AUTO_RECONCILE_AT = now
+        return result
+    except Exception:
+        # Diario unreachable, schema drift, etc. — don't block the iOS poll.
+        # Keep the timestamp untouched so we'll retry next call.
+        return None
+
+
+@router.post("/sync-to-hk")
+async def sync_to_hk(
+    from_: str | None = Query(None, alias="from", description="YYYY-MM-DD, default 2010-01-01 (all history)"),
+    to: str | None = Query(None, description="YYYY-MM-DD, default today"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manual trigger of the same reconciliation that `auto_reconcile_if_due`
+    runs automatically before each /write/pending poll. Useful for forcing
+    an immediate refresh from the dashboard."""
+    try:
+        return await reconcile_diario_to_hk(db, from_=from_, to=to)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"diario-alimentare unreachable: {e}")

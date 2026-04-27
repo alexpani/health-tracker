@@ -19,6 +19,14 @@ from app.schemas import (
 
 router = APIRouter(prefix="/api/v1", tags=["query"])
 
+# NOTE: Per i 9 tipi cumulative attivita' (Steps, Distance*, Calories*,
+# Flights, Apple{Exercise,Stand,Move}Time) il dato Apple-compatibile
+# arriva via la tabella `daily_stats` alimentata da
+# HKStatisticsCollectionQuery lato iOS. Vedi `daily_stats.py`. La
+# query `/samples?aggregation=daily` continua a tornare la SUM dei
+# raw sample (utile per "Esplora" / debugging) ma il chart Activity
+# nel dashboard legge direttamente da `/api/v1/daily-stats`.
+
 
 @router.get("/samples")
 async def query_samples(
@@ -99,6 +107,7 @@ async def query_samples(
             select(
                 period,
                 func.avg(HealthSample.value).label("avg"),
+                func.sum(HealthSample.value).label("sum"),
                 func.min(HealthSample.value).label("min"),
                 func.max(HealthSample.value).label("max"),
                 func.count().label("count"),
@@ -113,7 +122,6 @@ async def query_samples(
             stmt = stmt.where(HealthSample.start_date <= end)
         stmt = apply_filters(stmt)
         stmt = stmt.offset(offset).limit(limit)
-
         result = await db.execute(stmt)
         rows = result.all()
 
@@ -133,6 +141,7 @@ async def query_samples(
                 AggregatedPoint(
                     period_start=r.period_start,
                     avg=round(r.avg, 2),
+                    sum=round(float(r.sum), 2) if r.sum is not None else None,
                     min=round(r.min, 2),
                     max=round(r.max, 2),
                     count=r.count,

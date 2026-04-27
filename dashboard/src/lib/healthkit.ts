@@ -8,6 +8,10 @@ export interface TypeMeta {
   unitMultiplier: number
   color: string
   formatValue?: (v: number) => string
+  /** How to roll up multiple samples in an aggregation bucket.
+   * "sum" for cumulative quantities (steps, distance, calories, dietary).
+   * "avg" (default) for measurements (HR, weight, BMI, ...). */
+  aggregateBy?: "sum" | "avg"
 }
 
 // HK identifier -> metadata for display
@@ -223,16 +227,21 @@ export const TYPE_META: Record<string, TypeMeta> = {
 }
 
 export function getMeta(type: string): TypeMeta {
-  return (
-    TYPE_META[type] ?? {
-      label: type.replace("HKQuantityTypeIdentifier", "").replace("HKCategoryTypeIdentifier", ""),
-      category: "other",
-      displayUnit: "",
-      sourceUnit: "",
-      unitMultiplier: 1,
-      color: "#6b7280",
-    }
-  )
+  const m = TYPE_META[type] ?? {
+    label: type.replace("HKQuantityTypeIdentifier", "").replace("HKCategoryTypeIdentifier", ""),
+    category: "other" as Category,
+    displayUnit: "",
+    sourceUnit: "",
+    unitMultiplier: 1,
+    color: "#6b7280",
+  }
+  // Default aggregation: cumulative quantities (activity + nutrition) sum,
+  // everything else (vitals, body, fitness measurements) averages.
+  if (m.aggregateBy === undefined) {
+    const cumulative = m.category === "activity" || m.category === "nutrition"
+    return { ...m, aggregateBy: cumulative ? "sum" : "avg" }
+  }
+  return m
 }
 
 export const CATEGORIES: Record<Category, { label: string; types: string[] }> = {
