@@ -194,36 +194,73 @@ final class SyncService {
             await syncDailyStats()
         }
 
-        // PASS 0: body-metric types via anchored queries (catches retroactive
-        // writes from Withings etc. that the windowed path would miss).
-        for (typeId, unit) in Self.anchoredQuantityTypes {
-            if shouldStop { break }
-            currentType = typeId.rawValue.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")
+        // PASS 0: body-metric + Watch cumulative types via anchored queries.
+        // Parallelizziamo: HKAnchoredObjectQuery per tipo e' indipendente,
+        // HKHealthStore e' thread-safe. Con 16 tipi che spesso non hanno
+        // nuovi sample, in serie ci stavano tipo 5-10s per gli overhead di
+        // HK; in parallelo ~1s.
+        if !shouldStop {
+            currentType = "Anchored quantity types"
             typeProgress = 0
             currentWindowDate = nil
-            await syncQuantityTypeAnchored(typeId: typeId, unit: unit)
-            completedTypes += 1
+            await withTaskGroup(of: Void.self) { group in
+                for (typeId, unit) in Self.anchoredQuantityTypes {
+                    if shouldStop { break }
+                    group.addTask { [self] in
+                        await syncQuantityTypeAnchored(typeId: typeId, unit: unit)
+                    }
+                }
+            }
+            completedTypes += Self.anchoredQuantityTypes.count
             progress = Double(completedTypes) / Double(totalTypes)
         }
 
-        // PASS 1: light/normal types (windowed)
-        for (typeId, unit) in quantityNormal {
-            if shouldStop { break }
-            currentType = typeId.rawValue.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")
+        // PASS 1: tipi normali (windowed). Parallelizziamo a gruppi limitati
+        // (max 4 in volo) per evitare di saturare HK / il backend con troppe
+        // POST concorrenti.
+        if !shouldStop {
+            currentType = "Quantity types"
             typeProgress = 0
-            currentWindowDate = nil
-            await syncQuantityType(typeId: typeId, unit: unit)
-            completedTypes += 1
+            await withTaskGroup(of: Void.self) { group in
+                var inflight = 0
+                let maxInflight = 4
+                for (typeId, unit) in quantityNormal {
+                    if shouldStop { break }
+                    if inflight >= maxInflight {
+                        await group.next()
+                        inflight -= 1
+                    }
+                    group.addTask { [self] in
+                        await syncQuantityType(typeId: typeId, unit: unit)
+                    }
+                    inflight += 1
+                }
+                while await group.next() != nil {}
+            }
+            completedTypes += quantityNormal.count
             progress = Double(completedTypes) / Double(totalTypes)
         }
 
-        for typeId in categoryNormal {
-            if shouldStop { break }
-            currentType = typeId.rawValue.replacingOccurrences(of: "HKCategoryTypeIdentifier", with: "")
+        if !shouldStop {
+            currentType = "Category types"
             typeProgress = 0
-            currentWindowDate = nil
-            await syncCategoryType(typeId: typeId)
-            completedTypes += 1
+            await withTaskGroup(of: Void.self) { group in
+                var inflight = 0
+                let maxInflight = 4
+                for typeId in categoryNormal {
+                    if shouldStop { break }
+                    if inflight >= maxInflight {
+                        await group.next()
+                        inflight -= 1
+                    }
+                    group.addTask { [self] in
+                        await syncCategoryType(typeId: typeId)
+                    }
+                    inflight += 1
+                }
+                while await group.next() != nil {}
+            }
+            completedTypes += categoryNormal.count
             progress = Double(completedTypes) / Double(totalTypes)
         }
 
@@ -546,48 +583,57 @@ final class SyncService {
 
         let now = Date()
 
-        for (typeId, unit) in Self.dailyStatsTypes {
-            if shouldStop { return }
-            currentType = "Daily " + typeId.rawValue.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")
+        // I 9 tipi sono indipendenti: 9 HKStatisticsCollectionQuery + 9
+        // POST in parallelo. Cosi' restiamo nei ~500ms anche con 3 giorni
+        // di rewind per ciascuno (in serie erano ~3-5s).
+        let endOfToday = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: now)) ?? now
 
-            let anchorKey = "lastDailyStatsAt_\(typeId.rawValue)"
-            let lastAt = UserDefaults.standard.object(forKey: anchorKey) as? Date
+        await withTaskGroup(of: (String, Int).self) { group in
+            for (typeId, unit) in Self.dailyStatsTypes {
+                if shouldStop { break }
+                let anchorKey = "lastDailyStatsAt_\(typeId.rawValue)"
+                let lastAt = UserDefaults.standard.object(forKey: anchorKey) as? Date
+                let from: Date = {
+                    if let lastAt {
+                        return Calendar.current.date(byAdding: .day, value: -3, to: lastAt) ?? lastAt
+                    }
+                    return firstSyncFloor
+                }()
+                let typeName = typeId.rawValue.replacingOccurrences(of: "HKQuantityTypeIdentifier", with: "")
 
-            // Re-pull last 3 days every time: the Watch can backfill samples
-            // hours/days late, so HK's daily totals can change retroactively.
-            let from: Date = {
-                if let lastAt {
-                    return Calendar.current.date(byAdding: .day, value: -3, to: lastAt) ?? lastAt
+                group.addTask { [self, dayFmt] in
+                    do {
+                        let points = try await healthKitManager.fetchDailyStatistics(
+                            type: typeId, unit: unit, from: from, to: endOfToday
+                        )
+                        let nonZero = points.filter { $0.value > 0 }
+                        var upserted = 0
+                        if !nonZero.isEmpty {
+                            let payload = nonZero.map { (date: dayFmt.string(from: $0.date), value: $0.value) }
+                            upserted = try await apiClient.postDailyStats(type: typeId.rawValue, points: payload)
+                        }
+                        UserDefaults.standard.set(now, forKey: anchorKey)
+                        return (typeName, upserted)
+                    } catch {
+                        return (typeName, -1)
+                    }
                 }
-                return firstSyncFloor
-            }()
-            // End-of-today (exclusive upper bound)
-            let to = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: now)) ?? now
-
-            do {
-                let points = try await healthKitManager.fetchDailyStatistics(
-                    type: typeId, unit: unit, from: from, to: to
-                )
-                // Skip empty days — HKStatisticsCollectionQuery returns 0 for
-                // days where the Watch wasn't worn, polluting the chart.
-                let nonZero = points.filter { $0.value > 0 }
-                if !nonZero.isEmpty {
-                    let payload = nonZero.map { (date: dayFmt.string(from: $0.date), value: $0.value) }
-                    let upserted = try await apiClient.postDailyStats(type: typeId.rawValue, points: payload)
-                    grandTotal += upserted
-                    let msg = "\(currentType): \(upserted) days"
-                    syncLog.append(msg)
-                    logger.info("\(msg)")
-                }
-                UserDefaults.standard.set(now, forKey: anchorKey)
-            } catch {
-                let msg = "\(currentType): failed - \(error.localizedDescription)"
-                syncLog.append(msg)
-                logger.error("\(msg)")
             }
 
-            done += 1
-            typeProgress = Double(done) / totalTypes
+            for await (typeName, upserted) in group {
+                done += 1
+                typeProgress = Double(done) / totalTypes
+                if upserted > 0 {
+                    grandTotal += upserted
+                    let msg = "Daily \(typeName): \(upserted) days"
+                    syncLog.append(msg)
+                    logger.info("\(msg)")
+                } else if upserted < 0 {
+                    let msg = "Daily \(typeName): failed"
+                    syncLog.append(msg)
+                    logger.error("\(msg)")
+                }
+            }
         }
 
         if grandTotal > 0 {

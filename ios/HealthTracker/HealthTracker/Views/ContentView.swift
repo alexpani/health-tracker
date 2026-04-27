@@ -8,11 +8,6 @@ struct ContentView: View {
                     Label("Sync", systemImage: "arrow.triangle.2.circlepath")
                 }
 
-            DashboardView()
-                .tabItem {
-                    Label("Dashboard", systemImage: "heart.text.square")
-                }
-
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")

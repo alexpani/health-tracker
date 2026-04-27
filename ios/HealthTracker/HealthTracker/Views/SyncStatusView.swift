@@ -144,8 +144,8 @@ struct SyncStatusView: View {
                         }
                     } else {
                         Section("Ultime \(syncService.recentSyncs.count) sync") {
-                            ForEach(Array(syncService.recentSyncs.enumerated()), id: \.element.id) { idx, summary in
-                                SyncHistoryRow(summary: summary, expandedByDefault: idx == 0)
+                            ForEach(syncService.recentSyncs) { summary in
+                                SyncHistoryRow(summary: summary)
                             }
                         }
                     }
@@ -164,7 +164,6 @@ struct SyncStatusView: View {
 /// Riga espandibile di una singola sync nello storico recenti.
 private struct SyncHistoryRow: View {
     let summary: LastSyncSummary
-    let expandedByDefault: Bool
     @State private var isExpanded: Bool = false
 
     var body: some View {
@@ -225,9 +224,6 @@ private struct SyncHistoryRow: View {
                         .monospacedDigit()
                 }
             }
-        }
-        .onAppear {
-            if expandedByDefault && !isExpanded { isExpanded = true }
         }
     }
 }
