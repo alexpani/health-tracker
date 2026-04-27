@@ -1,8 +1,10 @@
 import Foundation
 import HealthKit
+import os
 
 actor HealthKitManager {
     let healthStore = HKHealthStore()
+    private static let logger = Logger(subsystem: "com.healthtracker", category: "healthkit")
 
     // All quantity types we want to read
     static let quantityTypes: [(HKQuantityTypeIdentifier, HKUnit)] = [
@@ -139,37 +141,57 @@ actor HealthKitManager {
     /// (requires background delivery). The callback should trigger a quick sync.
     func startObservingNewSamples(onChange: @escaping @Sendable () async -> Void) {
         let store = self.healthStore
+        let log = Self.logger
 
-        let runCallback = { (completion: @escaping HKObserverQueryCompletionHandler) in
+        let runCallback = { (typeName: String, completion: @escaping HKObserverQueryCompletionHandler) in
+            log.info("HKObserverQuery fired: \(typeName)")
             Task {
                 await onChange()
                 completion()
             }
         }
 
+        let bgCompletion: (String) -> (Bool, Error?) -> Void = { name in
+            return { success, error in
+                if success {
+                    log.info("BG delivery enabled: \(name)")
+                } else {
+                    log.error("BG delivery FAILED for \(name): \(error?.localizedDescription ?? "unknown")")
+                }
+            }
+        }
+
+        var registered = 0
         for (identifier, _) in Self.quantityTypes {
             guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else { continue }
+            let name = identifier.rawValue
             let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, _ in
-                runCallback(completion)
+                runCallback(name, completion)
             }
             store.execute(query)
-            store.enableBackgroundDelivery(for: type, frequency: .hourly) { _, _ in }
+            registered += 1
+            store.enableBackgroundDelivery(for: type, frequency: .hourly, withCompletion: bgCompletion(name))
         }
 
         for identifier in Self.categoryTypes {
             guard let type = HKCategoryType.categoryType(forIdentifier: identifier) else { continue }
+            let name = identifier.rawValue
             let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completion, _ in
-                runCallback(completion)
+                runCallback(name, completion)
             }
             store.execute(query)
-            store.enableBackgroundDelivery(for: type, frequency: .hourly) { _, _ in }
+            registered += 1
+            store.enableBackgroundDelivery(for: type, frequency: .hourly, withCompletion: bgCompletion(name))
         }
 
         let workoutQuery = HKObserverQuery(sampleType: .workoutType(), predicate: nil) { _, completion, _ in
-            runCallback(completion)
+            runCallback("HKWorkoutType", completion)
         }
         store.execute(workoutQuery)
-        store.enableBackgroundDelivery(for: .workoutType(), frequency: .hourly) { _, _ in }
+        registered += 1
+        store.enableBackgroundDelivery(for: .workoutType(), frequency: .hourly, withCompletion: bgCompletion("HKWorkoutType"))
+
+        log.info("HKObserverQuery setup: \(registered) types registered (BG delivery requested)")
     }
 
     func requestAuthorization() async throws {

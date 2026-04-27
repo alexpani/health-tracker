@@ -3,7 +3,7 @@ import SwiftData
 
 @main
 struct HealthTrackerApp: App {
-    @State private var syncService = SyncService()
+    private let syncService = SyncService()
     @Environment(\.scenePhase) private var scenePhase
     private let healthKitManager = HealthKitManager()
 
@@ -16,8 +16,29 @@ struct HealthTrackerApp: App {
             fatalError("Failed to create ModelContainer: \(error)")
         }
 
-        // Register background task
+        // Register the BGAppRefreshTask handler. MUST happen synchronously in
+        // App.init (before app finished launching) per iOS rules.
         BackgroundTaskManager.shared.register(syncService: syncService)
+
+        // CRITICAL: HKObserverQuery + HK background delivery only work if the
+        // observers are registered on every launch — including BACKGROUND
+        // launches that iOS performs to deliver new HealthKit samples. The
+        // SwiftUI `.task { }` modifier on a View only fires when the View
+        // actually appears (i.e. foreground launch), so registering observers
+        // there silently kills the realtime channel when the app is closed.
+        // Register them here at App init so every process start (fg or bg)
+        // wires them up.
+        let hkm = healthKitManager
+        let svc = syncService
+        let mc = modelContainer
+        Task.detached(priority: .userInitiated) {
+            try? await hkm.requestAuthorization()
+            await MainActor.run { svc.setModelContainer(mc) }
+            BackgroundTaskManager.shared.scheduleNextSync()
+            await hkm.startObservingNewSamples { [svc] in
+                await svc.performQuickSync()
+            }
+        }
     }
 
     var body: some Scene {
@@ -25,19 +46,8 @@ struct HealthTrackerApp: App {
             ContentView()
                 .environment(syncService)
                 .task {
-                    // Request HealthKit authorization on first launch
-                    try? await healthKitManager.requestAuthorization()
-                    syncService.setModelContainer(modelContainer)
-
-                    // Schedule background sync
-                    BackgroundTaskManager.shared.scheduleNextSync()
-
-                    // Start real-time HealthKit observers
-                    await healthKitManager.startObservingNewSamples { [syncService] in
-                        await syncService.performQuickSync()
-                    }
-
-                    // Initial auto-sync on launch (throttled)
+                    // Foreground launch: kick off an immediate auto-sync once
+                    // the UI is ready (throttled to 10 min).
                     autoSyncIfNeeded()
                 }
         }
