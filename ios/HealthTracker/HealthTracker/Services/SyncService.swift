@@ -3,14 +3,16 @@ import HealthKit
 import SwiftData
 import os
 
-/// Persisted summary of the last completed sync
-struct LastSyncSummary: Codable {
+/// Persisted summary of a single completed sync
+struct LastSyncSummary: Codable, Identifiable, Hashable {
     var startedAt: Date
     var completedAt: Date
     var durationSeconds: Double
     var totalSamples: Int
     var log: [String]
     var wasInterrupted: Bool
+
+    var id: Date { startedAt }
 }
 
 @Observable
@@ -22,6 +24,10 @@ final class SyncService {
     var lastSyncTotalSamples: Int = 0
     var lastSyncLog: [String] = []        // preserved summary of the last completed sync
     var lastSyncWasInterrupted: Bool = false
+    /// Storico delle ultime N sync completate (capped a `maxRecentSyncs`,
+    /// piu' recente prima). Persistito su UserDefaults insieme alla last
+    /// sync. Mostrato in `SyncStatusView`.
+    var recentSyncs: [LastSyncSummary] = []
     var currentType: String = ""
     var progress: Double = 0
     var typeProgress: Double = 0          // progress within current type (0..1)
@@ -44,6 +50,8 @@ final class SyncService {
     private let deferredTypes: Set<String> = []
 
     private let lastSyncKey = "last_sync_summary_v1"
+    private let recentSyncsKey = "recent_syncs_v1"
+    private let maxRecentSyncs = 5
 
     init() {
         loadLastSyncSummary()
@@ -54,8 +62,22 @@ final class SyncService {
     }
 
     private func loadLastSyncSummary() {
-        guard let data = UserDefaults.standard.data(forKey: lastSyncKey) else { return }
-        guard let summary = try? JSONDecoder().decode(LastSyncSummary.self, from: data) else { return }
+        // Storico recenti (piu' nuovo prima)
+        if let data = UserDefaults.standard.data(forKey: recentSyncsKey),
+           let arr = try? JSONDecoder().decode([LastSyncSummary].self, from: data) {
+            recentSyncs = arr
+        }
+        // Last sync (back-compat con il vecchio singleton)
+        if let last = recentSyncs.first {
+            applyToLatest(last)
+        } else if let data = UserDefaults.standard.data(forKey: lastSyncKey),
+                  let summary = try? JSONDecoder().decode(LastSyncSummary.self, from: data) {
+            recentSyncs = [summary]
+            applyToLatest(summary)
+        }
+    }
+
+    private func applyToLatest(_ summary: LastSyncSummary) {
         lastSyncStartedAt = summary.startedAt
         lastSyncDate = summary.completedAt
         lastSyncDurationSeconds = summary.durationSeconds
@@ -73,6 +95,16 @@ final class SyncService {
             log: syncLog,
             wasInterrupted: interrupted
         )
+        // Prepend, cap at maxRecentSyncs
+        recentSyncs.insert(summary, at: 0)
+        if recentSyncs.count > maxRecentSyncs {
+            recentSyncs.removeLast(recentSyncs.count - maxRecentSyncs)
+        }
+        if let data = try? JSONEncoder().encode(recentSyncs) {
+            UserDefaults.standard.set(data, forKey: recentSyncsKey)
+        }
+        // Mantieni anche la chiave singleton per back-compat con eventuali
+        // letture vecchie (puo' essere rimossa in futuro).
         if let data = try? JSONEncoder().encode(summary) {
             UserDefaults.standard.set(data, forKey: lastSyncKey)
         }
