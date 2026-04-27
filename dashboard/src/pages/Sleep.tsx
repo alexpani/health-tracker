@@ -7,6 +7,54 @@ import { SLEEP_STAGES } from "@/lib/healthkit"
 import { formatDate } from "@/lib/utils"
 import type { TimeRange } from "@/lib/types"
 
+/** Tooltip custom: mostra le singole fasi + totale "Dormito" (Core+Deep+REM,
+ *  esclude Sveglio) e "A letto" (somma di tutte le fasi visibili). */
+function SleepTooltip({ active, payload, label }: any) {
+  if (!active || !payload || payload.length === 0) return null
+  const asleepLabels = [SLEEP_STAGES[3].label, SLEEP_STAGES[4].label, SLEEP_STAGES[5].label]
+  let asleep = 0
+  let inBed = 0
+  for (const p of payload) {
+    const v = Number(p.value) || 0
+    inBed += v
+    if (asleepLabels.includes(p.name)) asleep += v
+  }
+  const fmt = (m: number) => {
+    const h = Math.floor(m / 60)
+    const mm = Math.round(m % 60)
+    return h > 0 ? `${h}h ${mm.toString().padStart(2, "0")}m` : `${mm} min`
+  }
+  return (
+    <div
+      className="rounded-md border bg-card text-card-foreground shadow-md p-3 text-sm"
+      style={{ minWidth: 200 }}
+    >
+      <div className="font-medium mb-2">{label ? formatDate(String(label)) : ""}</div>
+      <div className="space-y-1">
+        {payload.map((p: any) => (
+          <div key={p.name} className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: p.color }} />
+              {p.name}
+            </span>
+            <span className="tabular-nums">{Math.round(Number(p.value) || 0)} min</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 pt-2 border-t space-y-1">
+        <div className="flex items-center justify-between font-medium">
+          <span>Dormito</span>
+          <span className="tabular-nums">{fmt(asleep)}</span>
+        </div>
+        <div className="flex items-center justify-between text-muted-foreground">
+          <span>A letto</span>
+          <span className="tabular-nums">{fmt(inBed)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Sleep() {
   const [range, setRange] = useState<TimeRange>("30d")
   const dates = useMemo(() => timeRangeToDates(range), [range])
@@ -109,9 +157,8 @@ export default function Sleep() {
                 />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip
-                  labelFormatter={v => formatDate(v as string)}
-                  formatter={(v: number) => `${Math.round(v)} min`}
-                  contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                  content={<SleepTooltip />}
+                  cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }}
                 />
                 <Legend />
                 {visibleStages.map(stage => (
