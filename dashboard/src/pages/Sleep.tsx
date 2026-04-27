@@ -34,12 +34,17 @@ export default function Sleep() {
     })
     .sort((a, b) => (a.day < b.day ? -1 : 1))
 
-  // Mostra solo le fasi che hanno almeno un valore > 0 nel periodo: il
-  // Watch moderno scrive solo Awake/Core/Deep/REM, mentre "A letto" e
-  // "Addormentato (non specificato)" sono legacy e restano sempre a 0
-  // — toglierli dalla legenda e dal tooltip ripulisce la vista.
+  // Stage 0 ("A letto") e 1 ("Addormentato non specificato") sono
+  // wrapper che coprono l'intera notte: Apple Salute li sovrascrive coi
+  // sample dettagliati Core/Deep/REM/Sveglio. Sommarli nel chart e' un
+  // double-count, quindi vengono sempre nascosti. Le fasi 2-5 sono
+  // mostrate solo se hanno almeno un valore > 0 nel periodo.
   const visibleStages = Object.entries(SLEEP_STAGES)
-    .filter(([, v]) => chartData.some(d => (d[v.label] || 0) > 0))
+    .filter(([k, v]) => {
+      const stageId = Number(k)
+      if (stageId === 0 || stageId === 1) return false
+      return chartData.some(d => (d[v.label] || 0) > 0)
+    })
     .map(([, v]) => v)
 
   const totalHoursAvg =
