@@ -34,6 +34,14 @@ export default function Sleep() {
     })
     .sort((a, b) => (a.day < b.day ? -1 : 1))
 
+  // Mostra solo le fasi che hanno almeno un valore > 0 nel periodo: il
+  // Watch moderno scrive solo Awake/Core/Deep/REM, mentre "A letto" e
+  // "Addormentato (non specificato)" sono legacy e restano sempre a 0
+  // — toglierli dalla legenda e dal tooltip ripulisce la vista.
+  const visibleStages = Object.entries(SLEEP_STAGES)
+    .filter(([, v]) => chartData.some(d => (d[v.label] || 0) > 0))
+    .map(([, v]) => v)
+
   const totalHoursAvg =
     chartData.length === 0
       ? 0
@@ -101,7 +109,7 @@ export default function Sleep() {
                   contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
                 />
                 <Legend />
-                {Object.values(SLEEP_STAGES).map(stage => (
+                {visibleStages.map(stage => (
                   <Bar key={stage.label} dataKey={stage.label} stackId="sleep" fill={stage.color} />
                 ))}
               </BarChart>
