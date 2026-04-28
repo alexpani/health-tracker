@@ -405,10 +405,15 @@ async def get_document_file(
     full_path: Path = settings.lab_documents_dir / doc.relative_path
     if not full_path.exists():
         raise HTTPException(410, "file non disponibile su disco")
+    # Inline disposition: il browser apre il PDF nella scheda invece di
+    # forzarne il download. Manteniamo comunque il filename suggerito per
+    # l'eventuale "Salva con nome" dell'utente.
     return FileResponse(
         path=str(full_path),
         media_type=doc.mime_type,
-        filename=doc.relative_path,
+        headers={
+            "Content-Disposition": f'inline; filename="{doc.relative_path}"',
+        },
     )
 
 

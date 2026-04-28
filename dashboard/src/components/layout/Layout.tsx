@@ -23,7 +23,10 @@ export default function Layout() {
         >
           <Menu className="h-5 w-5" />
         </Button>
-        <span className="text-sm font-semibold whitespace-nowrap">Health Dashboard</span>
+        <a href="/" className="flex items-center gap-2 whitespace-nowrap">
+          <img src="/favicon-64.png" alt="Health" className="h-7 w-7 rounded-md" />
+          <span className="text-sm font-semibold hidden sm:inline">Health</span>
+        </a>
 
         {/* Nav orizzontale: solo lg+ */}
         <div className="hidden lg:flex flex-1 min-w-0">
