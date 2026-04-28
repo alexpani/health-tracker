@@ -197,6 +197,41 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
           onChange={e => set("end", e.target.value ? new Date(e.target.value).toISOString() : undefined)}
           placeholder="A"
         />
+        <div className="flex flex-wrap gap-1">
+          {([
+            { label: "1g", days: 1 },
+            { label: "2g", days: 2 },
+            { label: "7g", days: 7 },
+            { label: "14g", days: 14 },
+            { label: "1m", days: 30 },
+            { label: "3m", days: 90 },
+          ] as const).map(p => (
+            <button
+              key={p.label}
+              type="button"
+              className="text-xs px-2 py-1 rounded border bg-secondary hover:bg-accent"
+              onClick={() => {
+                const end = new Date()
+                const start = new Date()
+                start.setDate(start.getDate() - p.days)
+                onChange({
+                  ...value,
+                  start: start.toISOString(),
+                  end: end.toISOString(),
+                })
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="text-xs px-2 py-1 rounded border bg-secondary hover:bg-accent"
+            onClick={() => onChange({ ...value, start: undefined, end: undefined })}
+          >
+            ✕
+          </button>
+        </div>
       </section>
 
       {/* Distance */}
