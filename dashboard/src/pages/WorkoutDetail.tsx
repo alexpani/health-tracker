@@ -549,7 +549,19 @@ export default function WorkoutDetail() {
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                 <XAxis dataKey="time" tickFormatter={timeAxisFmt} minTickGap={50} tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip labelFormatter={timeAxisFmt} formatter={(v: number) => [`${v.toFixed(2)} km/h`, "Velocita'"]} />
+                <Tooltip
+                  labelFormatter={timeAxisFmt}
+                  formatter={(v: number) => {
+                    if (!v || v <= 0) return [`${v.toFixed(2)} km/h`, "Velocita'"]
+                    const paceMinTotal = 60 / v
+                    const m = Math.floor(paceMinTotal)
+                    const s = Math.round((paceMinTotal - m) * 60)
+                    const sStr = s.toString().padStart(2, "0")
+                    // Edge case: 60s rounding overflow (e.g. 59.7 → 60).
+                    const paceStr = s === 60 ? `${m + 1}:00` : `${m}:${sStr}`
+                    return [`${v.toFixed(2)} km/h · ${paceStr}/km`, "Velocita'"]
+                  }}
+                />
                 <Line dataKey="value" stroke="#22c55e" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
