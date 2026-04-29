@@ -181,6 +181,7 @@ export function useTypes() {
     queryKey: ["types"],
     queryFn: () => apiGet<TypeCount[]>("/api/v1/samples/types"),
     staleTime: 300_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
   })
 }
 
@@ -215,6 +216,7 @@ export function useCategories(type: string, start?: string, end?: string, enable
       }),
     enabled,
     staleTime: 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
   })
 }
 
@@ -354,6 +356,7 @@ export function useWorkoutSplits(uuid: string | undefined, distanceKm = 1.0) {
     queryFn: () => apiGet<WorkoutSplits>(`/api/v1/workouts/by-uuid/${uuid}/splits`, { distance_km: distanceKm }),
     enabled: !!uuid,
     staleTime: 5 * 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
   })
 }
 
@@ -474,6 +477,7 @@ export function useWorkoutRecordsFacets() {
     queryKey: ["workoutRecordsFacets"],
     queryFn: () => apiGet<WorkoutRecordsFacets>("/api/v1/workouts/records/facets"),
     staleTime: 10 * 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
   })
 }
 
@@ -740,5 +744,6 @@ export function useLatestWeightBefore(
         }
       ),
     enabled: !!testDate,
+    refetchInterval: 30 * 60_000, // 30 min polling
   })
 }

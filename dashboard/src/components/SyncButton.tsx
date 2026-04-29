@@ -10,17 +10,24 @@ export function SyncButton() {
   async function handleSync() {
     setIsRefetching(true)
     try {
-      // Refetch all data-sync-dependent queries
+      // Refetch every query that depends on data synced from the iOS app.
+      // Excludes: labs, regimens, rules, blacklist, diario/stretching proxies,
+      // recentWrites/allowedWriteTypes (config/queue), which are independent.
       await Promise.all([
-        qc.refetchQueries({ queryKey: ["workouts"] }),
         qc.refetchQueries({ queryKey: ["samples"] }),
         qc.refetchQueries({ queryKey: ["latest"] }),
+        qc.refetchQueries({ queryKey: ["latestWeight"] }),
         qc.refetchQueries({ queryKey: ["sampleFacets"] }),
-        qc.refetchQueries({ queryKey: ["daySnapshot"] }),
+        qc.refetchQueries({ queryKey: ["categories"] }),
+        qc.refetchQueries({ queryKey: ["types"] }),
         qc.refetchQueries({ queryKey: ["dailyStats"] }),
+        qc.refetchQueries({ queryKey: ["daySnapshot"] }),
+        qc.refetchQueries({ queryKey: ["workouts"] }),
+        qc.refetchQueries({ queryKey: ["workout"] }),
+        qc.refetchQueries({ queryKey: ["workoutSplits"] }),
         qc.refetchQueries({ queryKey: ["workoutFacets"] }),
         qc.refetchQueries({ queryKey: ["workoutRecords"] }),
-        qc.refetchQueries({ queryKey: ["workout"] }),
+        qc.refetchQueries({ queryKey: ["workoutRecordsFacets"] }),
         qc.refetchQueries({ queryKey: ["syncStatus"] }),
         qc.refetchQueries({ queryKey: ["syncSessions"] }),
       ])
