@@ -321,6 +321,15 @@ actor APIClient {
         return resp.upserted
     }
 
+    /// Logs a "no new data" sync attempt on the backend so the dashboard's
+    /// sync sessions list mirrors the local app log even when nothing was
+    /// uploaded (no samples / categories / workouts to send).
+    func postSyncHeartbeat(sampleCount: Int = 0) async throws {
+        struct Resp: Decodable { let logged: Bool }
+        let body: [String: Any] = ["device_id": deviceID, "sample_count": sampleCount]
+        let _: Resp = try await post(path: "/api/v1/sync/heartbeat", body: body)
+    }
+
     func checkConnection() async -> Bool {
         guard let url = URL(string: "\(serverURL)/health") else { return false }
         do {

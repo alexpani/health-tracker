@@ -304,6 +304,11 @@ final class SyncService {
             if syncLog.isEmpty {
                 syncLog.append("Nessun nuovo dato da sincronizzare")
             }
+            // Log empty sync on the backend so the dashboard's sync sessions
+            // table reflects this attempt (no batch POST happens otherwise).
+            if totalSamplesSynced == 0 {
+                try? await apiClient.postSyncHeartbeat(sampleCount: 0)
+            }
         }
 
         // Preserve summary of this sync for the UI + persist across launches

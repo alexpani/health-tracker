@@ -166,6 +166,7 @@ Ordered history (most recent last):
 **Sync status**
 - `GET /api/v1/sync/status[?include_types=true]` — fast totals (pg_class.reltuples); full breakdown with `include_types`
 - `GET /api/v1/sync/sessions?limit=10` — groups sync_log entries with <5 min gap into sessions (for the Home page table)
+- `POST /api/v1/sync/heartbeat` body `{device_id, sample_count?}` — logs a sync attempt that produced no new data. The iOS app calls this at the end of `runFullSync` when `totalSamplesSynced == 0` (no samples/categories/workouts to upload), so the dashboard's sync sessions table mirrors the local app log instead of skipping empty syncs.
 
 **Write / Delete queues (web ↔ Apple Health)**
 - `POST /api/v1/write`, `GET /api/v1/write/pending`, `POST /api/v1/write/{id}/confirm|fail`
@@ -251,6 +252,7 @@ Current seed rules (applied once, can be edited from dashboard):
   - `resetBodySync()` — clears lastSyncDate for body types (was a Settings button, removed; can be reintroduced)
   - Persists last summary via UserDefaults `last_sync_summary_v1` with `LastSyncSummary` Codable struct
   - `shouldStop` flag for the stop button
+  - **Empty-sync heartbeat**: at the end of `runFullSync`, if `totalSamplesSynced == 0` (no new samples/categories/workouts to upload), calls `POST /api/v1/sync/heartbeat`. Without this the backend's `sync_log` would only record syncs that produced data, and the dashboard's sync sessions table would silently miss the empty syncs that the iOS UI shows.
 - `Services/APIClient.swift` — URLSession actor with retry/backoff, endpoints for samples/categories/workouts POST + pending writes + pending deletions + confirm/fail
 - `Services/BackgroundTaskManager.swift` — `BGAppRefreshTask` registration + 1h scheduling
 - `Views/ContentView.swift` — TabView order: **Sync (default), Dashboard, Settings**

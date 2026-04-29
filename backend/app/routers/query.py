@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select, text
+from sqlalchemy import func, insert, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -1079,6 +1079,25 @@ async def bulk_delete_samples(body: BulkDeleteIn, db: AsyncSession = Depends(get
     result = await db.execute(stmt)
     await db.commit()
     return {"deleted": result.rowcount, "hk_deletion_enqueued": len(rows)}
+
+
+@router.post("/sync/heartbeat")
+async def sync_heartbeat(payload: dict, db: AsyncSession = Depends(get_db)):
+    """
+    Logs a sync attempt that produced no new data. The iOS app calls this at
+    the end of a sync session if `totalSamplesSynced == 0`, so the dashboard's
+    sync sessions table reflects the same activity shown in the app's local log.
+    Body: {"device_id": "...", "sample_count": 0}.
+    """
+    device_id = payload.get("device_id")
+    if not device_id:
+        return {"logged": False, "reason": "missing device_id"}
+    sample_count = int(payload.get("sample_count", 0) or 0)
+    await db.execute(
+        insert(SyncLog.__table__).values(device_id=device_id, sample_count=sample_count)
+    )
+    await db.commit()
+    return {"logged": True, "device_id": device_id, "sample_count": sample_count}
 
 
 @router.get("/sync/sessions")
