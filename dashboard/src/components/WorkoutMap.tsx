@@ -3,10 +3,18 @@ import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 import type { RoutePoint } from "@/lib/types"
 
+export interface TimeSeriesPoint {
+  time: string
+  value: number
+}
+
 interface Props {
   points: RoutePoint[]
   hoverIndex: number | null
   onHover?: (index: number | null) => void
+  /// Sample HR ordinati per timestamp (ASC). Usati per arricchire il
+  /// tooltip al hover sui segmenti della polyline.
+  hrSeries?: TimeSeriesPoint[]
 }
 
 interface Segment {
@@ -14,8 +22,58 @@ interface Segment {
   to: number
   paceSecPerKm: number | null
   speedMs: number | null
+  hrAvg: number | null
   midLat: number
   midLon: number
+}
+
+function formatPace(secPerKm: number | null): string {
+  if (secPerKm === null || !isFinite(secPerKm) || secPerKm <= 0) return "—"
+  const m = Math.floor(secPerKm / 60)
+  const s = Math.round(secPerKm - m * 60)
+  // Edge case: rounding overflow (59.7s → "5:00" non "4:60")
+  if (s === 60) return `${m + 1}:00/km`
+  return `${m}:${s.toString().padStart(2, "0")}/km`
+}
+
+/// HR medio nella finestra [startTs, endTs]. Binary search dell'array
+/// ordinato per timestamp; se nessun sample cade dentro la finestra,
+/// ritorna il sample più vicino (entro 30s) o null.
+function hrAverageInWindow(
+  series: TimeSeriesPoint[],
+  startTs: number,
+  endTs: number
+): number | null {
+  if (series.length === 0) return null
+  // lower_bound del primo sample >= startTs
+  let lo = 0
+  let hi = series.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (new Date(series[mid].time).getTime() < startTs) lo = mid + 1
+    else hi = mid
+  }
+  let sum = 0
+  let count = 0
+  for (let i = lo; i < series.length; i++) {
+    const t = new Date(series[i].time).getTime()
+    if (t > endTs) break
+    sum += series[i].value
+    count++
+  }
+  if (count > 0) return sum / count
+  // Fallback: sample più vicino entro 30s al midpoint
+  const mid = (startTs + endTs) / 2
+  const tolerance = 30_000
+  let bestIdx = -1
+  let bestDelta = Infinity
+  // controlla idx prima e dopo lo
+  const candidates = [lo - 1, lo].filter(i => i >= 0 && i < series.length)
+  for (const i of candidates) {
+    const d = Math.abs(new Date(series[i].time).getTime() - mid)
+    if (d < bestDelta) { bestDelta = d; bestIdx = i }
+  }
+  return bestIdx >= 0 && bestDelta <= tolerance ? series[bestIdx].value : null
 }
 
 function haversineMeters(a: RoutePoint, b: RoutePoint): number {
@@ -41,21 +99,25 @@ function paceColor(paceSecPerKm: number | null): string {
   return `hsl(${hue.toFixed(0)}, 80%, 45%)`
 }
 
-function buildSegments(points: RoutePoint[]): Segment[] {
+function buildSegments(points: RoutePoint[], hrSeries?: TimeSeriesPoint[]): Segment[] {
   if (points.length < 2) return []
   const out: Segment[] = []
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i]
     const b = points[i + 1]
-    const dt = (new Date(b.ts).getTime() - new Date(a.ts).getTime()) / 1000
+    const tA = new Date(a.ts).getTime()
+    const tB = new Date(b.ts).getTime()
+    const dt = (tB - tA) / 1000
     const dx = haversineMeters(a, b)
     const speedMs = dt > 0 ? dx / dt : null
     const paceSecPerKm = speedMs && speedMs > 0.1 ? 1000 / speedMs : null
+    const hrAvg = hrSeries && hrSeries.length > 0 ? hrAverageInWindow(hrSeries, tA, tB) : null
     out.push({
       from: i,
       to: i + 1,
       paceSecPerKm,
       speedMs,
+      hrAvg,
       midLat: (a.lat + b.lat) / 2,
       midLon: (a.lon + b.lon) / 2,
     })
@@ -63,13 +125,29 @@ function buildSegments(points: RoutePoint[]): Segment[] {
   return out
 }
 
-export function WorkoutMap({ points, hoverIndex, onHover }: Props) {
+function tooltipHtml(seg: Segment, ts: string): string {
+  const speedKmh = seg.speedMs !== null ? (seg.speedMs * 3.6).toFixed(2) : "—"
+  const pace = formatPace(seg.paceSecPerKm)
+  const time = new Date(ts).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+  const hrLine = seg.hrAvg !== null
+    ? `<div style="color:#ef4444">♥ ${Math.round(seg.hrAvg)} bpm</div>`
+    : ""
+  return `
+    <div style="font-size:11px;line-height:1.35">
+      <div style="color:#666;margin-bottom:2px">${time}</div>
+      <div><strong>${speedKmh} km/h</strong> · ${pace}</div>
+      ${hrLine}
+    </div>
+  `
+}
+
+export function WorkoutMap({ points, hoverIndex, onHover, hrSeries }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const cursorMarkerRef = useRef<L.CircleMarker | null>(null)
   const polylinesRef = useRef<L.Polyline[]>([])
 
-  const segments = useMemo(() => buildSegments(points), [points])
+  const segments = useMemo(() => buildSegments(points, hrSeries), [points, hrSeries])
 
   // Init map once.
   useEffect(() => {
@@ -125,6 +203,12 @@ export function WorkoutMap({ points, hoverIndex, onHover }: Props) {
           lineCap: "round",
         }
       )
+      line.bindTooltip(tooltipHtml(seg, points[seg.from].ts), {
+        sticky: true,
+        direction: "top",
+        opacity: 0.95,
+        offset: [0, -4],
+      })
       line.on("mouseover", () => onHover?.(seg.from))
       line.on("mouseout", () => onHover?.(null))
       line.addTo(map)

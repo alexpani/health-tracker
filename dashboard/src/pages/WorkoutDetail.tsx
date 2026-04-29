@@ -393,7 +393,7 @@ export default function WorkoutDetail() {
           )}
           {!routeLoading && route && route.points.length > 0 && (
             <>
-              <WorkoutMap points={route.points} hoverIndex={routeHover} onHover={setRouteHover} />
+              <WorkoutMap points={route.points} hoverIndex={routeHover} onHover={setRouteHover} hrSeries={hrChartData} />
               <ElevationChart points={route.points} hoverIndex={routeHover} onHover={setRouteHover} />
             </>
           )}
