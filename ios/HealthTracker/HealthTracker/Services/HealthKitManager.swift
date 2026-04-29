@@ -7,6 +7,24 @@ actor HealthKitManager {
     let healthStore = HKHealthStore()
     private static let logger = Logger(subsystem: "com.healthtracker", category: "healthkit")
 
+    /// Normalize whitespace in HealthKit source names. Apple Watch reports
+    /// itself as "Apple\u{00A0}Watch\u{00A0}7" (with NBSP between words) which
+    /// silently breaks server-side equality matches and ILIKE filters.
+    /// Mirror the backend `_normalize_source` logic so we send clean data.
+    private static func normalizedSourceName(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        var s = raw
+            .replacingOccurrences(of: "\u{00A0}", with: " ") // NBSP
+            .replacingOccurrences(of: "\u{202F}", with: " ") // NARROW NO-BREAK SPACE
+            .replacingOccurrences(of: "\u{3000}", with: " ") // IDEOGRAPHIC SPACE
+            .replacingOccurrences(of: "\u{2028}", with: " ") // LINE SEPARATOR
+            .replacingOccurrences(of: "\u{2029}", with: " ") // PARAGRAPH SEPARATOR
+            .replacingOccurrences(of: "\u{200B}", with: "")  // ZERO WIDTH SPACE
+        // Collapse runs of whitespace.
+        s = s.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+        return s.isEmpty ? nil : s
+    }
+
     // All quantity types we want to read
     static let quantityTypes: [(HKQuantityTypeIdentifier, HKUnit)] = [
         // Activity
@@ -350,7 +368,7 @@ actor HealthKitManager {
                 unit: unit.unitString,
                 startDate: formatter.string(from: sample.startDate),
                 endDate: formatter.string(from: sample.endDate),
-                sourceName: sample.sourceRevision.source.name,
+                sourceName: Self.normalizedSourceName(sample.sourceRevision.source.name),
                 sourceBundleId: sample.sourceRevision.source.bundleIdentifier,
                 device: sample.device?.model,
                 metadata: sample.metadata?.compactMapValues { "\($0)" }
@@ -397,7 +415,7 @@ actor HealthKitManager {
                 value: sample.value,
                 startDate: formatter.string(from: sample.startDate),
                 endDate: formatter.string(from: sample.endDate),
-                sourceName: sample.sourceRevision.source.name,
+                sourceName: Self.normalizedSourceName(sample.sourceRevision.source.name),
                 sourceBundleId: sample.sourceRevision.source.bundleIdentifier,
                 metadata: sample.metadata?.compactMapValues { "\($0)" }
             )
@@ -436,7 +454,7 @@ actor HealthKitManager {
                 totalDistance: workout.totalDistance?.doubleValue(for: .meter()),
                 startDate: formatter.string(from: workout.startDate),
                 endDate: formatter.string(from: workout.endDate),
-                sourceName: workout.sourceRevision.source.name,
+                sourceName: Self.normalizedSourceName(workout.sourceRevision.source.name),
                 metadata: workout.metadata?.compactMapValues { "\($0)" },
                 title: workout.metadata?["workout name"] as? String,
                 activities: activities
@@ -768,7 +786,7 @@ actor HealthKitManager {
                 unit: unit.unitString,
                 startDate: formatter.string(from: sample.startDate),
                 endDate: formatter.string(from: sample.endDate),
-                sourceName: sample.sourceRevision.source.name,
+                sourceName: Self.normalizedSourceName(sample.sourceRevision.source.name),
                 sourceBundleId: sample.sourceRevision.source.bundleIdentifier,
                 device: sample.device?.model,
                 metadata: sample.metadata?.compactMapValues { "\($0)" }
@@ -858,7 +876,7 @@ actor HealthKitManager {
                 totalDistance: workout.totalDistance?.doubleValue(for: .meter()),
                 startDate: formatter.string(from: workout.startDate),
                 endDate: formatter.string(from: workout.endDate),
-                sourceName: workout.sourceRevision.source.name,
+                sourceName: Self.normalizedSourceName(workout.sourceRevision.source.name),
                 metadata: workout.metadata?.compactMapValues { "\($0)" },
                 title: workout.metadata?["workout name"] as? String,
                 activities: Self.extractWorkoutActivities(workout, formatter: formatter)

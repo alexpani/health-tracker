@@ -12,6 +12,31 @@ from app.schemas import BatchResult, CategoryBatchIn, SampleBatchIn, WorkoutBatc
 router = APIRouter(prefix="/api/v1", tags=["ingest"])
 
 
+def _normalize_source(s: str | None) -> str | None:
+    """Normalize whitespace in source_name fields. Apple Watch and some other
+    Apple-internal sources put a NBSP (U+00A0) between words (e.g.
+    "Apple Watch 7") which silently breaks `source_name = '...'`
+    queries that use a normal space, plus filter chips and ILIKE searches.
+    Replace NBSP and other "Unicode space" characters with a regular space
+    and collapse runs.
+    """
+    if s is None:
+        return None
+    # NBSP, narrow NBSP, ideographic space, line/paragraph separators,
+    # zero-width space — anything weird that should render as a normal space.
+    out = (
+        s.replace(" ", " ")
+        .replace(" ", " ")
+        .replace("　", " ")
+        .replace(" ", " ")
+        .replace(" ", " ")
+        .replace("​", "")
+    )
+    # Collapse multi-space runs introduced by the above.
+    out = " ".join(out.split())
+    return out or None
+
+
 async def _apply_rules(db: AsyncSession, samples: list) -> tuple[list, dict[int, int]]:
     """
     Apply configurable ingest rules from DB.
@@ -30,9 +55,10 @@ async def _apply_rules(db: AsyncSession, samples: list) -> tuple[list, dict[int,
 
     for s in samples:
         blocked_by = None
+        s_source = _normalize_source(s.source_name)
         for r in rules:
             if r.rule_type == "blocked_source":
-                if r.source_name and s.source_name == r.source_name:
+                if r.source_name and s_source == _normalize_source(r.source_name):
                     # Optional per-type constraint
                     if r.type_identifier and s.type != r.type_identifier:
                         continue
@@ -104,7 +130,7 @@ async def ingest_samples(batch: SampleBatchIn, db: AsyncSession = Depends(get_db
             "unit": s.unit,
             "start_date": s.start_date,
             "end_date": s.end_date,
-            "source_name": s.source_name,
+            "source_name": _normalize_source(s.source_name),
             "source_bundle_id": s.source_bundle_id,
             "device": s.device,
             "metadata": s.metadata,
@@ -140,7 +166,7 @@ async def ingest_categories(batch: CategoryBatchIn, db: AsyncSession = Depends(g
             "value": s.value,
             "start_date": s.start_date,
             "end_date": s.end_date,
-            "source_name": s.source_name,
+            "source_name": _normalize_source(s.source_name),
             "source_bundle_id": s.source_bundle_id,
             "metadata": s.metadata,
         }
@@ -189,7 +215,7 @@ async def ingest_workouts(batch: WorkoutBatchIn, db: AsyncSession = Depends(get_
             "total_distance": w.total_distance,
             "start_date": w.start_date,
             "end_date": w.end_date,
-            "source_name": w.source_name,
+            "source_name": _normalize_source(w.source_name),
             "metadata": w.metadata,
             "title": w.title or ((w.metadata or {}).get("workout name") if isinstance(w.metadata, dict) else None),
             "notes": w.notes,
