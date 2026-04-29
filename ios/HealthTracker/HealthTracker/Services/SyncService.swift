@@ -274,6 +274,13 @@ final class SyncService {
             progress = Double(completedTypes) / Double(totalTypes)
         }
 
+        // GPS routes backfill — bounded per sync to avoid blocking. Runs after
+        // workouts so the priority pass for newly-inserted ones (inside
+        // syncWorkouts) has already happened.
+        if !shouldStop {
+            await syncWorkoutRoutesBackfill()
+        }
+
         // PASS 2: deferred heavy types (HeartRate, HRV)
         for (typeId, unit) in quantityDeferred {
             if shouldStop { break }
@@ -542,10 +549,89 @@ final class SyncService {
                 syncLog.append(msg)
                 logger.info("\(msg)")
             }
+
+            // Push GPS routes for the workouts we just inserted (priority pass).
+            // We always try, even for workouts that probably don't have a route
+            // (indoor / third-party imports): the backend stores an empty list
+            // so the missing-routes backfill loop won't re-check them.
+            for w in added {
+                await uploadRoute(forWorkoutUUID: w.uuid)
+            }
         } catch {
             let msg = "Workouts: anchored sync failed - \(error.localizedDescription)"
             syncLog.append(msg)
             logger.error("\(msg)")
+        }
+    }
+
+    /// Backfill GPS routes for workouts already in the backend that don't
+    /// have a route ingested yet. Bounded to `maxBackfillPerSync` per call so
+    /// a single sync doesn't spend forever crawling years of historical
+    /// workouts. Subsequent syncs continue the work.
+    private static let maxBackfillPerSync = 100
+
+    @MainActor
+    private func syncWorkoutRoutesBackfill() async {
+        currentType = "Workout routes (backfill)"
+        typeProgress = 0
+        var processed = 0
+        var withRoute = 0
+        var cursor: String? = nil
+
+        while processed < Self.maxBackfillPerSync {
+            if shouldStop { break }
+            let batchLimit = min(50, Self.maxBackfillPerSync - processed)
+            let resp: APIClient.MissingRoutesResponse
+            do {
+                resp = try await apiClient.fetchMissingRoutes(limit: batchLimit, before: cursor)
+            } catch {
+                logger.error("Workout routes backfill: fetch missing failed - \(error.localizedDescription)")
+                return
+            }
+            if resp.uuids.isEmpty { break }
+
+            for item in resp.uuids {
+                if shouldStop { break }
+                guard let uuid = UUID(uuidString: item.uuid) else { continue }
+                let hadPoints = await uploadRoute(forWorkoutUUID: item.uuid, hkUUID: uuid)
+                if hadPoints { withRoute += 1 }
+                processed += 1
+                if Self.maxBackfillPerSync > 0 {
+                    typeProgress = min(1.0, Double(processed) / Double(Self.maxBackfillPerSync))
+                }
+            }
+
+            // Cursor = oldest start_date in this batch, so next iteration
+            // continues from there.
+            cursor = resp.uuids.last?.start_date
+            // If we got fewer results than requested, the queue is empty.
+            if resp.count < batchLimit { break }
+        }
+
+        if processed > 0 {
+            let msg = "Workout routes: \(withRoute)/\(processed) con GPS"
+            syncLog.append(msg)
+            logger.info("\(msg)")
+        }
+    }
+
+    /// Reads the GPS route for a workout from HealthKit and POSTs it to the
+    /// backend. Always POSTs, even if empty: an empty list marks the workout
+    /// as "checked, no GPS data". Returns true if at least one point was
+    /// uploaded, false otherwise. Errors are logged and swallowed — a failed
+    /// route upload must never break the rest of the sync.
+    @discardableResult
+    @MainActor
+    private func uploadRoute(forWorkoutUUID uuidString: String, hkUUID: UUID? = nil) async -> Bool {
+        let uuid = hkUUID ?? UUID(uuidString: uuidString)
+        guard let uuid else { return false }
+        do {
+            let points = (try await healthKitManager.fetchWorkoutRoute(workoutUUID: uuid)) ?? []
+            try await apiClient.postWorkoutRoute(workoutUUID: uuidString, points: points)
+            return !points.isEmpty
+        } catch {
+            logger.error("Route upload failed for \(uuidString): \(error.localizedDescription)")
+            return false
         }
     }
 

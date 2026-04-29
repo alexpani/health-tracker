@@ -111,6 +111,29 @@ struct WorkoutPayload {
     let activities: [WorkoutActivityPayload]?
 }
 
+/// Single GPS fix from `HKWorkoutRoute`. Optional fields are omitted when
+/// the underlying `CLLocation` reports them as invalid (negative accuracy).
+struct RoutePointPayload {
+    let lat: Double
+    let lon: Double
+    let ts: String  // ISO8601 with fractional seconds
+    let alt: Double?
+    let hAcc: Double?
+    let vAcc: Double?
+    let speed: Double?  // m/s
+    let course: Double?  // degrees
+
+    func toDict() -> [String: Any] {
+        var d: [String: Any] = ["lat": lat, "lon": lon, "ts": ts]
+        if let v = alt { d["alt"] = v }
+        if let v = hAcc { d["h_acc"] = v }
+        if let v = vAcc { d["v_acc"] = v }
+        if let v = speed { d["speed"] = v }
+        if let v = course { d["course"] = v }
+        return d
+    }
+}
+
 actor APIClient {
     private let session: URLSession
     private let dateFormatter: ISO8601DateFormatter
@@ -319,6 +342,44 @@ actor APIClient {
         ]
         let resp: Resp = try await post(path: "/api/v1/daily-stats/batch", body: body)
         return resp.upserted
+    }
+
+    /// Upload the GPS route for a single workout. Idempotent on the backend
+    /// (UPSERT on workout_uuid). An empty `points` array is a valid call: it
+    /// marks the workout as "checked, no GPS data available" so the
+    /// `missing-routes` backfill loop won't re-process it.
+    func postWorkoutRoute(workoutUUID: String, points: [RoutePointPayload]) async throws {
+        struct Resp: Decodable { let workout_uuid: String; let point_count: Int }
+        let body: [String: Any] = ["points": points.map { $0.toDict() }]
+        let _: Resp = try await post(
+            path: "/api/v1/workouts/by-uuid/\(workoutUUID)/route", body: body
+        )
+    }
+
+    struct MissingRoutesResponse: Decodable {
+        struct Item: Decodable {
+            let uuid: String
+            let start_date: String
+            let activity_type: Int
+        }
+        let uuids: [Item]
+        let count: Int
+    }
+
+    /// Get a batch of workout UUIDs that don't have a route ingested yet,
+    /// most-recent first. Used by the backfill loop in SyncService.
+    func fetchMissingRoutes(limit: Int = 50, before: String? = nil) async throws -> MissingRoutesResponse {
+        var components = URLComponents(string: "\(serverURL)/api/v1/workouts/missing-routes")!
+        var items: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit))]
+        if let before { items.append(URLQueryItem(name: "before", value: before)) }
+        components.queryItems = items
+        guard let url = components.url else { throw APIError.invalidURL }
+        let (data, response) = try await session.data(from: url)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw APIError.serverError(statusCode: code, body: String(data: data, encoding: .utf8) ?? "")
+        }
+        return try JSONDecoder().decode(MissingRoutesResponse.self, from: data)
     }
 
     /// Logs a "no new data" sync attempt on the backend so the dashboard's

@@ -145,6 +145,24 @@ export interface WorkoutSplits {
   note?: string
 }
 
+export interface RoutePoint {
+  lat: number
+  lon: number
+  ts: string
+  alt?: number
+  h_acc?: number
+  v_acc?: number
+  speed?: number
+  course?: number
+}
+
+export interface WorkoutRoute {
+  workout_uuid: string
+  points: RoutePoint[]
+  point_count: number
+  updated_at: string | null
+}
+
 export interface SyncSession {
   started_at: string
   ended_at: string

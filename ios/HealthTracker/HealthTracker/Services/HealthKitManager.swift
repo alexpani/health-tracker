@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import HealthKit
 import os
@@ -122,6 +123,9 @@ actor HealthKitManager {
         }
 
         types.insert(HKWorkoutType.workoutType())
+        // GPS routes for outdoor workouts (HKWorkoutRoute series). Required to
+        // read CLLocation points via HKWorkoutRouteQuery for the dashboard map.
+        types.insert(HKSeriesType.workoutRoute())
 
         return types
     }
@@ -441,6 +445,98 @@ actor HealthKitManager {
 
         let deletedUUIDs = deleted.map { $0.uuid }
         return (payloads, deletedUUIDs, newAnchor)
+    }
+
+    // MARK: - Workout GPS route
+
+    /// Returns the GPS fixes recorded by Apple Watch / iPhone during a workout
+    /// (HKWorkoutRoute series). Empty array means "no route exists for this
+    /// workout" — typical for indoor workouts, manually entered ones, and
+    /// most third-party imports. Multiple route series associated to the
+    /// same workout are concatenated by timestamp.
+    func fetchWorkoutRoute(for workout: HKWorkout) async throws -> [RoutePointPayload] {
+        let routeType = HKSeriesType.workoutRoute()
+        let predicate = HKQuery.predicateForObjects(from: workout)
+
+        let routes: [HKWorkoutRoute] = try await withCheckedThrowingContinuation { cont in
+            let q = HKSampleQuery(
+                sampleType: routeType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error { cont.resume(throwing: error); return }
+                cont.resume(returning: (samples as? [HKWorkoutRoute]) ?? [])
+            }
+            healthStore.execute(q)
+        }
+        if routes.isEmpty { return [] }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        var allPoints: [RoutePointPayload] = []
+        for route in routes {
+            let locs = try await fetchLocations(for: route)
+            allPoints.append(contentsOf: locs.map { Self.toPayload($0, formatter: formatter) })
+        }
+        // Multiple route series may overlap in time on watchOS; sort by ts.
+        allPoints.sort { $0.ts < $1.ts }
+        return allPoints
+    }
+
+    /// Variant looked up by HKWorkout.uuid. Returns nil if the workout is no
+    /// longer in HealthKit (e.g., user deleted it from the Health app).
+    func fetchWorkoutRoute(workoutUUID: UUID) async throws -> [RoutePointPayload]? {
+        let pred = HKQuery.predicateForObject(with: workoutUUID)
+        let workout: HKWorkout? = try await withCheckedThrowingContinuation { cont in
+            let q = HKSampleQuery(
+                sampleType: .workoutType(),
+                predicate: pred,
+                limit: 1,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error { cont.resume(throwing: error); return }
+                cont.resume(returning: (samples as? [HKWorkout])?.first)
+            }
+            healthStore.execute(q)
+        }
+        guard let workout else { return nil }
+        return try await fetchWorkoutRoute(for: workout)
+    }
+
+    /// Drains an `HKWorkoutRouteQuery` (which delivers CLLocation in batches)
+    /// until `done == true`, accumulating all points.
+    private func fetchLocations(for route: HKWorkoutRoute) async throws -> [CLLocation] {
+        try await withCheckedThrowingContinuation { cont in
+            var collected: [CLLocation] = []
+            let q = HKWorkoutRouteQuery(route: route) { _, locsOrNil, done, error in
+                if let error { cont.resume(throwing: error); return }
+                if let locs = locsOrNil { collected.append(contentsOf: locs) }
+                if done { cont.resume(returning: collected) }
+            }
+            healthStore.execute(q)
+        }
+    }
+
+    private static func toPayload(_ loc: CLLocation, formatter: ISO8601DateFormatter) -> RoutePointPayload {
+        // Negative accuracy values from Core Location mean "invalid" and
+        // should be dropped per Apple's docs.
+        let alt: Double? = loc.verticalAccuracy >= 0 ? loc.altitude : nil
+        let hAcc: Double? = loc.horizontalAccuracy >= 0 ? loc.horizontalAccuracy : nil
+        let vAcc: Double? = loc.verticalAccuracy >= 0 ? loc.verticalAccuracy : nil
+        let speed: Double? = loc.speed >= 0 ? loc.speed : nil
+        let course: Double? = loc.course >= 0 ? loc.course : nil
+        return RoutePointPayload(
+            lat: loc.coordinate.latitude,
+            lon: loc.coordinate.longitude,
+            ts: formatter.string(from: loc.timestamp),
+            alt: alt,
+            hAcc: hAcc,
+            vAcc: vAcc,
+            speed: speed,
+            course: course
+        )
     }
 
     // MARK: - Workout intervals extraction

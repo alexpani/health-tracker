@@ -15,7 +15,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { useSamples, useUpdateWorkout, useWorkoutByUuid, useWorkoutSplits } from "@/lib/queries"
+import { useSamples, useUpdateWorkout, useWorkoutByUuid, useWorkoutRoute, useWorkoutSplits } from "@/lib/queries"
+import { WorkoutMap } from "@/components/WorkoutMap"
+import { ElevationChart } from "@/components/ElevationChart"
 import { extractWorkoutMetadata, workoutDisplayTitle, workoutName } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { AggregatedPoint, Sample } from "@/lib/types"
@@ -52,12 +54,15 @@ export default function WorkoutDetail() {
   const { uuid } = useParams<{ uuid: string }>()
   const { data: workout, isLoading } = useWorkoutByUuid(uuid)
   const { data: splitsData } = useWorkoutSplits(uuid)
+  const { data: route, isLoading: routeLoading } = useWorkoutRoute(uuid)
   const update = useUpdateWorkout()
 
   const [titleDraft, setTitleDraft] = useState("")
   const [notesDraft, setNotesDraft] = useState("")
   const [titleSaved, setTitleSaved] = useState(false)
   const [notesSaved, setNotesSaved] = useState(false)
+  // Indice del punto GPS sotto il cursore — condiviso fra mappa e altimetria.
+  const [routeHover, setRouteHover] = useState<number | null>(null)
 
   useEffect(() => {
     setTitleDraft(workout?.title ?? "")
@@ -360,6 +365,38 @@ export default function WorkoutDetail() {
             )}
             {notesSaved && <span className="text-xs text-green-600">Salvata</span>}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            Mappa percorso
+            {route && route.point_count > 0 && (
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {route.point_count} punti GPS
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {routeLoading && <p className="text-sm text-muted-foreground">Caricamento…</p>}
+          {!routeLoading && route === null && (
+            <p className="text-sm text-muted-foreground">
+              Percorso non ancora sincronizzato. Apri l'app sull'iPhone e fai un sync per importarlo da HealthKit.
+            </p>
+          )}
+          {!routeLoading && route && route.points.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Nessun dato GPS disponibile per questo workout (indoor o sorgente esterna senza tracciato).
+            </p>
+          )}
+          {!routeLoading && route && route.points.length > 0 && (
+            <>
+              <WorkoutMap points={route.points} hoverIndex={routeHover} onHover={setRouteHover} />
+              <ElevationChart points={route.points} hoverIndex={routeHover} onHover={setRouteHover} />
+            </>
+          )}
         </CardContent>
       </Card>
 

@@ -7,7 +7,7 @@ from sqlalchemy import func, insert, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import CategorySample, HealthSample, PendingDeletion, SyncLog, Workout
+from app.models import CategorySample, HealthSample, PendingDeletion, SyncLog, Workout, WorkoutRoute
 from app.schemas import (
     AggregatedPoint,
     CategorySampleOut,
@@ -317,6 +317,110 @@ async def update_workout(workout_uuid: str, body: WorkoutUpdate, db: AsyncSessio
         "uuid": str(row.uuid),
         "title": row.title,
         "notes": row.notes,
+    }
+
+
+@router.get("/workouts/by-uuid/{workout_uuid}/route")
+async def get_workout_route(workout_uuid: str, db: AsyncSession = Depends(get_db)):
+    """Return the GPS route for a workout. Returns 404 if no route was ever
+    ingested for this UUID; returns `{points: [], point_count: 0}` if the
+    iOS app explicitly recorded "no route available" (e.g., indoor workout
+    or third-party source without GPS data)."""
+    stmt = select(WorkoutRoute).where(WorkoutRoute.workout_uuid == workout_uuid)
+    row = (await db.execute(stmt)).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "Route not ingested for this workout")
+    return {
+        "workout_uuid": str(row.workout_uuid),
+        "points": row.points,
+        "point_count": row.point_count,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+class RoutePoint(BaseModel):
+    lat: float
+    lon: float
+    ts: str  # ISO8601
+    alt: float | None = None  # meters
+    h_acc: float | None = None  # horizontal accuracy meters
+    v_acc: float | None = None  # vertical accuracy meters
+    speed: float | None = None  # m/s
+    course: float | None = None  # degrees
+
+
+class RouteIngest(BaseModel):
+    points: list[RoutePoint]
+
+
+@router.post("/workouts/by-uuid/{workout_uuid}/route")
+async def post_workout_route(
+    workout_uuid: str, body: RouteIngest, db: AsyncSession = Depends(get_db)
+):
+    """Ingest the GPS route for a workout. Idempotent UPSERT: re-posting
+    overwrites the previous route. The iOS app calls this also with an
+    empty `points: []` to mark a workout as "no route available", so the
+    backfill loop won't re-check it on the next sync."""
+    # Verify the workout exists
+    wstmt = select(Workout.uuid).where(Workout.uuid == workout_uuid)
+    if not (await db.execute(wstmt)).scalar_one_or_none():
+        raise HTTPException(404, "Workout not found")
+
+    points = [p.model_dump(exclude_none=True) for p in body.points]
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    stmt = pg_insert(WorkoutRoute.__table__).values(
+        workout_uuid=workout_uuid,
+        points=points,
+        point_count=len(points),
+    ).on_conflict_do_update(
+        index_elements=["workout_uuid"],
+        set_={
+            "points": points,
+            "point_count": len(points),
+            "updated_at": func.now(),
+        },
+    )
+    await db.execute(stmt)
+    await db.commit()
+    return {"workout_uuid": workout_uuid, "point_count": len(points)}
+
+
+@router.get("/workouts/missing-routes")
+async def workouts_missing_routes(
+    limit: int = Query(50, le=500),
+    before: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return UUIDs of workouts that have no entry in `workout_routes` yet,
+    most-recent first. The iOS app polls this to backfill historical
+    workouts: for each UUID it tries `HKWorkoutRouteQuery`, then POSTs
+    either the points or an empty list to `/route` (empty marks the
+    workout as "checked, no GPS data" so it stops being returned here).
+    `before` is an ISO timestamp cursor for pagination."""
+    stmt = (
+        select(Workout.uuid, Workout.start_date, Workout.activity_type)
+        .outerjoin(WorkoutRoute, Workout.uuid == WorkoutRoute.workout_uuid)
+        .where(WorkoutRoute.workout_uuid.is_(None))
+    )
+    if before:
+        try:
+            before_dt = datetime.fromisoformat(before.replace("Z", "+00:00"))
+            stmt = stmt.where(Workout.start_date < before_dt)
+        except ValueError:
+            raise HTTPException(400, "Invalid `before` timestamp")
+    stmt = stmt.order_by(Workout.start_date.desc()).limit(limit)
+    rows = (await db.execute(stmt)).all()
+    return {
+        "uuids": [
+            {
+                "uuid": str(r.uuid),
+                "start_date": r.start_date.isoformat(),
+                "activity_type": r.activity_type,
+            }
+            for r in rows
+        ],
+        "count": len(rows),
     }
 
 

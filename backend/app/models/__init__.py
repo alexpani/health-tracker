@@ -260,4 +260,27 @@ class Regimen(Base):
     )
 
 
+class WorkoutRoute(Base):
+    """GPS route per workout outdoor. Una riga per workout. I punti sono
+    persistiti come array JSONB di {lat, lon, alt, ts, hAcc, vAcc, speed, course}
+    (campi opzionali). PK = workout_uuid (1 route per workout, idempotente).
+    Sorgente: HKWorkoutRoute via HKWorkoutRouteQuery letto dall'app iOS;
+    cancellato a cascata col workout."""
+    __tablename__ = "workout_routes"
+
+    workout_uuid: Mapped[uuid_mod.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workouts.uuid", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    points: Mapped[list] = mapped_column(JSONB, nullable=False)
+    point_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 from . import lab  # noqa: E402, F401  — registra i modelli lab su Base.metadata

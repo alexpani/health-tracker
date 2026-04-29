@@ -38,6 +38,7 @@ import type {
   WorkoutFilters,
   WorkoutRecords,
   WorkoutRecordsFacets,
+  WorkoutRoute,
   WorkoutSplits,
   WriteInput,
 } from "./types"
@@ -357,6 +358,31 @@ export function useWorkoutSplits(uuid: string | undefined, distanceKm = 1.0) {
     enabled: !!uuid,
     staleTime: 5 * 60_000,
     refetchInterval: 30 * 60_000, // 30 min polling
+  })
+}
+
+/// GPS route per workout. Restituisce 404 finché l'app iOS non ha ingestito
+/// il route per quel UUID — il componente WorkoutMap mostra il fallback
+/// "in attesa di sync" in quel caso. Una volta ingestito (anche con
+/// `points: []`, cioè "checked, no GPS"), il 404 sparisce.
+export function useWorkoutRoute(uuid: string | undefined) {
+  return useQuery({
+    queryKey: ["workoutRoute", uuid],
+    queryFn: async () => {
+      try {
+        return await apiGet<WorkoutRoute>(`/api/v1/workouts/by-uuid/${uuid}/route`)
+      } catch (err: any) {
+        // 404 = "not yet ingested" → null così la UI mostra il placeholder
+        // "in attesa di sync" invece di un errore generico. apiGet alza
+        // un Error col messaggio "API 404: ...".
+        if (/^API 404/.test(String(err?.message ?? ""))) return null
+        throw err
+      }
+    },
+    enabled: !!uuid,
+    staleTime: 5 * 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
+    retry: false,
   })
 }
 
