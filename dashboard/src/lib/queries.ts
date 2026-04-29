@@ -61,7 +61,7 @@ export function useSamples(opts: SamplesQuery, enabled = true) {
     queryFn: () => apiGet<SamplesResponse>("/api/v1/samples", opts as any),
     enabled,
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
     placeholderData: keepPreviousData,
   })
 }
@@ -74,6 +74,7 @@ export function useDaySnapshot(date: string, enabled = true) {
     queryFn: () => apiGet<DaySnapshot>(`/api/v1/day/${date}`),
     enabled: enabled && !!date,
     staleTime: 30_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
     placeholderData: keepPreviousData,
   })
 }
@@ -150,6 +151,7 @@ export function useDailyStats(type: string, start?: string, end?: string, enable
     queryFn: () => apiGet<DailyStatPoint[]>("/api/v1/daily-stats", { type, start, end }),
     enabled: enabled && !!type,
     staleTime: 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
     placeholderData: keepPreviousData,
   })
 }
@@ -160,7 +162,7 @@ export function useLatest(type: string, enabled = true) {
     queryFn: () => apiGet<LatestSampleResponse>("/api/v1/samples/latest", { type }),
     enabled,
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
   })
 }
 
@@ -170,6 +172,7 @@ export function useSampleFacets(type: string, enabled = true) {
     queryFn: () => apiGet<SampleFacets>("/api/v1/samples/facets", { type }),
     enabled: enabled && !!type,
     staleTime: 5 * 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
   })
 }
 
@@ -341,6 +344,7 @@ export function useWorkoutByUuid(uuid: string | undefined) {
     queryFn: () => apiGet<WorkoutDetail>(`/api/v1/workouts/by-uuid/${uuid}`),
     enabled: !!uuid,
     staleTime: 5 * 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
   })
 }
 
@@ -374,6 +378,7 @@ export function useWorkouts(filters: WorkoutFilters = {}) {
         limit: 10000,
       }),
     staleTime: 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
   })
 }
 
@@ -397,6 +402,7 @@ export function useWorkoutFacets(filters: WorkoutFilters = {}) {
         title_contains: filters.title_contains,
       }),
     staleTime: 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
     placeholderData: keepPreviousData,
   })
 }
@@ -410,6 +416,7 @@ export function useWorkoutRecords(filters: { years?: number[]; sources?: string[
       indoor: filters.indoor !== undefined ? (filters.indoor ? "true" : "false") : undefined,
     }),
     staleTime: 10 * 60_000,
+    refetchInterval: 30 * 60_000, // 30 min polling
     placeholderData: keepPreviousData,
   })
 }

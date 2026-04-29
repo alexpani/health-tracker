@@ -4,6 +4,7 @@ import { Activity, Dumbbell, Flame, Footprints, Moon, StretchHorizontal } from "
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { MetricCard } from "@/components/charts/MetricCard"
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart"
+import { SyncButton } from "@/components/SyncButton"
 import {
   useCategories,
   useLatest,
@@ -86,9 +87,12 @@ export default function Home() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">Panoramica dei tuoi dati di salute</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-muted-foreground">Panoramica dei tuoi dati di salute</p>
+        </div>
+        <SyncButton />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
