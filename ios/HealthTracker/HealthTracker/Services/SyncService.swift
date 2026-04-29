@@ -567,8 +567,9 @@ final class SyncService {
     /// Backfill GPS routes for workouts already in the backend that don't
     /// have a route ingested yet. Bounded to `maxBackfillPerSync` per call so
     /// a single sync doesn't spend forever crawling years of historical
-    /// workouts. Subsequent syncs continue the work.
-    private static let maxBackfillPerSync = 100
+    /// workouts. Subsequent syncs continue the work. Una volta che lo
+    /// storico iniziale e' assorbito, il valore puo' essere abbassato.
+    private static let maxBackfillPerSync = 500
 
     @MainActor
     private func syncWorkoutRoutesBackfill() async {
