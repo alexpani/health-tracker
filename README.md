@@ -33,6 +33,7 @@ FastAPI + async SQLAlchemy + PostgreSQL 16, Dockerized. Alembic migrations.
 
 - **Ingest**: batch POST for quantity samples, category samples, workouts. Filtered through configurable rules + UUID blacklist + source blocklist.
 - **Query**: GET with aggregation (hourly/daily/weekly/monthly), filters (sources, devices, value range), correlated samples within a time window, sample facets, latest values, sync status (fast via `pg_class.reltuples`), sync sessions (grouped from `sync_log`).
+- **Sync heartbeat**: `POST /api/v1/sync/heartbeat` — l'app iOS lo chiama alla fine di un sync che non ha prodotto nuovi dati (nessun batch da inviare), così la tabella sync sessions della dashboard riflette la stessa lista mostrata nell'app invece di saltare le sync vuote.
 - **Workouts**: rich filtering by `effective_types` (canonical slugs derived from `activity_type` + metadata, e.g., `treadmill_run`, `swim_pool`), `years[]`, `sources[]`, distance/duration/pace ranges. Single workout detail + per-km splits + delete (with snapshot for undo) + notes PATCH.
 - **Write queue**: web → Apple Health via an iOS-polled pending queue. Confirm/fail lifecycle.
 - **Delete queue**: plan + confirm + fail workflow for Apple Health deletions issued from the web.
@@ -61,7 +62,7 @@ SwiftUI native app targeting iOS 17+.
 React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui + Recharts + TanStack Query.
 
 **Pages:**
-- **Home** — today's metrics, weekly charts, last 3 workouts, sync status, last 10 sync sessions table
+- **Home** — today's metrics, weekly charts, last 3 workouts, sync status, last 10 sync sessions table, **bottone "Sincronizza"** in alto a destra per refetch immediato di tutte le query dipendenti dai dati sync iOS (le query hanno già polling 30 min come fallback automatico)
 - **Calendario** (`/day/:date`) — vista per giorno: scegli una data e vedi in un colpo d'occhio attivita' (da HKStatisticsCollectionQuery), corpo, vitali, nutrizione (diario o HK), sonno con stages, workout, eventuali panel lab di quel giorno, e i regimi attivi (farmaci, integratori, dieta, allenamento). Naviga con ←/→ o date picker. Link condivisibili (la data e' nell'URL).
 - **Regimi** (`/regimens`) — gestione manuale di farmaci, integratori, piani alimentari e piani di allenamento come periodi (start_date / end_date opzionali, dose, note). Backfill best-effort dai campi context dei panel lab confermati via script `backend/scripts/backfill_regimens_from_lab.py`.
 - **Attivita** — steps, distance, flights, calories (tabbed). Per i 9 tipi cumulative (Steps, Distance{Walking,Cycling,Swimming}, FlightsClimbed, {Active,Basal}Energy, Apple{Exercise,Stand,Move}Time) il chart aggregato giornaliero legge i totali pre-calcolati da `HKStatisticsCollectionQuery` (tabella `daily_stats`), che combaciano coi widget di Apple Salute (HK applica internamente il dedup Watch+iPhone).
