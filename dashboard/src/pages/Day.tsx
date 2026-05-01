@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Activity,
+  CalendarDays,
   Dumbbell,
   FlaskConical,
   Heart,
@@ -19,6 +20,7 @@ import { Input } from "@/components/ui/input"
 import { useDaySnapshot } from "@/lib/queries"
 import type { DaySnapshot, RegimenKind, Regimen } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
+import { DayCalendarSidebar } from "@/components/DayCalendarSidebar"
 
 function todayLocal(): string {
   const d = new Date()
@@ -87,6 +89,7 @@ export default function Day() {
 
   const [showAddRegimen, setShowAddRegimen] = useState(false)
   const [editRegimenId, setEditRegimenId] = useState<number | null>(null)
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const editRegimen: Regimen | null = useMemo(() => {
     if (editRegimenId == null || !data) return null
     const r = data.regimens_active.find(x => x.id === editRegimenId)
@@ -99,72 +102,96 @@ export default function Day() {
   }, [editRegimenId, data])
 
   return (
-    <div className="space-y-6">
-      {/* Header navigazione */}
-      <div className="flex items-center justify-between gap-2 sticky top-0 z-10 bg-background py-2">
-        <div className="flex items-center gap-1">
-          <Button variant="outline" size="icon" onClick={() => navigate(`/day/${shiftDate(date, -1)}`)} aria-label="Giorno precedente">
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <h1 className="text-2xl font-bold tracking-tight capitalize px-3">
-            {formatDateIT(date)}
-          </h1>
-          <Button variant="outline" size="icon" onClick={() => navigate(`/day/${shiftDate(date, 1)}`)} aria-label="Giorno successivo">
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+    <div className="flex gap-6 -m-6 p-0 min-h-[calc(100vh-0px)]">
+      {/* Sidebar desktop a SINISTRA — mini-calendario + (in futuro) altri filtri */}
+      <aside className="hidden lg:block w-[300px] shrink-0 border-r bg-card/30 sticky top-0 h-screen overflow-hidden">
+        <DayCalendarSidebar selectedDate={date} onSelectDate={iso => navigate(`/day/${iso}`)} />
+      </aside>
+
+      <div className="flex-1 space-y-6 min-w-0 p-6">
+        {/* Header navigazione giorno */}
+        <div className="flex items-center justify-between gap-2 sticky top-0 z-10 bg-background py-2">
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="icon" className="lg:hidden" onClick={() => setShowMobileSidebar(true)} aria-label="Calendario">
+              <CalendarDays className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="icon" onClick={() => navigate(`/day/${shiftDate(date, -1)}`)} aria-label="Giorno precedente">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <h1 className="text-2xl font-bold tracking-tight capitalize px-3">
+              {formatDateIT(date)}
+            </h1>
+            <Button variant="outline" size="icon" onClick={() => navigate(`/day/${shiftDate(date, 1)}`)} aria-label="Giorno successivo">
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              type="date"
+              value={date}
+              onChange={e => e.target.value && navigate(`/day/${e.target.value}`)}
+              className="w-[180px]"
+            />
+            <Button variant={date === today ? "default" : "outline"} onClick={() => navigate(`/day/${today}`)}>
+              Oggi
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Input
-            type="date"
-            value={date}
-            onChange={e => e.target.value && navigate(`/day/${e.target.value}`)}
-            className="w-[180px]"
-          />
-          <Button variant={date === today ? "default" : "outline"} onClick={() => navigate(`/day/${today}`)}>
-            Oggi
-          </Button>
-        </div>
+
+        {q.isLoading && !data && <div className="h-72 animate-pulse bg-muted rounded" />}
+        {data && (
+          <>
+            {isFuture && (
+              <Card>
+                <CardContent className="py-6 text-center text-muted-foreground">
+                  Giorno futuro: nessun dato disponibile.
+                </CardContent>
+              </Card>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <ActivityCard data={data} />
+              <BodyCard data={data} />
+              <VitalsCard data={data} />
+              <NutritionCard data={data} />
+              <SleepCard data={data} />
+              <WorkoutsCard data={data} />
+              <LabCard data={data} />
+              <RegimensCard
+                data={data}
+                onAdd={() => { setShowAddRegimen(true); setEditRegimenId(null) }}
+                onEdit={id => { setEditRegimenId(id); setShowAddRegimen(false) }}
+              />
+            </div>
+
+            {showAddRegimen && (
+              <RegimenForm
+                defaults={{ start_date: date }}
+                onClose={() => setShowAddRegimen(false)}
+              />
+            )}
+            {editRegimen && (
+              <RegimenForm
+                regimen={editRegimen}
+                onClose={() => setEditRegimenId(null)}
+              />
+            )}
+          </>
+        )}
       </div>
 
-      {q.isLoading && !data && <div className="h-72 animate-pulse bg-muted rounded" />}
-      {data && (
-        <>
-          {isFuture && (
-            <Card>
-              <CardContent className="py-6 text-center text-muted-foreground">
-                Giorno futuro: nessun dato disponibile.
-              </CardContent>
-            </Card>
-          )}
-
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            <ActivityCard data={data} />
-            <BodyCard data={data} />
-            <VitalsCard data={data} />
-            <NutritionCard data={data} />
-            <SleepCard data={data} />
-            <WorkoutsCard data={data} />
-            <LabCard data={data} />
-            <RegimensCard
-              data={data}
-              onAdd={() => { setShowAddRegimen(true); setEditRegimenId(null) }}
-              onEdit={id => { setEditRegimenId(id); setShowAddRegimen(false) }}
+      {/* Drawer mobile (<lg) per la sidebar */}
+      {showMobileSidebar && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowMobileSidebar(false)} />
+          <div className="absolute left-0 top-0 bottom-0 w-[300px] bg-card shadow-xl">
+            <DayCalendarSidebar
+              selectedDate={date}
+              onSelectDate={iso => { navigate(`/day/${iso}`); setShowMobileSidebar(false) }}
+              onClose={() => setShowMobileSidebar(false)}
             />
           </div>
-
-          {showAddRegimen && (
-            <RegimenForm
-              defaults={{ start_date: date }}
-              onClose={() => setShowAddRegimen(false)}
-            />
-          )}
-          {editRegimen && (
-            <RegimenForm
-              regimen={editRegimen}
-              onClose={() => setEditRegimenId(null)}
-            />
-          )}
-        </>
+        </div>
       )}
     </div>
   )
