@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react"
-import { ChevronLeft, ChevronRight } from "lucide-react"
-import { useNavigate } from "react-router-dom"
+import { ChevronLeft, ChevronRight, ExternalLink, X } from "lucide-react"
+import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { useDiarioDailyTotals } from "@/lib/queries"
+import { useDiarioActivePlan, useDiarioDailyTotals } from "@/lib/queries"
 import type { DiarioDailyTotal } from "@/lib/types"
 
 interface Props {
@@ -60,13 +60,26 @@ function adherenceClass(a: Adherence, dimmed: boolean): string {
   }
 }
 
+function formatDateIT(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number)
+  const dt = new Date(y, m - 1, d)
+  return dt.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+}
+
 export function NutritionCalendar({ kcalTargetFilter }: Props) {
-  const navigate = useNavigate()
   const today = todayIsoLocal()
   const [view, setView] = useState<{ year: number; month: number }>(() => {
     const t = new Date()
     return { year: t.getFullYear(), month: t.getMonth() }
   })
+  // Giorno selezionato dal click su una cella. Click sulla stessa cella
+  // deseleziona; il pannello riassuntivo appare sotto la griglia.
+  const [selectedDay, setSelectedDay] = useState<string | null>(null)
+  // Piano corrente: serve per i target macro (il diario non li espone per
+  // giorno storico, solo il piano corrente). Mostriamo i target solo se
+  // il giorno selezionato matcha il `kcal_target` del piano corrente
+  // (probabile stesso piano).
+  const { data: activePlan } = useDiarioActivePlan()
 
   const { startIso, endIso } = useMemo(() => {
     const first = new Date(view.year, view.month, 1)
@@ -143,11 +156,12 @@ export function NutritionCalendar({ kcalTargetFilter }: Props) {
             const d = byDate.get(cell.iso)
             const adh = classify(d)
             const isToday = cell.iso === today
+            const isSelected = cell.iso === selectedDay
             const dimmed = !cell.inMonth || isCellDimmed(d)
             const cls =
               "h-12 rounded text-xs font-medium tabular-nums transition-colors flex flex-col items-center justify-center px-1 " +
               adherenceClass(adh, dimmed) +
-              (isToday ? " ring-1 ring-primary" : "")
+              (isSelected ? " ring-2 ring-primary" : isToday ? " ring-1 ring-primary" : "")
             const tooltip = d
               ? `${cell.iso} · ${Math.round(d.kcal)} kcal${d.kcal_target ? ` / ${Math.round(d.kcal_target)}` : ""}`
               : cell.iso
@@ -156,7 +170,7 @@ export function NutritionCalendar({ kcalTargetFilter }: Props) {
                 key={cell.iso}
                 type="button"
                 title={tooltip}
-                onClick={() => navigate(`/day/${cell.iso}`)}
+                onClick={() => setSelectedDay(prev => (prev === cell.iso ? null : cell.iso))}
                 className={cls}
               >
                 <span>{cell.day}</span>
@@ -167,6 +181,16 @@ export function NutritionCalendar({ kcalTargetFilter }: Props) {
             )
           })}
         </div>
+
+        {/* Riassunto del giorno selezionato */}
+        {selectedDay && (
+          <DaySummary
+            iso={selectedDay}
+            data={byDate.get(selectedDay)}
+            activePlan={activePlan ?? null}
+            onClose={() => setSelectedDay(null)}
+          />
+        )}
 
         {/* Legenda */}
         <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t text-[11px] text-muted-foreground">
@@ -185,5 +209,112 @@ export function NutritionCalendar({ kcalTargetFilter }: Props) {
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+// ---------- Day summary (popover inline) ----------
+
+interface DaySummaryProps {
+  iso: string
+  data: DiarioDailyTotal | undefined
+  /// Piano corrente (per mostrare i target macro). Usato solo se il
+  /// kcal_target del giorno coincide col piano attuale (probabile
+  /// che siano lo stesso piano — il diario non espone i piani storici).
+  activePlan: { kcal_target: number; protein_g: number; fat_g: number; carbs_g: number } | null
+  onClose: () => void
+}
+
+function DaySummary({ iso, data, activePlan, onClose }: DaySummaryProps) {
+  const sameAsCurrent =
+    activePlan != null && data?.kcal_target != null
+      ? Math.round(activePlan.kcal_target) === Math.round(data.kcal_target)
+      : false
+
+  // Se il giorno usa lo stesso piano del corrente, mostriamo i target macro;
+  // altrimenti solo i consumati (il diario non espone i target storici per
+  // macro).
+  const macroTargets = sameAsCurrent && activePlan
+    ? { protein: activePlan.protein_g, fat: activePlan.fat_g, carbs: activePlan.carbs_g }
+    : { protein: null, fat: null, carbs: null }
+
+  const kcalDelta = data?.kcal_target != null ? data.kcal - data.kcal_target : null
+  const adherencePct = data?.kcal_target != null && data.kcal_target > 0
+    ? (data.kcal / data.kcal_target) * 100
+    : null
+
+  return (
+    <div className="mt-3 pt-3 border-t">
+      <div className="flex items-start justify-between gap-2">
+        <div className="space-y-0.5">
+          <div className="text-sm font-semibold capitalize">{formatDateIT(iso)}</div>
+          {!data && (
+            <p className="text-xs text-muted-foreground">Nessuna registrazione alimentare per questo giorno.</p>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <Link
+            to={`/day/${iso}`}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent"
+            title="Apri vista giorno completa"
+          >
+            <ExternalLink className="h-3 w-3" /> vai al giorno
+          </Link>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onClose} title="Chiudi">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      {data && (
+        <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <Metric
+            label="Calorie"
+            value={Math.round(data.kcal)}
+            target={data.kcal_target != null ? Math.round(data.kcal_target) : null}
+            unit="kcal"
+            delta={kcalDelta != null ? Math.round(kcalDelta) : null}
+          />
+          <Metric label="Proteine" value={Math.round(data.protein_g)} target={macroTargets.protein != null ? Math.round(macroTargets.protein) : null} unit="g" />
+          <Metric label="Grassi" value={Math.round(data.fat_g)} target={macroTargets.fat != null ? Math.round(macroTargets.fat) : null} unit="g" />
+          <Metric label="Carboidrati" value={Math.round(data.carbs_g)} target={macroTargets.carbs != null ? Math.round(macroTargets.carbs) : null} unit="g" />
+        </div>
+      )}
+
+      {data && adherencePct != null && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Aderenza: <strong>{adherencePct.toFixed(0)}%</strong> del target kcal
+          {kcalDelta != null && (
+            <> · {kcalDelta >= 0 ? "+" : ""}{Math.round(kcalDelta)} kcal {kcalDelta >= 0 ? "sopra" : "sotto"}</>
+          )}
+          {!sameAsCurrent && data.kcal_target != null && (
+            <> · piano del giorno: {Math.round(data.kcal_target)} kcal/die</>
+          )}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function Metric({ label, value, target, unit, delta }: {
+  label: string
+  value: number
+  target: number | null
+  unit: string
+  delta?: number | null
+}) {
+  return (
+    <div>
+      <div className="text-muted-foreground">{label}</div>
+      <div className="tabular-nums">
+        <span className="font-semibold">{value.toLocaleString("it-IT")}</span>
+        {target != null && <span className="text-muted-foreground"> / {target.toLocaleString("it-IT")}</span>}
+        <span className="ml-0.5 text-muted-foreground">{unit}</span>
+      </div>
+      {delta != null && (
+        <div className={`text-[10px] ${delta >= 0 ? "text-red-600" : "text-blue-600"}`}>
+          {delta >= 0 ? "+" : ""}{delta.toLocaleString("it-IT")}
+        </div>
+      )}
+    </div>
   )
 }
