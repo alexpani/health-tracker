@@ -12,7 +12,7 @@ export default function Layout() {
       {/* Top bar:
           - mobile/tablet (<lg): hamburger + titolo, drawer al click
           - desktop (lg+): nav orizzontale fissa con tutte le voci */}
-      <header className="border-b bg-card sticky top-0 z-40 flex items-center gap-3 px-4 h-12 shadow-sm">
+      <header className="border-b bg-card sticky top-0 z-40 flex items-center gap-3 px-4 h-12">
         {/* Hamburger: solo <lg */}
         <Button
           variant="ghost"
