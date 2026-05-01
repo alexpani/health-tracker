@@ -179,6 +179,7 @@ Ordered history (most recent last):
 - `GET /api/v1/write/recent` — dashboard feedback on write status
 - `GET /api/v1/write/allowed-types` — whitelist of write-allowed HK identifiers
 - `POST /api/v1/delete/plan`, `GET /api/v1/delete/pending`, `POST /api/v1/delete/{id}/confirm|fail`, `GET /api/v1/delete/status`
+- `POST /api/v1/delete/retry-failed?error_contains=...` — resetta `failed` PendingDeletion → `pending` per ritentarli al prossimo sync. Filtro opzionale `error_contains` (substring ILIKE su `error_message`); senza filtro resetta tutto. Nato per ripulire i "false fail" causati da `Protected health data is inaccessible` (HK code 8 = telefono lockato durante sync), che il vecchio iOS marcava `failed` invece di lasciarli `pending` per retry.
 
 **Rules** (dashboard Settings page)
 - `GET|POST /api/v1/rules` — list / create

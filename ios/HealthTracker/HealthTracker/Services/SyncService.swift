@@ -874,6 +874,7 @@ final class SyncService {
 
         var ok = 0
         var failed = 0
+        var deferred = 0
         let total = Double(pending.count)
 
         for (idx, item) in pending.enumerated() {
@@ -894,14 +895,34 @@ final class SyncService {
                     ok += 1
                 }
             } catch {
+                // Distinguish TRANSIENT errors (worth retrying next sync) from
+                // PERMANENT failures (no point retrying). The most common
+                // transient case is HKError.errorDatabaseInaccessible (code 8)
+                // = "Protected health data is inaccessible" returned by
+                // HealthKit when the iPhone is locked. HK allows puntuali
+                // *writes* even when locked, but `delete()` is forbidden, so
+                // background-triggered syncs while the phone is locked produce
+                // a stream of false "failed" deletions.
+                //
+                // For transient errors we leave the row in `pending` status
+                // (no API call) so the next sync — when the phone is hopefully
+                // unlocked — picks it up and retries.
+                let nsErr = error as NSError
+                let isTransient =
+                    nsErr.domain == HKError.errorDomain
+                    && nsErr.code == HKError.Code.errorDatabaseInaccessible.rawValue
+                if isTransient {
+                    deferred += 1
+                    continue
+                }
                 try? await apiClient.failDeletion(id: item.id, error: error.localizedDescription)
                 failed += 1
             }
         }
 
         typeProgress = 1.0
-        syncLog.append("Deletions: \(ok) ok, \(failed) failed")
-        logger.info("Deletions processed: \(ok) ok, \(failed) failed")
+        syncLog.append("Deletions: \(ok) ok, \(failed) failed, \(deferred) deferred")
+        logger.info("Deletions processed: \(ok) ok, \(failed) failed, \(deferred) deferred")
     }
 
     private func getSyncDate(for typeIdentifier: String) async -> Date? {

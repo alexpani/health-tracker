@@ -146,3 +146,31 @@ async def status(db: AsyncSession = Depends(get_db)):
     stmt = select(PendingDeletion.status, func.count()).group_by(PendingDeletion.status)
     result = await db.execute(stmt)
     return {s: c for s, c in result.all()}
+
+
+@router.post("/retry-failed")
+async def retry_failed(
+    db: AsyncSession = Depends(get_db),
+    error_contains: str | None = Query(
+        None,
+        description="Optional substring filter on error_message. Default = retry "
+                    "ALL failed deletions. Most common useful filter: "
+                    "'Protected health data is inaccessible' (HK locked at sync time).",
+    ),
+):
+    """Reset `failed` PendingDeletion rows back to `pending` so they get
+    re-attempted on the next iOS sync.
+
+    Background: HKHealthStore.delete() returns `errorDatabaseInaccessible`
+    (code 8) when the iPhone is locked. The old iOS code marked these as
+    `failed` permanently, accumulating zombie samples in HealthKit. Newer
+    iOS code defers transient errors automatically; this endpoint lets you
+    rescue the legacy backlog of false-failures with a single call."""
+    from sqlalchemy import update
+    stmt = update(PendingDeletion).where(PendingDeletion.status == "failed")
+    if error_contains:
+        stmt = stmt.where(PendingDeletion.error_message.ilike(f"%{error_contains}%"))
+    stmt = stmt.values(status="pending", error_message=None, deleted_at=None)
+    result = await db.execute(stmt)
+    await db.commit()
+    return {"reset": result.rowcount, "filter": error_contains}
