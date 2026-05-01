@@ -8,11 +8,11 @@ export default function Layout() {
   const [open, setOpen] = useState(false)
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-slate-100 dark:bg-slate-900">
       {/* Top bar:
           - mobile/tablet (<lg): hamburger + titolo, drawer al click
           - desktop (lg+): nav orizzontale fissa con tutte le voci */}
-      <header className="border-b bg-card/50 sticky top-0 z-40 flex items-center gap-3 px-4 h-12">
+      <header className="border-b bg-card sticky top-0 z-40 flex items-center gap-3 px-4 h-12 shadow-sm">
         {/* Hamburger: solo <lg */}
         <Button
           variant="ghost"
@@ -34,10 +34,14 @@ export default function Layout() {
         </div>
       </header>
 
-      {/* Main content — capped a 1680px (mx-auto centra). */}
+      {/* Main content — boxed: max-w 1680px + bg-background + ombra, su
+          sfondo esterno bg-slate-100. Padding orizzontale solo su schermi
+          larghi così il box "respira" visibilmente. */}
       <main className="flex-1 overflow-y-auto">
-        <div className="p-6 max-w-[1680px] mx-auto">
-          <Outlet />
+        <div className="max-w-[1680px] mx-auto px-2 sm:px-4 py-4">
+          <div className="bg-background rounded-lg shadow-sm border p-6 min-h-[calc(100vh-7rem)]">
+            <Outlet />
+          </div>
         </div>
       </main>
 

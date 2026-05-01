@@ -27,7 +27,7 @@ HealthKit is only accessible from native iOS apps. This system syncs all health 
 
 - **iOS App** (`ios/HealthTracker/`): SwiftUI + HealthKit + SwiftData, reads/writes/deletes Apple Health data, syncs to backend
 - **Backend** (`backend/`): FastAPI + async SQLAlchemy + PostgreSQL 16 + Alembic, deployed via Docker on Proxmox LXC
-- **Dashboard** (`dashboard/`): React 18 + Vite + TypeScript + Tailwind + shadcn/ui + Recharts + TanStack Query, deployed via Nginx on Proxmox LXC. Layout has a **hamburger top-bar** that opens a nav drawer (Sidebar nav items listed in `src/components/layout/Sidebar.tsx`); main content e' centrato con `max-w-[1680px] mx-auto` per non stiracchiarsi su monitor ultra-wide.
+- **Dashboard** (`dashboard/`): React 18 + Vite + TypeScript + Tailwind + shadcn/ui + Recharts + TanStack Query, deployed via Nginx on Proxmox LXC. Layout has a **hamburger top-bar** that opens a nav drawer (Sidebar nav items listed in `src/components/layout/Sidebar.tsx`); main content **boxed**: card centrata con `max-w-[1680px] mx-auto`, `bg-background`, `rounded-lg`, `shadow-sm` su sfondo esterno `bg-slate-100` (dark: `bg-slate-900`) — non si stiracchia su monitor ultra-wide.
 
 ### Infrastructure
 
