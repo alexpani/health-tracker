@@ -63,10 +63,12 @@ export default function WorkoutDetail() {
   const [notesSaved, setNotesSaved] = useState(false)
   // Indice del punto GPS sotto il cursore — condiviso fra mappa e altimetria.
   const [routeHover, setRouteHover] = useState<number | null>(null)
-  // Numero del km cliccato nella tabella "Parziali" (1-based). Click sulla
-  // stessa riga lo deseleziona. Quando valorizzato, la mappa evidenzia il
-  // segmento GPS corrispondente.
-  const [highlightedKm, setHighlightedKm] = useState<number | null>(null)
+  // Riga selezionata da una delle due tabelle ("Parziali per km" o
+  // "Intervalli"). Click sulla stessa riga deseleziona; click su una di
+  // un'altra tabella switcha sorgente. Il highlightedRange viene derivato
+  // sotto in base al kind.
+  type Highlight = { kind: "km" | "activity"; id: number }
+  const [highlight, setHighlight] = useState<Highlight | null>(null)
 
   useEffect(() => {
     setTitleDraft(workout?.title ?? "")
@@ -200,28 +202,41 @@ export default function WorkoutDetail() {
     })
   }, [workout, splitsData])
 
-  // Range di indici GPS corrispondente al km cliccato. Cerca tutti i punti
-  // GPS la cui timestamp cade nella finestra del km. Se non trova punti
-  // dentro la finestra (route GPS non perfettamente allineato col tempo
-  // del workout, raro), ritorna null.
+  // Range di indici GPS da evidenziare sulla mappa, derivato dal highlight
+  // attivo. Per "km" ricava la finestra dai split cumulativi; per "activity"
+  // usa direttamente start/end della WorkoutActivity. Cerca i punti GPS
+  // dentro la finestra; se non ne trova (es. route GPS che non copre il
+  // segmento) ritorna null e la mappa non evidenzia nulla.
   const highlightedRange = useMemo(() => {
-    if (highlightedKm === null || !route?.points || route.points.length === 0) return null
-    const range = kmTimeRanges.find(r => r.n === highlightedKm)
-    if (!range) return null
+    if (!highlight || !route?.points || route.points.length === 0) return null
+    let startTs: number | undefined
+    let endTs: number | undefined
+    if (highlight.kind === "km") {
+      const range = kmTimeRanges.find(r => r.n === highlight.id)
+      if (!range) return null
+      startTs = range.startTs
+      endTs = range.endTs
+    } else {
+      const act = workout?.activities?.[highlight.id]
+      if (!act) return null
+      startTs = new Date(act.start).getTime()
+      endTs = new Date(act.end).getTime()
+    }
+    if (startTs === undefined || endTs === undefined || endTs <= startTs) return null
     let startIdx = -1
     let endIdx = -1
     for (let i = 0; i < route.points.length; i++) {
       const t = new Date(route.points[i].ts).getTime()
-      if (t >= range.startTs && t <= range.endTs) {
+      if (t >= startTs && t <= endTs) {
         if (startIdx === -1) startIdx = i
         endIdx = i
-      } else if (t > range.endTs) {
+      } else if (t > endTs) {
         break
       }
     }
     if (startIdx === -1 || endIdx <= startIdx) return null
     return { startIdx, endIdx }
-  }, [highlightedKm, kmTimeRanges, route])
+  }, [highlight, kmTimeRanges, route, workout])
 
   const speedChartData = useMemo(() => {
     const arr = (runningSpeed.data?.data as Sample[] | undefined) ?? []
@@ -497,12 +512,12 @@ export default function WorkoutDetail() {
               </TableHeader>
               <TableBody>
                 {splitsData.splits.map(s => {
-                  const isHighlighted = highlightedKm === s.n
+                  const isHighlighted = highlight?.kind === "km" && highlight.id === s.n
                   const clickable = !!route && route.points.length > 0
                   return (
                     <TableRow
                       key={s.n}
-                      onClick={clickable ? () => setHighlightedKm(prev => (prev === s.n ? null : s.n)) : undefined}
+                      onClick={clickable ? () => setHighlight(prev => (prev?.kind === "km" && prev.id === s.n ? null : { kind: "km", id: s.n })) : undefined}
                       className={
                         (clickable ? "cursor-pointer hover:bg-muted/50 " : "") +
                         (isHighlighted ? "bg-blue-50 dark:bg-blue-950" : "")
@@ -536,6 +551,7 @@ export default function WorkoutDetail() {
               Intervalli
               <span className="ml-2 text-xs font-normal text-muted-foreground">
                 {workout.activities.length} entry · da HealthKit (HKWorkoutActivity / workoutEvents)
+                {route && route.points.length > 0 && " · click su una riga per evidenziare l'intervallo sulla mappa"}
               </span>
             </CardTitle>
           </CardHeader>
@@ -575,9 +591,21 @@ export default function WorkoutDetail() {
                   const typeSubtitle = !a.name && a.activity_type != null && workoutName(a.activity_type) !== activityLabel
                     ? workoutName(a.activity_type)
                     : null
+                  const isHighlighted = highlight?.kind === "activity" && highlight.id === i
+                  const clickable = !!route && route.points.length > 0
                   return (
-                    <TableRow key={i} className={isRest ? "bg-muted/40" : ""}>
-                      <TableCell className="font-medium tabular-nums">{a.n}</TableCell>
+                    <TableRow
+                      key={i}
+                      onClick={clickable ? () => setHighlight(prev => (prev?.kind === "activity" && prev.id === i ? null : { kind: "activity", id: i })) : undefined}
+                      className={
+                        (clickable ? "cursor-pointer hover:bg-muted/50 " : "") +
+                        (isHighlighted ? "bg-blue-50 dark:bg-blue-950" : (isRest ? "bg-muted/40" : ""))
+                      }
+                    >
+                      <TableCell className="font-medium tabular-nums">
+                        {a.n}
+                        {isHighlighted && <span className="ml-1 text-blue-600">●</span>}
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           {dotColor && (
