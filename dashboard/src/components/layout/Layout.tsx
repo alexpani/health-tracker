@@ -34,9 +34,9 @@ export default function Layout() {
         </div>
       </header>
 
-      {/* Main content full-width */}
+      {/* Main content — capped a 1680px (mx-auto centra). */}
       <main className="flex-1 overflow-y-auto">
-        <div className="p-6">
+        <div className="p-6 max-w-[1680px] mx-auto">
           <Outlet />
         </div>
       </main>

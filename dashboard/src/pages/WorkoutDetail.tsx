@@ -378,59 +378,61 @@ export default function WorkoutDetail() {
         </Card>
       )}
 
-      <Card>
-        <CardHeader><CardTitle>Titolo</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          <Input
-            value={titleDraft}
-            onChange={e => setTitleDraft(e.target.value)}
-            placeholder="Titolo personalizzato del workout..."
-            maxLength={200}
-          />
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={saveTitle}
-              disabled={!titleDirty || update.isPending}
-            >
-              {update.isPending ? "Salvo..." : "Salva"}
-            </Button>
-            {titleDirty && (
-              <Button size="sm" variant="ghost" onClick={() => setTitleDraft(workout.title ?? "")}>
-                Annulla
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader><CardTitle>Titolo</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            <Input
+              value={titleDraft}
+              onChange={e => setTitleDraft(e.target.value)}
+              placeholder="Titolo personalizzato del workout..."
+              maxLength={200}
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={saveTitle}
+                disabled={!titleDirty || update.isPending}
+              >
+                {update.isPending ? "Salvo..." : "Salva"}
               </Button>
-            )}
-            {titleSaved && <span className="text-xs text-green-600">Salvato</span>}
-          </div>
-        </CardContent>
-      </Card>
+              {titleDirty && (
+                <Button size="sm" variant="ghost" onClick={() => setTitleDraft(workout.title ?? "")}>
+                  Annulla
+                </Button>
+              )}
+              {titleSaved && <span className="text-xs text-green-600">Salvato</span>}
+            </div>
+          </CardContent>
+        </Card>
 
-      <Card>
-        <CardHeader><CardTitle>Note</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          <Textarea
-            value={notesDraft}
-            onChange={e => setNotesDraft(e.target.value)}
-            placeholder="Aggiungi una nota per questo workout..."
-            rows={4}
-          />
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={saveNotes}
-              disabled={!notesDirty || update.isPending}
-            >
-              {update.isPending ? "Salvo..." : "Salva"}
-            </Button>
-            {notesDirty && (
-              <Button size="sm" variant="ghost" onClick={() => setNotesDraft(workout.notes ?? "")}>
-                Annulla
+        <Card>
+          <CardHeader><CardTitle>Note</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            <Textarea
+              value={notesDraft}
+              onChange={e => setNotesDraft(e.target.value)}
+              placeholder="Aggiungi una nota per questo workout..."
+              rows={4}
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={saveNotes}
+                disabled={!notesDirty || update.isPending}
+              >
+                {update.isPending ? "Salvo..." : "Salva"}
               </Button>
-            )}
-            {notesSaved && <span className="text-xs text-green-600">Salvata</span>}
-          </div>
-        </CardContent>
-      </Card>
+              {notesDirty && (
+                <Button size="sm" variant="ghost" onClick={() => setNotesDraft(workout.notes ?? "")}>
+                  Annulla
+                </Button>
+              )}
+              {notesSaved && <span className="text-xs text-green-600">Salvata</span>}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader>
@@ -616,35 +618,23 @@ export default function WorkoutDetail() {
         </Card>
       )}
 
-      {hrChartData.length > 0 && (
+      {/* Card chart cardiaco solo se ci sono almeno 2 sample puntuali — i
+          workout pre-2019 di Apple Watch hanno 1 solo sample aggregato che
+          non disegna una linea, meglio nascondere la card del tutto: la
+          FC media e' gia' visibile nella sezione metriche in alto. */}
+      {hrChartData.length > 1 && hrAggregatedOnly === null && (
         <Card>
           <CardHeader><CardTitle>Frequenza cardiaca</CardTitle></CardHeader>
           <CardContent>
-            {hrAggregatedOnly !== null ? (
-              // Workout pre-2019: watchOS salvava un solo sample HR
-              // aggregato (durata = workout). Non c'e' nulla da
-              // disegnare; mostriamo direttamente la FC media.
-              <div className="space-y-1">
-                <div className="text-3xl font-bold text-red-500 tabular-nums">
-                  {hrAggregatedOnly} <span className="text-base font-normal text-muted-foreground">bpm</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  FC media (sample aggregato del workout). I sample puntuali a 5s di cadenza non sono
-                  disponibili per questo workout — comportamento di watchOS pre-2019, durante il
-                  "workout mode" l'orologio salvava solo l'aggregato.
-                </p>
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={hrChartData}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                  <XAxis dataKey="time" tickFormatter={timeAxisFmt} minTickGap={50} tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 5", "dataMax + 5"]} />
-                  <Tooltip labelFormatter={timeAxisFmt} formatter={(v: number) => [`${Math.round(v)} bpm`, "HR"]} />
-                  <Line dataKey="value" stroke="#ef4444" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={hrChartData}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                <XAxis dataKey="time" tickFormatter={timeAxisFmt} minTickGap={50} tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 5", "dataMax + 5"]} />
+                <Tooltip labelFormatter={timeAxisFmt} formatter={(v: number) => [`${Math.round(v)} bpm`, "HR"]} />
+                <Line dataKey="value" stroke="#ef4444" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
           </CardContent>
         </Card>
       )}
