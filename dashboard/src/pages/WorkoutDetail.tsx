@@ -63,6 +63,10 @@ export default function WorkoutDetail() {
   const [notesSaved, setNotesSaved] = useState(false)
   // Indice del punto GPS sotto il cursore — condiviso fra mappa e altimetria.
   const [routeHover, setRouteHover] = useState<number | null>(null)
+  // Numero del km cliccato nella tabella "Parziali" (1-based). Click sulla
+  // stessa riga lo deseleziona. Quando valorizzato, la mappa evidenzia il
+  // segmento GPS corrispondente.
+  const [highlightedKm, setHighlightedKm] = useState<number | null>(null)
 
   useEffect(() => {
     setTitleDraft(workout?.title ?? "")
@@ -158,6 +162,66 @@ export default function WorkoutDetail() {
       .map(s => ({ time: s.start_date, value: s.value }))
       .sort((a, b) => a.time.localeCompare(b.time))
   }, [hr.data])
+
+  // Fallback per workout pre-2019 dove watchOS salvava un singolo sample HR
+  // aggregato (durata = workout) invece dei sample puntuali a 5s di cadenza.
+  // In questo caso la chart non puo' disegnare niente; mostriamo invece la
+  // FC media testuale.
+  const hrAggregatedOnly = useMemo(() => {
+    const arr = (hr.data?.data as Sample[] | undefined) ?? []
+    if (arr.length !== 1 || !workout) return null
+    const s = arr[0]
+    const sStart = new Date(s.start_date).getTime()
+    const sEnd = new Date(s.end_date).getTime()
+    const wStart = new Date(workout.start_date).getTime()
+    const wEnd = new Date(workout.end_date).getTime()
+    const sampleDur = sEnd - sStart
+    const workoutDur = wEnd - wStart
+    // Sample che copre >50% del workout = aggregato.
+    if (workoutDur > 0 && sampleDur / workoutDur > 0.5) {
+      return Math.round(s.value)
+    }
+    return null
+  }, [hr.data, workout])
+
+  // Mappa ogni split (1-based) a una finestra temporale [startTs, endTs] in
+  // ms. Gli split sono cumulativi sul tempo: km1 = [workout.start, +dur1],
+  // km2 = [+dur1, +dur1+dur2], ecc. Il backend restituisce già la durata
+  // di ciascun km (anche per i parziali finali).
+  const kmTimeRanges = useMemo(() => {
+    if (!workout || !splitsData?.splits) return []
+    const baseTs = new Date(workout.start_date).getTime()
+    let cum = 0
+    return splitsData.splits.map(s => {
+      const startTs = baseTs + cum * 1000
+      cum += s.duration_seconds
+      const endTs = baseTs + cum * 1000
+      return { n: s.n, startTs, endTs }
+    })
+  }, [workout, splitsData])
+
+  // Range di indici GPS corrispondente al km cliccato. Cerca tutti i punti
+  // GPS la cui timestamp cade nella finestra del km. Se non trova punti
+  // dentro la finestra (route GPS non perfettamente allineato col tempo
+  // del workout, raro), ritorna null.
+  const highlightedRange = useMemo(() => {
+    if (highlightedKm === null || !route?.points || route.points.length === 0) return null
+    const range = kmTimeRanges.find(r => r.n === highlightedKm)
+    if (!range) return null
+    let startIdx = -1
+    let endIdx = -1
+    for (let i = 0; i < route.points.length; i++) {
+      const t = new Date(route.points[i].ts).getTime()
+      if (t >= range.startTs && t <= range.endTs) {
+        if (startIdx === -1) startIdx = i
+        endIdx = i
+      } else if (t > range.endTs) {
+        break
+      }
+    }
+    if (startIdx === -1 || endIdx <= startIdx) return null
+    return { startIdx, endIdx }
+  }, [highlightedKm, kmTimeRanges, route])
 
   const speedChartData = useMemo(() => {
     const arr = (runningSpeed.data?.data as Sample[] | undefined) ?? []
@@ -393,7 +457,13 @@ export default function WorkoutDetail() {
           )}
           {!routeLoading && route && route.points.length > 0 && (
             <>
-              <WorkoutMap points={route.points} hoverIndex={routeHover} onHover={setRouteHover} hrSeries={hrChartData} />
+              <WorkoutMap
+                points={route.points}
+                hoverIndex={routeHover}
+                onHover={setRouteHover}
+                hrSeries={hrChartData}
+                highlightedRange={highlightedRange}
+              />
               <ElevationChart points={route.points} hoverIndex={routeHover} onHover={setRouteHover} />
             </>
           )}
@@ -402,7 +472,16 @@ export default function WorkoutDetail() {
 
       {splitsData && splitsData.splits.length > 0 && (
         <Card>
-          <CardHeader><CardTitle>Parziali (per km)</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>
+              Parziali (per km)
+              {route && route.points.length > 0 && (
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  click su una riga per evidenziare il km sulla mappa
+                </span>
+              )}
+            </CardTitle>
+          </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
@@ -415,19 +494,33 @@ export default function WorkoutDetail() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {splitsData.splits.map(s => (
-                  <TableRow key={s.n}>
-                    <TableCell className="font-medium">{s.n}</TableCell>
-                    <TableCell className="tabular-nums">
-                      {s.distance_km.toFixed(2)} km {s.partial && <span className="text-xs text-muted-foreground">(parziale)</span>}
-                    </TableCell>
-                    <TableCell className="tabular-nums">{formatDuration(s.duration_seconds)}</TableCell>
-                    <TableCell className="tabular-nums">{formatPace(s.pace_sec_per_km)}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {s.avg_heart_rate !== null ? `${s.avg_heart_rate} bpm` : "-"}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {splitsData.splits.map(s => {
+                  const isHighlighted = highlightedKm === s.n
+                  const clickable = !!route && route.points.length > 0
+                  return (
+                    <TableRow
+                      key={s.n}
+                      onClick={clickable ? () => setHighlightedKm(prev => (prev === s.n ? null : s.n)) : undefined}
+                      className={
+                        (clickable ? "cursor-pointer hover:bg-muted/50 " : "") +
+                        (isHighlighted ? "bg-blue-50 dark:bg-blue-950" : "")
+                      }
+                    >
+                      <TableCell className="font-medium">
+                        {s.n}
+                        {isHighlighted && <span className="ml-1 text-blue-600">●</span>}
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        {s.distance_km.toFixed(2)} km {s.partial && <span className="text-xs text-muted-foreground">(parziale)</span>}
+                      </TableCell>
+                      <TableCell className="tabular-nums">{formatDuration(s.duration_seconds)}</TableCell>
+                      <TableCell className="tabular-nums">{formatPace(s.pace_sec_per_km)}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {s.avg_heart_rate !== null ? `${s.avg_heart_rate} bpm` : "-"}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           </CardContent>
@@ -527,15 +620,31 @@ export default function WorkoutDetail() {
         <Card>
           <CardHeader><CardTitle>Frequenza cardiaca</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={hrChartData}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis dataKey="time" tickFormatter={timeAxisFmt} minTickGap={50} tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 5", "dataMax + 5"]} />
-                <Tooltip labelFormatter={timeAxisFmt} formatter={(v: number) => [`${Math.round(v)} bpm`, "HR"]} />
-                <Line dataKey="value" stroke="#ef4444" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            {hrAggregatedOnly !== null ? (
+              // Workout pre-2019: watchOS salvava un solo sample HR
+              // aggregato (durata = workout). Non c'e' nulla da
+              // disegnare; mostriamo direttamente la FC media.
+              <div className="space-y-1">
+                <div className="text-3xl font-bold text-red-500 tabular-nums">
+                  {hrAggregatedOnly} <span className="text-base font-normal text-muted-foreground">bpm</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  FC media (sample aggregato del workout). I sample puntuali a 5s di cadenza non sono
+                  disponibili per questo workout — comportamento di watchOS pre-2019, durante il
+                  "workout mode" l'orologio salvava solo l'aggregato.
+                </p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={hrChartData}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis dataKey="time" tickFormatter={timeAxisFmt} minTickGap={50} tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 5", "dataMax + 5"]} />
+                  <Tooltip labelFormatter={timeAxisFmt} formatter={(v: number) => [`${Math.round(v)} bpm`, "HR"]} />
+                  <Line dataKey="value" stroke="#ef4444" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
       )}

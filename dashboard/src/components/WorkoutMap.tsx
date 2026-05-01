@@ -1,11 +1,19 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
+import { Maximize2, Minimize2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import type { RoutePoint } from "@/lib/types"
 
 export interface TimeSeriesPoint {
   time: string
   value: number
+}
+
+/// Range di indici GPS da evidenziare sulla mappa (start incluso, end incluso).
+export interface HighlightRange {
+  startIdx: number
+  endIdx: number
 }
 
 interface Props {
@@ -15,6 +23,10 @@ interface Props {
   /// Sample HR ordinati per timestamp (ASC). Usati per arricchire il
   /// tooltip al hover sui segmenti della polyline.
   hrSeries?: TimeSeriesPoint[]
+  /// Se valorizzato, disegna una polyline blu spessa sopra i segmenti GPS
+  /// nel range [startIdx, endIdx]. Usato dalla tabella "Parziali" per
+  /// evidenziare il km cliccato.
+  highlightedRange?: HighlightRange | null
 }
 
 interface Segment {
@@ -27,25 +39,40 @@ interface Segment {
   midLon: number
 }
 
+function haversineMeters(a: RoutePoint, b: RoutePoint): number {
+  const R = 6371000
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const dLat = toRad(b.lat - a.lat)
+  const dLon = toRad(b.lon - a.lon)
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+// Pace → colore. Verde (veloce) → giallo (medio) → rosso (lento).
+function paceColor(paceSecPerKm: number | null): string {
+  if (paceSecPerKm === null || !isFinite(paceSecPerKm)) return "#888"
+  const p = Math.max(240, Math.min(480, paceSecPerKm))
+  const t = (p - 240) / (480 - 240)
+  const hue = (1 - t) * 120
+  return `hsl(${hue.toFixed(0)}, 80%, 45%)`
+}
+
 function formatPace(secPerKm: number | null): string {
   if (secPerKm === null || !isFinite(secPerKm) || secPerKm <= 0) return "—"
   const m = Math.floor(secPerKm / 60)
   const s = Math.round(secPerKm - m * 60)
-  // Edge case: rounding overflow (59.7s → "5:00" non "4:60")
   if (s === 60) return `${m + 1}:00/km`
   return `${m}:${s.toString().padStart(2, "0")}/km`
 }
 
-/// HR medio nella finestra [startTs, endTs]. Binary search dell'array
-/// ordinato per timestamp; se nessun sample cade dentro la finestra,
-/// ritorna il sample più vicino (entro 30s) o null.
 function hrAverageInWindow(
   series: TimeSeriesPoint[],
   startTs: number,
   endTs: number
 ): number | null {
   if (series.length === 0) return null
-  // lower_bound del primo sample >= startTs
   let lo = 0
   let hi = series.length
   while (lo < hi) {
@@ -62,41 +89,16 @@ function hrAverageInWindow(
     count++
   }
   if (count > 0) return sum / count
-  // Fallback: sample più vicino entro 30s al midpoint
   const mid = (startTs + endTs) / 2
   const tolerance = 30_000
   let bestIdx = -1
   let bestDelta = Infinity
-  // controlla idx prima e dopo lo
   const candidates = [lo - 1, lo].filter(i => i >= 0 && i < series.length)
   for (const i of candidates) {
     const d = Math.abs(new Date(series[i].time).getTime() - mid)
     if (d < bestDelta) { bestDelta = d; bestIdx = i }
   }
   return bestIdx >= 0 && bestDelta <= tolerance ? series[bestIdx].value : null
-}
-
-function haversineMeters(a: RoutePoint, b: RoutePoint): number {
-  const R = 6371000
-  const toRad = (d: number) => (d * Math.PI) / 180
-  const dLat = toRad(b.lat - a.lat)
-  const dLon = toRad(b.lon - a.lon)
-  const lat1 = toRad(a.lat)
-  const lat2 = toRad(b.lat)
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
-  return 2 * R * Math.asin(Math.sqrt(h))
-}
-
-// Pace → colore. Verde (veloce) → giallo (medio) → rosso (lento).
-// Pace tipico corsa: 240 s/km (4:00) molto veloce → 480 s/km (8:00) lento.
-function paceColor(paceSecPerKm: number | null): string {
-  if (paceSecPerKm === null || !isFinite(paceSecPerKm)) return "#888"
-  const p = Math.max(240, Math.min(480, paceSecPerKm))
-  // Normalize to 0..1 (0 = veloce/verde, 1 = lento/rosso)
-  const t = (p - 240) / (480 - 240)
-  // hue: 120 (verde) → 0 (rosso) passando per 60 (giallo)
-  const hue = (1 - t) * 120
-  return `hsl(${hue.toFixed(0)}, 80%, 45%)`
 }
 
 function buildSegments(points: RoutePoint[], hrSeries?: TimeSeriesPoint[]): Segment[] {
@@ -141,21 +143,27 @@ function tooltipHtml(seg: Segment, ts: string): string {
   `
 }
 
-export function WorkoutMap({ points, hoverIndex, onHover, hrSeries }: Props) {
+// Preset altezze (px). "default" = altezza iniziale al mount.
+const HEIGHT_PRESETS = { S: 300, M: 500, L: 800 } as const
+const DEFAULT_HEIGHT = HEIGHT_PRESETS.M
+
+export function WorkoutMap({ points, hoverIndex, onHover, hrSeries, highlightedRange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const cursorMarkerRef = useRef<L.CircleMarker | null>(null)
   const polylinesRef = useRef<L.Polyline[]>([])
+  const highlightLineRef = useRef<L.Polyline | null>(null)
+
+  const [height, setHeight] = useState<number>(DEFAULT_HEIGHT)
+  const [fullscreen, setFullscreen] = useState<boolean>(false)
 
   const segments = useMemo(() => buildSegments(points, hrSeries), [points, hrSeries])
 
   // Init map once.
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
-    const map = L.map(containerRef.current, {
-      // Disable default zoom control on touch devices? keep default for now.
-      preferCanvas: true,
-    })
+    const map = L.map(containerRef.current, { preferCanvas: true })
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19,
@@ -167,27 +175,32 @@ export function WorkoutMap({ points, hoverIndex, onHover, hrSeries }: Props) {
     }
   }, [])
 
+  // Watch container size changes (drag-resize via CSS resize:vertical, preset
+  // changes, fullscreen toggle): Leaflet needs invalidateSize() to redraw
+  // tiles correctly when the container size changes outside its knowledge.
+  useEffect(() => {
+    if (!containerRef.current) return
+    const ro = new ResizeObserver(() => {
+      mapRef.current?.invalidateSize()
+    })
+    ro.observe(containerRef.current)
+    return () => ro.disconnect()
+  }, [])
+
   // Render segments + start/end markers when points change.
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
-    // Clear previous layers.
     polylinesRef.current.forEach(p => p.remove())
     polylinesRef.current = []
     cursorMarkerRef.current?.remove()
     cursorMarkerRef.current = null
     map.eachLayer(layer => {
-      // Leaflet's tile layer is a TileLayer instance — keep it; remove markers and polylines we may have added.
-      if (layer instanceof L.Marker || (layer instanceof L.Polyline && !(layer as any)._isTile)) {
-        if (!(layer as any)._isTileLayer) {
-          // marker/polyline cleanup is already done above for our refs; skip
-        }
-      }
+      if (layer instanceof L.Marker) layer.remove()
     })
 
     if (points.length === 0) return
 
-    // Polyline segments colored by pace.
     segments.forEach(seg => {
       const a = points[seg.from]
       const b = points[seg.to]
@@ -215,7 +228,6 @@ export function WorkoutMap({ points, hoverIndex, onHover, hrSeries }: Props) {
       polylinesRef.current.push(line)
     })
 
-    // Start / end markers using divIcon (no asset URL issues with Vite).
     const start = points[0]
     const end = points[points.length - 1]
     const startIcon = L.divIcon({
@@ -231,22 +243,14 @@ export function WorkoutMap({ points, hoverIndex, onHover, hrSeries }: Props) {
       iconAnchor: [7, 7],
     })
     L.marker([start.lat, start.lon], { icon: startIcon, title: "Partenza" })
-      .addTo(map)
-      .bindTooltip("Partenza", { direction: "top", offset: [0, -8] })
+      .addTo(map).bindTooltip("Partenza", { direction: "top", offset: [0, -8] })
     L.marker([end.lat, end.lon], { icon: endIcon, title: "Arrivo" })
-      .addTo(map)
-      .bindTooltip("Arrivo", { direction: "top", offset: [0, -8] })
+      .addTo(map).bindTooltip("Arrivo", { direction: "top", offset: [0, -8] })
 
-    // Cursor marker (sync with hoverIndex from elevation chart).
     cursorMarkerRef.current = L.circleMarker([start.lat, start.lon], {
-      radius: 6,
-      color: "#3b82f6",
-      weight: 2,
-      fillColor: "#fff",
-      fillOpacity: 1,
+      radius: 6, color: "#3b82f6", weight: 2, fillColor: "#fff", fillOpacity: 1,
     })
 
-    // Fit bounds.
     const bounds = L.latLngBounds(points.map(p => [p.lat, p.lon]))
     map.fitBounds(bounds, { padding: [24, 24] })
   }, [points, segments, onHover])
@@ -262,11 +266,7 @@ export function WorkoutMap({ points, hoverIndex, onHover, hrSeries }: Props) {
     const p = points[hoverIndex]
     if (!cursorMarkerRef.current) {
       cursorMarkerRef.current = L.circleMarker([p.lat, p.lon], {
-        radius: 6,
-        color: "#3b82f6",
-        weight: 2,
-        fillColor: "#fff",
-        fillOpacity: 1,
+        radius: 6, color: "#3b82f6", weight: 2, fillColor: "#fff", fillOpacity: 1,
       })
     } else {
       cursorMarkerRef.current.setLatLng([p.lat, p.lon])
@@ -276,14 +276,81 @@ export function WorkoutMap({ points, hoverIndex, onHover, hrSeries }: Props) {
     }
   }, [hoverIndex, points])
 
+  // Highlight a range of GPS points (for "Parziali" click): blue thick
+  // polyline drawn on top of the colored ones, plus auto fitBounds to it.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    highlightLineRef.current?.remove()
+    highlightLineRef.current = null
+    if (!highlightedRange || points.length === 0) return
+    const { startIdx, endIdx } = highlightedRange
+    const lo = Math.max(0, Math.min(startIdx, endIdx))
+    const hi = Math.min(points.length - 1, Math.max(startIdx, endIdx))
+    if (hi <= lo) return
+    const slice = points.slice(lo, hi + 1).map(p => [p.lat, p.lon] as [number, number])
+    const line = L.polyline(slice, {
+      color: "#2563eb",
+      weight: 7,
+      opacity: 0.85,
+      lineCap: "round",
+      lineJoin: "round",
+    })
+    line.addTo(map)
+    line.bringToFront()
+    highlightLineRef.current = line
+    map.fitBounds(L.latLngBounds(slice), { padding: [40, 40], maxZoom: 17 })
+  }, [highlightedRange, points])
+
+  function applyPreset(p: keyof typeof HEIGHT_PRESETS) {
+    setHeight(HEIGHT_PRESETS[p])
+  }
+
+  // Fullscreen wrapper styles applied to the outermost div.
+  const wrapperStyle: React.CSSProperties = fullscreen
+    ? { position: "fixed", inset: 0, zIndex: 50, background: "white", padding: 8 }
+    : {}
+
+  // Map container height: in fullscreen prendi tutto lo spazio del wrapper
+  // (calc 100% - control bar); in normal mode usa lo state `height`, con
+  // `resize: vertical` per il drag handle nativo del browser.
+  const mapStyle: React.CSSProperties = fullscreen
+    ? { height: "calc(100% - 44px)", width: "100%" }
+    : { height: `${height}px`, width: "100%", resize: "vertical", overflow: "hidden", minHeight: 200, maxHeight: 1200 }
+
   return (
-    <div className="relative">
-      <div ref={containerRef} className="w-full h-[400px] rounded-md border" />
-      <div className="absolute bottom-2 left-2 z-[400] bg-white/90 px-2 py-1 rounded text-[10px] text-muted-foreground pointer-events-none">
-        Pace: <span style={{ color: paceColor(240) }}>● veloce</span>{" "}
-        <span style={{ color: paceColor(360) }}>● medio</span>{" "}
-        <span style={{ color: paceColor(480) }}>● lento</span>
+    <div ref={wrapperRef} style={wrapperStyle} className={fullscreen ? "" : "relative"}>
+      {/* Control bar */}
+      <div className="flex items-center gap-2 mb-2 text-xs">
+        <span className="text-muted-foreground">Dimensione:</span>
+        <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => applyPreset("S")}>S</Button>
+        <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => applyPreset("M")}>M</Button>
+        <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => applyPreset("L")}>L</Button>
+        <div className="flex-1" />
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2"
+          onClick={() => setFullscreen(f => !f)}
+          title={fullscreen ? "Esci da schermo intero" : "Schermo intero"}
+        >
+          {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+        </Button>
       </div>
+
+      {/* Map container — when not fullscreen, the user can drag the bottom-right
+          corner to resize vertically thanks to `resize: vertical`. */}
+      <div ref={containerRef} style={mapStyle} className="rounded-md border" />
+
+      {/* Pace legend — only when not fullscreen (in fullscreen the map covers
+          the whole viewport and the legend would be lost). */}
+      {!fullscreen && (
+        <div className="absolute bottom-2 left-2 z-[400] bg-white/90 px-2 py-1 rounded text-[10px] text-muted-foreground pointer-events-none">
+          Pace: <span style={{ color: paceColor(240) }}>● veloce</span>{" "}
+          <span style={{ color: paceColor(360) }}>● medio</span>{" "}
+          <span style={{ color: paceColor(480) }}>● lento</span>
+        </div>
+      )}
     </div>
   )
 }
