@@ -420,8 +420,22 @@ async def _fetch_diet_plan(d: date_cls) -> dict | None:
     except Exception:
         return None
 
-    # Niente target storico → nessun piano attivo quel giorno → niente da mostrare.
+    # Niente target storico → due casi:
+    #  - giorno passato senza registrazioni → nessun piano attivo, return None
+    #  - giorno >= oggi → l'utente non ha ancora registrato nulla MA il piano
+    #    corrente e' attivo. Cadiamo sui dati di `active-plan` come fallback
+    #    (altrimenti la card "Piano alimentare" sotto Regimi attivi sparisce
+    #    su /day/<oggi> finche' non si mangia il primo boccone).
     if target is None:
+        if d >= date_cls.today() and plan_kcal is not None:
+            return {
+                "name": name or "Piano alimentare",
+                "kcal_target": plan_kcal,
+                "protein_g": macros["protein_g"],
+                "fat_g": macros["fat_g"],
+                "carbs_g": macros["carbs_g"],
+                "name_is_historic_guess": False,
+            }
         return None
 
     # Stesso target del piano corrente? probabile sia lo stesso piano:
