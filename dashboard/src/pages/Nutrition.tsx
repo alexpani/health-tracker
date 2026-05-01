@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Filter } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DiarioSection } from "@/components/DiarioSection"
+import { NutritionCalendar } from "@/components/NutritionCalendar"
 import { NutritionFiltersSidebar } from "@/components/NutritionFiltersSidebar"
 import { TypeBrowser } from "@/components/TypeBrowser"
 import { CATEGORIES } from "@/lib/healthkit"
@@ -44,17 +45,35 @@ export default function Nutrition() {
     return Array.from(set).sort((a, b) => b - a)
   }, [allDaily, facetKcal])
 
+  // Lista dei `kcal_target` distinti dai daily totals storici. Il diario
+  // espone solo lo snapshot per giorno, quindi target diversi = piani
+  // diversi. Filtro: tolgo null e arrotondo a int per evitare duplicati
+  // tipo 1499.999 vs 1500.
+  const availableTargets = useMemo(() => {
+    const set = new Set<number>()
+    for (const d of allDaily ?? []) {
+      if (d.kcal_target != null) set.add(Math.round(d.kcal_target))
+    }
+    return Array.from(set).sort((a, b) => a - b)
+  }, [allDaily])
+
   const activeFiltersCount = [
     filters.start, filters.end,
     filters.kcal_min !== undefined ? 1 : undefined,
     filters.kcal_max !== undefined ? 1 : undefined,
     filters.adherence,
+    filters.kcal_target !== undefined ? 1 : undefined,
   ].filter(Boolean).length
 
   return (
     <div className="flex gap-6 -m-6 p-0 min-h-[calc(100vh-0px)]">
       <aside className="hidden lg:block w-[320px] shrink-0 border-r bg-card/30 sticky top-0 h-screen overflow-hidden">
-        <NutritionFiltersSidebar value={filters} onChange={setFilters} availableYears={availableYears} />
+        <NutritionFiltersSidebar
+          value={filters}
+          onChange={setFilters}
+          availableYears={availableYears}
+          availableTargets={availableTargets}
+        />
       </aside>
 
       <div className="flex-1 space-y-10 min-w-0 p-6">
@@ -68,6 +87,8 @@ export default function Nutrition() {
             Filtri {activeFiltersCount > 0 && <span className="ml-1 bg-primary text-primary-foreground rounded-full px-2 text-xs">{activeFiltersCount}</span>}
           </Button>
         </div>
+
+        <NutritionCalendar kcalTargetFilter={filters.kcal_target} />
 
         <DiarioSection filters={filters} />
 
@@ -88,6 +109,7 @@ export default function Nutrition() {
               value={filters}
               onChange={setFilters}
               availableYears={availableYears}
+              availableTargets={availableTargets}
               onClose={() => setShowMobileFilters(false)}
             />
           </div>

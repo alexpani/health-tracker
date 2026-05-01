@@ -489,6 +489,12 @@ export interface NutritionFilters {
   kcal_min?: number
   kcal_max?: number
   adherence?: "under" | "on_target" | "over"  // ±10% tolerance for on_target
+  /// Filtro "regime alimentare" — dato che il diario non espone i nomi dei
+  /// piani storici, usiamo il `kcal_target` come discriminante: due giorni
+  /// con lo stesso target appartengono allo stesso piano. Valori speciali:
+  /// numero = piano con quel target esatto; null = "Senza target" (giorni
+  /// senza piano attivo); undefined = nessun filtro.
+  kcal_target?: number | null
 }
 
 export interface BodyFilters {

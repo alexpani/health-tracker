@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { useRegimens } from "@/lib/queries"
+import { useDiarioActivePlan, useRegimens } from "@/lib/queries"
 import type { Regimen, RegimenKind } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
 
@@ -33,13 +33,46 @@ export default function Regimens() {
     include_ended: includeEnded,
   })
 
+  // Piano alimentare attivo dal diario alimentare. Lo iniettamo come Regimen
+  // sintetico (id=-1, source='diario') in modo che la pagina /regimens
+  // mostri sotto "Piano alimentare" lo stesso piano che la /day/:date
+  // riconosce. Read-only — l'editing avviene nel diario.
+  const dietQ = useDiarioActivePlan()
+  const dietPlanRegimen = useMemo<Regimen | null>(() => {
+    if (!dietQ.data) return null
+    const p = dietQ.data
+    const dose: string[] = []
+    if (p.kcal_target != null) dose.push(`${Math.round(p.kcal_target)} kcal/die`)
+    if (p.protein_g != null) dose.push(`P ${Math.round(p.protein_g)}g`)
+    if (p.fat_g != null) dose.push(`F ${Math.round(p.fat_g)}g`)
+    if (p.carbs_g != null) dose.push(`C ${Math.round(p.carbs_g)}g`)
+    return {
+      id: -1,
+      kind: "diet",
+      name: p.name,
+      start_date: null,
+      end_date: null,
+      dose: dose.join(" · ") || null,
+      notes: "Sincronizzato dal diario alimentare. Modifica nel diario.",
+      source: "diario",
+      created_at: p.updated_at ?? "",
+      updated_at: p.updated_at ?? "",
+    }
+  }, [dietQ.data])
+
   const grouped = useMemo(() => {
     const out: Record<"ongoing" | "ended", Regimen[]> = { ongoing: [], ended: [] }
     for (const r of q.data ?? []) {
       ;(isOngoing(r) ? out.ongoing : out.ended).push(r)
     }
+    // Inietto il piano del diario in cima alla sezione "ongoing" (e' attivo
+    // per definizione: il diario espone solo il piano corrente). Solo se
+    // il filtro kindFilter consente "diet" (null = tutti, o "diet").
+    if (dietPlanRegimen && (kindFilter === null || kindFilter === "diet")) {
+      out.ongoing.unshift(dietPlanRegimen)
+    }
     return out
-  }, [q.data])
+  }, [q.data, dietPlanRegimen, kindFilter])
 
   return (
     <div className="space-y-6">
@@ -124,30 +157,44 @@ function Section({ title, items, onEdit }: { title: string; items: Regimen[]; on
                 </tr>
               </thead>
               <tbody>
-                {byKind[kind].map(r => (
-                  <tr key={r.id} className="border-t hover:bg-accent/40">
-                    <td className="p-3 font-medium">
-                      {r.name}
-                      {r.source === "lab_backfill" && (
-                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400">
-                          da lab
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-3 hidden md:table-cell">{r.dose ?? "—"}</td>
-                    <td className="p-3 tabular-nums whitespace-nowrap">
-                      {fmtDate(r.start_date)} → {r.end_date ? fmtDate(r.end_date) : <em className="text-emerald-600">in corso</em>}
-                    </td>
-                    <td className="p-3 hidden lg:table-cell text-muted-foreground line-clamp-2 max-w-xs">
-                      {r.notes ?? ""}
-                    </td>
-                    <td className="p-3 text-right">
-                      <Button variant="ghost" size="sm" onClick={() => onEdit(r)}>
-                        Modifica
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                {byKind[kind].map(r => {
+                  const fromDiario = r.source === "diario"
+                  return (
+                    <tr key={r.id} className="border-t hover:bg-accent/40">
+                      <td className="p-3 font-medium">
+                        {r.name}
+                        {r.source === "lab_backfill" && (
+                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                            da lab
+                          </span>
+                        )}
+                        {fromDiario && (
+                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+                            dal diario
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3 hidden md:table-cell">{r.dose ?? "—"}</td>
+                      <td className="p-3 tabular-nums whitespace-nowrap">
+                        {fromDiario
+                          ? <em className="text-emerald-600">in corso</em>
+                          : <>{fmtDate(r.start_date)} → {r.end_date ? fmtDate(r.end_date) : <em className="text-emerald-600">in corso</em>}</>}
+                      </td>
+                      <td className="p-3 hidden lg:table-cell text-muted-foreground line-clamp-2 max-w-xs">
+                        {r.notes ?? ""}
+                      </td>
+                      <td className="p-3 text-right">
+                        {fromDiario ? (
+                          <span className="text-xs text-muted-foreground">solo lettura</span>
+                        ) : (
+                          <Button variant="ghost" size="sm" onClick={() => onEdit(r)}>
+                            Modifica
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </CardContent>

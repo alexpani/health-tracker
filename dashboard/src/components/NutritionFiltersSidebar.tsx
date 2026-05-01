@@ -8,6 +8,9 @@ interface Props {
   value: NutritionFilters
   onChange: (v: NutritionFilters) => void
   availableYears: number[]
+  /// Lista dei `kcal_target` distinti presenti nei daily totals storici.
+  /// Usata per popolare le chip "Regime alimentare".
+  availableTargets: number[]
   onClose?: () => void
 }
 
@@ -75,7 +78,7 @@ function DateRow({ label, isoValue, isEnd, onChange }: {
   )
 }
 
-export function NutritionFiltersSidebar({ value, onChange, availableYears, onClose }: Props) {
+export function NutritionFiltersSidebar({ value, onChange, availableYears, availableTargets, onClose }: Props) {
   const set = <K extends keyof NutritionFilters>(k: K, v: NutritionFilters[K]) =>
     onChange({ ...value, [k]: v })
 
@@ -110,6 +113,7 @@ export function NutritionFiltersSidebar({ value, onChange, availableYears, onClo
     value.kcal_min !== undefined ? 1 : undefined,
     value.kcal_max !== undefined ? 1 : undefined,
     value.adherence,
+    value.kcal_target !== undefined ? 1 : undefined,
   ].filter(Boolean).length
 
   return (
@@ -188,6 +192,51 @@ export function NutritionFiltersSidebar({ value, onChange, availableYears, onClo
           })}
         </div>
       </section>
+
+      {/* Regime alimentare (= kcal_target distinti) */}
+      {availableTargets.length > 0 && (
+        <section className="space-y-2">
+          <Label className="text-xs font-medium">Regime alimentare</Label>
+          <div className="flex flex-wrap gap-1">
+            <button
+              type="button"
+              onClick={() => set("kcal_target", undefined)}
+              className={`text-xs px-2 py-1 rounded-md border ${
+                value.kcal_target === undefined ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-accent"
+              }`}
+            >
+              Tutti
+            </button>
+            {availableTargets.map(t => {
+              const sel = value.kcal_target === t
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => set("kcal_target", t)}
+                  className={`text-xs px-2 py-1 rounded-md border ${
+                    sel ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-accent"
+                  }`}
+                >
+                  {Math.round(t)} kcal
+                </button>
+              )
+            })}
+            <button
+              type="button"
+              onClick={() => set("kcal_target", null)}
+              className={`text-xs px-2 py-1 rounded-md border ${
+                value.kcal_target === null ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-accent"
+              }`}
+            >
+              Senza target
+            </button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Il diario non espone i nomi dei piani storici: usiamo il `kcal/die` come discriminante.
+          </p>
+        </section>
+      )}
 
       {/* Aderenza al target */}
       <section className="space-y-2">

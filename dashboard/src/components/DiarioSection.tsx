@@ -172,9 +172,19 @@ export function DiarioSection({ filters }: Props) {
       } else if (filters.adherence && !d.kcal_target) {
         return false
       }
+      // Filtro "Regime alimentare" (kcal_target). null = "Senza target",
+      // numero = "match esatto su quel target" (round per evitare drift
+      // tipo 1499.999 vs 1500).
+      if (filters.kcal_target !== undefined) {
+        if (filters.kcal_target === null) {
+          if (d.kcal_target != null) return false
+        } else {
+          if (d.kcal_target == null || Math.round(d.kcal_target) !== filters.kcal_target) return false
+        }
+      }
       return true
     })
-  }, [consolidatedDaily, filters.start, filters.end, filters.kcal_min, filters.kcal_max, filters.adherence])
+  }, [consolidatedDaily, filters.start, filters.end, filters.kcal_min, filters.kcal_max, filters.adherence, filters.kcal_target])
 
   const stats = useMemo(() => {
     if (filtered.length === 0) return null
