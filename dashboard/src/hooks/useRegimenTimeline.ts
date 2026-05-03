@@ -98,6 +98,68 @@ export function sortRegimens(regimens: Regimen[]): Regimen[] {
   })
 }
 
+export interface RegimenGroup {
+  key: string // `${kind}|${normalizedName}`
+  kind: RegimenKind
+  name: string // canonical (presa dal regimen piu' recente per readability)
+  regimens: Regimen[]
+}
+
+/** Normalizza il nome: trim + lowercase. Due regimi con lo stesso
+ * normalizedName + kind sono considerati lo stesso "regime" mostrato
+ * sulla stessa riga timeline. */
+export function normalizeName(name: string): string {
+  return name.trim().toLowerCase()
+}
+
+/** Raggruppa per (kind, name normalizzato). Ogni gruppo riunisce le
+ * "vite" successive dello stesso regime (es. Coenzima Q10 preso ad
+ * aprile, sospeso, ripreso a maggio). Ordina i gruppi per kind poi
+ * per earliest start_date del gruppo. */
+export function groupRegimens(regimens: Regimen[]): RegimenGroup[] {
+  const map = new Map<string, RegimenGroup>()
+  for (const r of regimens) {
+    const key = `${r.kind}|${normalizeName(r.name)}`
+    const existing = map.get(key)
+    if (existing) {
+      existing.regimens.push(r)
+      // Display name: usa quello del regime piu' recente (id maggiore)
+      // come canonical. Garantisce capitalization consistente.
+      if (r.id > existing.regimens[0].id) {
+        existing.name = r.name
+      }
+    } else {
+      map.set(key, {
+        key,
+        kind: r.kind as RegimenKind,
+        name: r.name,
+        regimens: [r],
+      })
+    }
+  }
+  // Ordina regimens dentro ogni gruppo per start_date
+  for (const group of map.values()) {
+    group.regimens.sort((a, b) => {
+      const aStart = a.start_date || '9999-12-31'
+      const bStart = b.start_date || '9999-12-31'
+      return aStart.localeCompare(bStart)
+    })
+  }
+  // Ordina gruppi: kind > earliest start_date del gruppo
+  return Array.from(map.values()).sort((a, b) => {
+    const kindDiff = KIND_ORDER[a.kind] - KIND_ORDER[b.kind]
+    if (kindDiff !== 0) return kindDiff
+    const aStart = a.regimens[0].start_date || '9999-12-31'
+    const bStart = b.regimens[0].start_date || '9999-12-31'
+    return aStart.localeCompare(bStart)
+  })
+}
+
+/** Un gruppo e' visibile nel range se almeno uno dei suoi regimens lo e'. */
+export function isGroupVisible(group: RegimenGroup, rangeStart: string, rangeEnd: string): boolean {
+  return group.regimens.some(r => isRegimenVisible(r, rangeStart, rangeEnd))
+}
+
 export function filterRegimensInRange(
   regimens: Regimen[],
   rangeStart: string,
@@ -196,11 +258,20 @@ export function useRegimenTimeline(regimens: Regimen[], rangeStart: string, rang
 
   const visible = useMemo(() => filterRegimensInRange(sorted, rangeStart, rangeEnd), [sorted, rangeStart, rangeEnd])
 
+  const groups = useMemo(() => groupRegimens(regimens), [regimens])
+
+  const visibleGroups = useMemo(
+    () => groups.filter(g => isGroupVisible(g, rangeStart, rangeEnd)),
+    [groups, rangeStart, rangeEnd]
+  )
+
   const dateMarkers = useMemo(() => formatDateMarkers(rangeStart, rangeEnd), [rangeStart, rangeEnd])
 
   return {
     sorted,
     visible,
+    groups,
+    visibleGroups,
     dateMarkers,
     presets: PRESETS,
   }

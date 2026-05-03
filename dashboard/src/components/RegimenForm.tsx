@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { useCreateRegimen, useDeleteRegimen, useUpdateRegimen } from "@/lib/queries"
+import { useCreateRegimen, useDeleteRegimen, useRegimens, useUpdateRegimen } from "@/lib/queries"
 import type { Regimen, RegimenKind } from "@/lib/types"
 
 const KIND_LABELS: Record<RegimenKind, string> = {
@@ -48,6 +48,30 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
   const create = useCreateRegimen()
   const update = useUpdateRegimen()
   const remove = useDeleteRegimen()
+
+  // Lista nomi distinti per il kind corrente (case-insensitive),
+  // usati per autocomplete + rilevamento duplicati. Include anche
+  // i regimens terminati: voglio suggerire un nome anche se preso
+  // tempo fa, per raggruppare i due periodi sulla stessa linea.
+  const allRegimens = useRegimens({ kind, include_ended: true })
+  const existingNames = useMemo(() => {
+    const set = new Map<string, string>()
+    for (const r of allRegimens.data ?? []) {
+      // Skip se editing e questo e' lo stesso regime
+      if (regimen && r.id === regimen.id) continue
+      const norm = r.name.trim().toLowerCase()
+      if (!norm) continue
+      if (!set.has(norm)) set.set(norm, r.name.trim())
+    }
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b, 'it'))
+  }, [allRegimens.data, regimen])
+
+  // Match case-insensitive col nome digitato: mostra hint se esiste gia'
+  const duplicateMatch = useMemo(() => {
+    const norm = name.trim().toLowerCase()
+    if (!norm) return null
+    return existingNames.find(n => n.toLowerCase() === norm) ?? null
+  }, [name, existingNames])
 
   useEffect(() => {
     if (regimen) {
@@ -138,7 +162,23 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
 
         <div className="grid gap-2">
           <Label>Nome</Label>
-          <Input value={name} onChange={e => setName(e.target.value)} placeholder="Es. Vitamin D3" />
+          <Input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="Es. Vitamin D3"
+            list="regimen-names"
+            autoComplete="off"
+          />
+          <datalist id="regimen-names">
+            {existingNames.map(n => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+          {duplicateMatch && !isEdit && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Esiste già un "{duplicateMatch}" — verrà mostrato come secondo periodo sulla stessa riga della timeline.
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4">

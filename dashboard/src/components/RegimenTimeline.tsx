@@ -18,12 +18,18 @@ export function RegimenTimeline({ regimens, isLoading, onRegimensChange }: Regim
   const [editingRegimen, setEditingRegimen] = useState<Regimen | null>(null)
 
   const dateRange = useMemo(() => getDateRange(presetIdx, regimens), [presetIdx, regimens])
-  const { visible } = useRegimenTimeline(regimens, dateRange.start, dateRange.end)
+  const { visibleGroups } = useRegimenTimeline(regimens, dateRange.start, dateRange.end)
 
-  const filteredRegimens = useMemo(() => {
-    if (showEnded) return visible
-    return visible.filter(r => !r.end_date || new Date(r.end_date) >= new Date())
-  }, [visible, showEnded])
+  // Filtro "mostra terminati": un gruppo e' "in corso" se almeno uno
+  // dei suoi regimens lo e' (end_date null o futuro). I gruppi
+  // completamente terminati vengono nascosti se showEnded=false.
+  const filteredGroups = useMemo(() => {
+    if (showEnded) return visibleGroups
+    const today = new Date()
+    return visibleGroups.filter(g =>
+      g.regimens.some(r => !r.end_date || new Date(r.end_date) >= today)
+    )
+  }, [visibleGroups, showEnded])
 
   const handleSelectRegimen = (regimen: Regimen) => {
     setEditingRegimen(regimen)
@@ -80,7 +86,7 @@ export function RegimenTimeline({ regimens, isLoading, onRegimensChange }: Regim
 
       {/* Timeline Gantt */}
       <RegimenGanttGrid
-        regimens={filteredRegimens}
+        groups={filteredGroups}
         rangeStart={dateRange.start}
         rangeEnd={dateRange.end}
         onSelectRegimen={handleSelectRegimen}
