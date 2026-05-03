@@ -3,7 +3,7 @@ import { Regimen } from '@/lib/types'
 import { Button } from './ui/button'
 import { RegimenGanttGrid } from './RegimenGanttGrid'
 import { RegimenForm } from './RegimenForm'
-import { useRegimenTimeline, getDateRange } from '@/hooks/useRegimenTimeline'
+import { useRegimenTimeline, getDateRange, useGearKm } from '@/hooks/useRegimenTimeline'
 
 interface RegimenTimelineProps {
   regimens: Regimen[]
@@ -19,6 +19,7 @@ export function RegimenTimeline({ regimens, isLoading, onRegimensChange }: Regim
 
   const dateRange = useMemo(() => getDateRange(presetIdx, regimens), [presetIdx, regimens])
   const { visibleGroups } = useRegimenTimeline(regimens, dateRange.start, dateRange.end)
+  const kmByRegimenId = useGearKm(regimens)
 
   // Filtro "mostra terminati": un gruppo e' "in corso" se almeno uno
   // dei suoi regimens lo e' (end_date null o futuro). I gruppi
@@ -91,6 +92,7 @@ export function RegimenTimeline({ regimens, isLoading, onRegimensChange }: Regim
         rangeEnd={dateRange.end}
         onSelectRegimen={handleSelectRegimen}
         hoverRegimenId={hoverRegimenId}
+        kmByRegimenId={kmByRegimenId}
       />
 
       {/* Edit modal */}

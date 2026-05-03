@@ -13,11 +13,12 @@ const KIND_LABELS: Record<RegimenKind, string> = {
   supplement: "Integratore",
   diet: "Piano alimentare",
   training: "Piano di allenamento",
+  gear: "Scarpe da corsa",
 }
 
 // I piani alimentari arrivano dall'app `diario-alimentare` — non si
 // inseriscono a mano qui. Tutto il resto si.
-const MANUAL_KINDS: RegimenKind[] = ["medication", "supplement", "training"]
+const MANUAL_KINDS: RegimenKind[] = ["medication", "supplement", "training", "gear"]
 
 interface Props {
   /** Quando passato, il form e' in modalita' edit */

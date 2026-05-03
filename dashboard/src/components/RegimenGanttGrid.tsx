@@ -15,6 +15,8 @@ interface RegimenGanttGridProps {
   rangeEnd: string
   onSelectRegimen?: (regimen: Regimen) => void
   hoverRegimenId?: number | null
+  /** Mappa regimenId -> km percorsi. Solo per regimens kind=gear. */
+  kmByRegimenId?: Map<number, number>
 }
 
 const MIN_BAR_WIDTH_PCT = 0.6 // visibilita' minima per barre molto brevi
@@ -25,17 +27,24 @@ export function RegimenGanttGrid({
   rangeEnd,
   onSelectRegimen,
   hoverRegimenId,
+  kmByRegimenId,
 }: RegimenGanttGridProps) {
   const [tooltipData, setTooltipData] = useState<{
     regimen: Regimen
     x: number
     y: number
+    km?: number
   } | null>(null)
 
   const dateMarkers = formatDateMarkers(rangeStart, rangeEnd)
 
   const handleBarMouseEnter = (regimen: Regimen, e: React.MouseEvent) => {
-    setTooltipData({ regimen, x: e.clientX, y: e.clientY })
+    setTooltipData({
+      regimen,
+      x: e.clientX,
+      y: e.clientY,
+      km: kmByRegimenId?.get(regimen.id),
+    })
   }
 
   const handleBarMouseLeave = () => setTooltipData(null)
@@ -58,18 +67,33 @@ export function RegimenGanttGrid({
           <div className="h-12 flex items-center px-3 border-b border-border text-xs font-semibold text-muted-foreground">
             Regimen
           </div>
-          {groups.map(g => (
-            <div
-              key={g.key}
-              className="h-16 px-3 border-b border-border flex items-center text-sm font-medium truncate hover:bg-muted/50 transition-colors"
-              title={g.name + (g.regimens.length > 1 ? ` (${g.regimens.length} periodi)` : '')}
-            >
-              <span className="truncate">{g.name}</span>
-              {g.regimens.length > 1 && (
-                <span className="ml-2 text-xs text-muted-foreground flex-shrink-0">×{g.regimens.length}</span>
-              )}
-            </div>
-          ))}
+          {groups.map(g => {
+            // Per gear groups: somma i km di tutti i regimens del gruppo
+            // (se l'utente ha cambiato il nome canonical ma e' lo stesso paio).
+            const groupKm =
+              g.kind === 'gear' && kmByRegimenId
+                ? g.regimens.reduce((acc, r) => acc + (kmByRegimenId.get(r.id) ?? 0), 0)
+                : null
+            return (
+              <div
+                key={g.key}
+                className="h-16 px-3 border-b border-border flex flex-col justify-center hover:bg-muted/50 transition-colors"
+                title={g.name + (g.regimens.length > 1 ? ` (${g.regimens.length} periodi)` : '')}
+              >
+                <div className="flex items-center text-sm font-medium">
+                  <span className="truncate">{g.name}</span>
+                  {g.regimens.length > 1 && (
+                    <span className="ml-2 text-xs text-muted-foreground flex-shrink-0">×{g.regimens.length}</span>
+                  )}
+                </div>
+                {groupKm !== null && (
+                  <div className="text-xs text-muted-foreground tabular-nums">
+                    {groupKm < 1 ? '0 km' : `${Math.round(groupKm)} km`}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
 
         {/* Timeline scrollabile orizzontalmente */}
@@ -166,7 +190,14 @@ export function RegimenGanttGrid({
       </div>
 
       {/* Tooltip */}
-      {tooltipData && <RegimenTimelineTooltip regimen={tooltipData.regimen} x={tooltipData.x} y={tooltipData.y} />}
+      {tooltipData && (
+        <RegimenTimelineTooltip
+          regimen={tooltipData.regimen}
+          x={tooltipData.x}
+          y={tooltipData.y}
+          km={tooltipData.km}
+        />
+      )}
 
       {/* Empty state */}
       {groups.length === 0 && (

@@ -424,6 +424,7 @@ function RegimensCard({
     supplement: [],
     diet: [],
     training: [],
+    gear: [],
   }
   for (const r of data.regimens_active) grouped[r.kind].push(r)
 

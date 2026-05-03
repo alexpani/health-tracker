@@ -1,13 +1,15 @@
 import { useMemo } from 'react'
-import { Regimen } from '@/lib/types'
+import { Regimen, Workout } from '@/lib/types'
+import { useWorkouts } from '@/lib/queries'
 
-export type RegimenKind = 'medication' | 'supplement' | 'diet' | 'training'
+export type RegimenKind = 'medication' | 'supplement' | 'diet' | 'training' | 'gear'
 
 const KIND_ORDER: Record<RegimenKind, number> = {
   medication: 0,
   supplement: 1,
   diet: 2,
   training: 3,
+  gear: 4,
 }
 
 const KIND_COLORS: Record<RegimenKind, string> = {
@@ -15,6 +17,7 @@ const KIND_COLORS: Record<RegimenKind, string> = {
   supplement: 'bg-blue-500 hover:bg-blue-600',
   diet: 'bg-green-500 hover:bg-green-600',
   training: 'bg-amber-500 hover:bg-amber-600',
+  gear: 'bg-purple-500 hover:bg-purple-600',
 }
 
 const KIND_LABELS: Record<RegimenKind, string> = {
@@ -22,6 +25,7 @@ const KIND_LABELS: Record<RegimenKind, string> = {
   supplement: 'Integratore',
   diet: 'Dieta',
   training: 'Allenamento',
+  gear: 'Scarpe da corsa',
 }
 
 export interface DateRange {
@@ -158,6 +162,59 @@ export function groupRegimens(regimens: Regimen[]): RegimenGroup[] {
 /** Un gruppo e' visibile nel range se almeno uno dei suoi regimens lo e'. */
 export function isGroupVisible(group: RegimenGroup, rangeStart: string, rangeEnd: string): boolean {
   return group.regimens.some(r => isRegimenVisible(r, rangeStart, rangeEnd))
+}
+
+/** Calcola km dei workout running per ogni regimen di kind="gear".
+ * Single-fetch sull'intero range coperto dai gear regimens, poi
+ * partizione per intervallo. Ritorna Map<regimenId, km>. Vuoto se
+ * non ci sono gear. */
+export function useGearKm(regimens: Regimen[]): Map<number, number> {
+  const gearRegimens = useMemo(() => regimens.filter(r => r.kind === 'gear'), [regimens])
+
+  // Range globale (min start, max end). Per regimen senza start_date
+  // usiamo un anno indietro come fallback (raro ma possibile).
+  const globalRange = useMemo(() => {
+    if (gearRegimens.length === 0) return { start: null, end: null }
+    const today = new Date().toISOString().slice(0, 10)
+    const fallbackStart = new Date()
+    fallbackStart.setFullYear(fallbackStart.getFullYear() - 1)
+    const fallback = fallbackStart.toISOString().slice(0, 10)
+    const starts = gearRegimens.map(r => r.start_date || fallback)
+    const ends = gearRegimens.map(r => r.end_date || today)
+    return {
+      start: starts.sort()[0],
+      end: ends.sort().reverse()[0],
+    }
+  }, [gearRegimens])
+
+  const workoutsQ = useWorkouts(
+    globalRange.start && globalRange.end
+      ? {
+          effective_types: ['type_37', 'treadmill_run'],
+          start: globalRange.start,
+          end: globalRange.end,
+        }
+      : {}
+  )
+
+  return useMemo(() => {
+    const map = new Map<number, number>()
+    if (gearRegimens.length === 0 || !workoutsQ.data) return map
+    for (const r of gearRegimens) {
+      const today = new Date().toISOString().slice(0, 10)
+      const s = r.start_date || '0000-01-01'
+      const e = r.end_date || today
+      let totalMeters = 0
+      for (const w of workoutsQ.data as Workout[]) {
+        const wDate = w.start_date.slice(0, 10)
+        if (wDate >= s && wDate <= e && w.total_distance) {
+          totalMeters += w.total_distance
+        }
+      }
+      map.set(r.id, totalMeters / 1000)
+    }
+    return map
+  }, [gearRegimens, workoutsQ.data])
 }
 
 export function filterRegimensInRange(

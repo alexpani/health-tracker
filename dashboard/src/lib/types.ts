@@ -326,7 +326,7 @@ export interface DailyStatPoint {
 
 // --- Regimens (medications / supplements / diet / training periods) ---
 
-export type RegimenKind = "medication" | "supplement" | "diet" | "training"
+export type RegimenKind = "medication" | "supplement" | "diet" | "training" | "gear"
 
 export interface Regimen {
   id: number

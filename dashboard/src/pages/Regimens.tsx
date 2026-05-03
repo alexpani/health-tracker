@@ -7,7 +7,7 @@ import type { Regimen, RegimenKind } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
 import { RegimenTimeline } from "@/components/RegimenTimeline"
 
-const KIND_ORDER: RegimenKind[] = ["medication", "supplement", "diet", "training"]
+const KIND_ORDER: RegimenKind[] = ["medication", "supplement", "diet", "training", "gear"]
 
 function isOngoing(r: Regimen): boolean {
   if (r.end_date == null) return true
@@ -178,7 +178,7 @@ export default function Regimens() {
 function Section({ title, items, onEdit }: { title: string; items: Regimen[]; onEdit: (r: Regimen) => void }) {
   if (items.length === 0) return null
   // group by kind within section
-  const byKind: Record<RegimenKind, Regimen[]> = { medication: [], supplement: [], diet: [], training: [] }
+  const byKind: Record<RegimenKind, Regimen[]> = { medication: [], supplement: [], diet: [], training: [], gear: [] }
   for (const r of items) byKind[r.kind].push(r)
 
   return (

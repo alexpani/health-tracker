@@ -5,9 +5,10 @@ interface RegimenTimelineTooltipProps {
   regimen: Regimen
   x: number // cursor X in viewport
   y: number // cursor Y in viewport
+  km?: number // se presente, mostra "X km percorsi" (per gear)
 }
 
-export function RegimenTimelineTooltip({ regimen, x, y }: RegimenTimelineTooltipProps) {
+export function RegimenTimelineTooltip({ regimen, x, y, km }: RegimenTimelineTooltipProps) {
   const kindLabel = getKindLabel(regimen.kind as any)
   const startStr = formatDateForDisplay(regimen.start_date)
   const endStr = formatDateForDisplay(regimen.end_date)
@@ -30,6 +31,12 @@ export function RegimenTimelineTooltip({ regimen, x, y }: RegimenTimelineTooltip
       {regimen.dose && <div className="text-xs text-muted-foreground mt-1">{regimen.dose}</div>}
 
       <div className="text-xs text-muted-foreground mt-2">{periodStr}</div>
+
+      {km !== undefined && (
+        <div className="text-xs mt-1 font-medium text-purple-600 dark:text-purple-400 tabular-nums">
+          {km < 1 ? '0 km percorsi' : `${Math.round(km)} km percorsi`}
+        </div>
+      )}
 
       <div className="text-xs text-muted-foreground mt-1 opacity-75">{kindLabel}</div>
 

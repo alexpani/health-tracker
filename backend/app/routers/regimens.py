@@ -17,7 +17,7 @@ from app.schemas import RegimenIn, RegimenOut, RegimenPatch
 
 router = APIRouter(prefix="/api/v1/regimens", tags=["regimens"])
 
-ALLOWED_KINDS = {"medication", "supplement", "diet", "training"}
+ALLOWED_KINDS = {"medication", "supplement", "diet", "training", "gear"}
 
 
 def _validate_kind(kind: str) -> None:
