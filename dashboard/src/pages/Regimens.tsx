@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useDiarioActivePlan, useRegimens } from "@/lib/queries"
 import type { Regimen, RegimenKind } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
+import { RegimenTimeline } from "@/components/RegimenTimeline"
 
 const KIND_ORDER: RegimenKind[] = ["medication", "supplement", "diet", "training"]
 
@@ -23,6 +24,7 @@ function fmtDate(iso: string | null): string {
 }
 
 export default function Regimens() {
+  const [viewMode, setViewMode] = useState<'timeline' | 'table'>('timeline')
   const [kindFilter, setKindFilter] = useState<RegimenKind | null>(null)
   const [includeEnded, setIncludeEnded] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
@@ -86,46 +88,88 @@ export default function Regimens() {
         </Button>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Button variant={kindFilter === null ? "default" : "outline"} size="sm" onClick={() => setKindFilter(null)}>
-          Tutti
+      {/* Timeline/Table view toggle */}
+      <div className="flex gap-2">
+        <Button
+          variant={viewMode === 'timeline' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setViewMode('timeline')}
+        >
+          Timeline
         </Button>
-        {KIND_ORDER.map(k => (
-          <Button
-            key={k}
-            variant={kindFilter === k ? "default" : "outline"}
-            size="sm"
-            onClick={() => setKindFilter(k)}
-          >
-            {KIND_LABELS[k]}
-          </Button>
-        ))}
-        <div className="flex-1" />
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={includeEnded} onChange={e => setIncludeEnded(e.target.checked)} />
-          Mostra terminati
-        </label>
+        <Button
+          variant={viewMode === 'table' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setViewMode('table')}
+        >
+          Tabella
+        </Button>
       </div>
+
+      {/* Timeline view */}
+      {viewMode === 'timeline' && (
+        <>
+          <RegimenTimeline
+            regimens={q.data ?? []}
+            isLoading={q.isLoading}
+            onRegimensChange={() => q.refetch()}
+          />
+          {q.isLoading && <div className="h-32 animate-pulse bg-muted rounded" />}
+          {q.data && q.data.length === 0 && (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                Nessun regime registrato. Premi <strong>Nuovo</strong> per aggiungerne uno.
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+
+      {/* Table view */}
+      {viewMode === 'table' && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <Button variant={kindFilter === null ? "default" : "outline"} size="sm" onClick={() => setKindFilter(null)}>
+              Tutti
+            </Button>
+            {KIND_ORDER.map(k => (
+              <Button
+                key={k}
+                variant={kindFilter === k ? "default" : "outline"}
+                size="sm"
+                onClick={() => setKindFilter(k)}
+              >
+                {KIND_LABELS[k]}
+              </Button>
+            ))}
+            <div className="flex-1" />
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={includeEnded} onChange={e => setIncludeEnded(e.target.checked)} />
+              Mostra terminati
+            </label>
+          </div>
+
+          <Section title="In corso" items={grouped.ongoing} onEdit={r => { setShowAdd(false); setEditing(r) }} />
+          {includeEnded && grouped.ended.length > 0 && (
+            <Section title="Terminati" items={grouped.ended} onEdit={r => { setShowAdd(false); setEditing(r) }} />
+          )}
+
+          {q.isLoading && <div className="h-32 animate-pulse bg-muted rounded" />}
+          {q.data && q.data.length === 0 && (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                Nessun regime registrato. Premi <strong>Nuovo</strong> per aggiungerne uno.
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
 
       {(showAdd || editing) && (
         <RegimenForm
           regimen={editing}
           onClose={() => { setShowAdd(false); setEditing(null) }}
         />
-      )}
-
-      <Section title="In corso" items={grouped.ongoing} onEdit={r => { setShowAdd(false); setEditing(r) }} />
-      {includeEnded && grouped.ended.length > 0 && (
-        <Section title="Terminati" items={grouped.ended} onEdit={r => { setShowAdd(false); setEditing(r) }} />
-      )}
-
-      {q.isLoading && <div className="h-32 animate-pulse bg-muted rounded" />}
-      {q.data && q.data.length === 0 && (
-        <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
-            Nessun regime registrato. Premi <strong>Nuovo</strong> per aggiungerne uno.
-          </CardContent>
-        </Card>
       )}
     </div>
   )
