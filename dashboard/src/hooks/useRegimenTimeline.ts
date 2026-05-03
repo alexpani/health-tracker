@@ -30,8 +30,8 @@ export interface DateRange {
 }
 
 export interface BarPosition {
-  left: number // percentage 0-100
-  width: number // percentage 0-100
+  left: number // percentage 0-100 (anchor sinistro)
+  right: number // percentage 0-100 (anchor destro, 0 = bordo destro)
   isUnknownStart: boolean
 }
 
@@ -140,11 +140,11 @@ export function calculateBarPosition(
   const clampedEnd = new Date(Math.min(effectiveEnd.getTime(), endDate.getTime()))
 
   const leftMs = clampedStart.getTime() - startDate.getTime()
-  const widthMs = clampedEnd.getTime() - clampedStart.getTime()
+  const rightMs = endDate.getTime() - clampedEnd.getTime()
 
   return {
     left: totalMs > 0 ? (leftMs / totalMs) * 100 : 0,
-    width: totalMs > 0 ? (widthMs / totalMs) * 100 : 0,
+    right: totalMs > 0 ? (rightMs / totalMs) * 100 : 0,
     isUnknownStart,
   }
 }
