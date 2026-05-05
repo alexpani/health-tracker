@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { ChevronDown, ChevronRight } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,6 +27,7 @@ interface PersistedState {
   manualSex?: "M" | "F"
   manualHeight?: number
   manualActivity?: keyof typeof ACTIVITY_LEVELS
+  collapsed?: boolean
 }
 
 function loadPersisted(): PersistedState {
@@ -106,6 +108,7 @@ export function WeightCalculator() {
     persisted.manualActivity ?? "moderate"
   )
   const [kcalSlider, setKcalSlider] = useState<number>(persisted.kcalSlider ?? 0)
+  const [collapsed, setCollapsed] = useState<boolean>(persisted.collapsed ?? true)
 
   // Quando arriva il peso da HK, se non abbiamo ancora un target, lo inizializziamo
   useEffect(() => {
@@ -155,8 +158,9 @@ export function WeightCalculator() {
       manualSex,
       manualHeight,
       manualActivity,
+      collapsed,
     })
-  }, [targetWeight, kcalSlider, tdeeMode, manualAge, manualSex, manualHeight, manualActivity])
+  }, [targetWeight, kcalSlider, tdeeMode, manualAge, manualSex, manualHeight, manualActivity, collapsed])
 
   // ---------- Stati di caricamento / vuoti ----------
   if (weightQ.isLoading || heightQ.isLoading) {
@@ -219,12 +223,45 @@ export function WeightCalculator() {
   if (deficit > 1000) warnings.push("Deficit > 1000 kcal/giorno: perdita superiore a 1 kg/settimana, generalmente sconsigliata")
   if (kcalSlider < 1500 && kcalSlider > 0) warnings.push("Soglia minima generale di 1500 kcal/giorno: scendere sotto richiede supervisione medica")
 
+  // ---------- Mini-summary per stato collassato ----------
+  const summaryText = (() => {
+    if (isAtTarget) return "Sei al target"
+    const targetStr = `${currentWeight.toFixed(1)} → ${targetWeight.toFixed(1)} kg`
+    if (weeksToGoal != null) {
+      const tempoStr = weeksToGoal < 1
+        ? "<1 sett"
+        : weeksToGoal < 8
+          ? `${Math.round(weeksToGoal)} sett`
+          : `${(weeksToGoal / 4.345).toFixed(1)} mesi`
+      return `${targetStr} · ${tempoStr}`
+    }
+    return targetStr
+  })()
+
   // ---------- Render ----------
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Calcolatore peso e dieta</CardTitle>
+      <CardHeader
+        className="cursor-pointer select-none hover:bg-muted/30 transition-colors"
+        onClick={() => setCollapsed(c => !c)}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            {collapsed ? (
+              <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            )}
+            <CardTitle>Calcolatore peso e dieta</CardTitle>
+          </div>
+          {collapsed && (
+            <span className="text-sm text-muted-foreground tabular-nums truncate">
+              {summaryText}
+            </span>
+          )}
+        </div>
       </CardHeader>
+      {!collapsed && (
       <CardContent className="space-y-5">
         {/* Stato + Target */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -421,6 +458,7 @@ export function WeightCalculator() {
           </div>
         )}
       </CardContent>
+      )}
     </Card>
   )
 }
