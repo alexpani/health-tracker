@@ -22,7 +22,7 @@ import type { BodyFilters, CorrelatedSample, Sample } from "@/lib/types"
 
 const BODY_TYPES = CATEGORIES.body.types
 const STORAGE_KEY = "body_filters_v3"
-const PAGE_SIZE = 50
+const PAGE_SIZE = 10
 
 interface MergedRow {
   id?: number
