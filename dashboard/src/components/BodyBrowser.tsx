@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { BodyFiltersSidebar } from "@/components/BodyFiltersSidebar"
+import { WeightCalculator } from "@/components/WeightCalculator"
 import { fetchCorrelated, useBulkDeleteSamples, useSampleFacets, useSamples } from "@/lib/queries"
 import { CATEGORIES, getMeta } from "@/lib/healthkit"
 import { formatDateTime } from "@/lib/utils"
@@ -466,6 +467,8 @@ export default function BodyBrowser() {
             <WeightDeltaCard label="Periodo selezionato" stat={weightStats.selected} />
           </div>
         )}
+
+        <WeightCalculator />
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {selectedTypes.map(t => {
