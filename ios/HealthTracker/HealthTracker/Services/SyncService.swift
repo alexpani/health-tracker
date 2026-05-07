@@ -1,7 +1,22 @@
 import Foundation
 import HealthKit
 import SwiftData
+import UIKit
 import os
+
+/// Returns true if the app is currently running in the background. Used to
+/// decide whether to advance HK anchors on empty fetches: in BG with a locked
+/// device HKAnchoredObjectQuery / HKSampleQuery silently return 0 samples for
+/// protected types (StepCount, HeartRate, AEE, BEE, etc.) WITHOUT throwing —
+/// if we naively persisted the new anchor, those samples would be skipped
+/// forever once the device unlocks. So in BG we only advance the bookmark
+/// when we actually got data; in foreground we always advance (0 samples
+/// truly means "nothing new").
+@MainActor
+func isAppInBackground() -> Bool {
+    let state = UIApplication.shared.applicationState
+    return state == .background || state == .inactive
+}
 
 /// Persisted summary of a single completed sync
 struct LastSyncSummary: Codable, Identifiable, Hashable {
@@ -432,10 +447,21 @@ final class SyncService {
                     }
                 }
 
-                await updateSyncDate(for: typeId.rawValue, date: windowEnd)
-                currentWindowDate = windowEnd
-                if totalDuration > 0 {
-                    typeProgress = min(1.0, windowEnd.timeIntervalSince(effectiveStart) / totalDuration)
+                // Advance the bookmark, but in BACKGROUND with an empty fetch
+                // skip the advance: a locked device returns 0 samples without
+                // throwing for protected types, and naively advancing
+                // lastSyncDate would skip those samples forever once unlocked.
+                let inBg = isAppInBackground()
+                if !samples.isEmpty || !inBg {
+                    await updateSyncDate(for: typeId.rawValue, date: windowEnd)
+                    currentWindowDate = windowEnd
+                    if totalDuration > 0 {
+                        typeProgress = min(1.0, windowEnd.timeIntervalSince(effectiveStart) / totalDuration)
+                    }
+                } else {
+                    // BG empty → exit the loop without advancing; will retry
+                    // on the next sync (foreground or unlocked BG).
+                    return
                 }
             } catch {
                 let msg = "\(currentType): window failed - \(error.localizedDescription)"
@@ -490,10 +516,18 @@ final class SyncService {
                         return
                     }
                 }
-                await updateSyncDate(for: typeId.rawValue, date: windowEnd)
-                currentWindowDate = windowEnd
-                if totalDuration > 0 {
-                    typeProgress = min(1.0, windowEnd.timeIntervalSince(effectiveStart) / totalDuration)
+                // BG + empty fetch → don't advance bookmark (protected data
+                // could be silently masked). See syncQuantityType for the
+                // full rationale.
+                let inBg = isAppInBackground()
+                if !samples.isEmpty || !inBg {
+                    await updateSyncDate(for: typeId.rawValue, date: windowEnd)
+                    currentWindowDate = windowEnd
+                    if totalDuration > 0 {
+                        typeProgress = min(1.0, windowEnd.timeIntervalSince(effectiveStart) / totalDuration)
+                    }
+                } else {
+                    return
                 }
             } catch {
                 let msg = "\(currentType): window failed - \(error.localizedDescription)"
@@ -539,9 +573,18 @@ final class SyncService {
                 deletedCount = try await apiClient.deleteWorkouts(uuids: deletedUUIDs)
             }
 
-            // Persist the new anchor only on success
-            if let newAnchor, let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
-                UserDefaults.standard.set(data, forKey: anchorKey)
+            // Persist the new anchor on success — but in BACKGROUND skip the
+            // persist if HK returned zero samples AND zero deletions, because
+            // a locked device returns 0/0 silently for protected types
+            // (StepCount, HeartRate, AEE, BEE, ...). If we advanced the anchor
+            // we'd skip the real samples forever once the device unlocks. In
+            // foreground 0/0 truly means "nothing new", so advance normally.
+            let inBg = isAppInBackground()
+            let didAnything = !added.isEmpty || !deletedUUIDs.isEmpty
+            if let newAnchor, (didAnything || !inBg) {
+                if let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
+                    UserDefaults.standard.set(data, forKey: anchorKey)
+                }
             }
 
             if totalInserted > 0 || deletedCount > 0 {
@@ -806,9 +849,18 @@ final class SyncService {
                 deletedCount = try await apiClient.deleteSamples(uuids: deletedUUIDs)
             }
 
-            // Persist the new anchor only on success
-            if let newAnchor, let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
-                UserDefaults.standard.set(data, forKey: anchorKey)
+            // Persist the new anchor on success — but in BACKGROUND skip the
+            // persist if HK returned zero samples AND zero deletions, because
+            // a locked device returns 0/0 silently for protected types
+            // (StepCount, HeartRate, AEE, BEE, ...). If we advanced the anchor
+            // we'd skip the real samples forever once the device unlocks. In
+            // foreground 0/0 truly means "nothing new", so advance normally.
+            let inBg = isAppInBackground()
+            let didAnything = !added.isEmpty || !deletedUUIDs.isEmpty
+            if let newAnchor, (didAnything || !inBg) {
+                if let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
+                    UserDefaults.standard.set(data, forKey: anchorKey)
+                }
             }
 
             if totalInserted > 0 || deletedCount > 0 {
