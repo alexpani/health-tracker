@@ -146,6 +146,18 @@ export function useDeleteRegimen() {
   })
 }
 
+/** Hook per ottenere il piano alimentare (kind='diet') attivo in una data specifica.
+ * Ritorna il primo regimen di tipo 'diet' attivo, oppure null.
+ * Il metadata del regimen contiene: kcal_target?, protein_pct?, fat_pct?, carbs_pct?
+ */
+export function useActiveDietPlan(date?: string, enabled = true) {
+  const regimens = useRegimens({ kind: "diet", active_on: date, include_ended: true })
+  return {
+    ...regimens,
+    data: regimens.data?.[0] ?? null,
+  }
+}
+
 export function useDailyStats(type: string, start?: string, end?: string, enabled = true) {
   return useQuery({
     queryKey: ["dailyStats", type, start, end],

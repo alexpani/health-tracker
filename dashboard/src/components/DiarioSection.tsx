@@ -12,8 +12,8 @@ import {
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { useDiarioActivePlan, useDiarioDailyTotals, useSamples } from "@/lib/queries"
-import type { DiarioDailyTotal, NutritionFilters, Sample } from "@/lib/types"
+import { useDiarioActivePlan, useDiarioDailyTotals, useSamples, useActiveDietPlan } from "@/lib/queries"
+import type { DiarioDailyTotal, DiarioPlan, NutritionFilters, Sample, Regimen } from "@/lib/types"
 
 // HealthKit dietary types we consolidate with the diario
 const HK_DIETARY_MAP = [
@@ -29,6 +29,28 @@ const OUR_WRITE_SOURCE = "Health Tracker"
 
 interface Props {
   filters: NutritionFilters
+}
+
+/** Normalizza un piano manuale (regimen diet) al formato DiarioPlan.
+ * Calcola i grammi dalle percentuali e dal kcal_target.
+ */
+function normalizeDietPlan(regimen: Regimen): DiarioPlan {
+  const meta = regimen.metadata || {}
+  const kcalTarget = meta.kcal_target || 0
+  const proteinPct = meta.protein_pct || 0
+  const fatPct = meta.fat_pct || 0
+  const carbsPct = meta.carbs_pct || 0
+  return {
+    name: regimen.name,
+    kcal_target: kcalTarget,
+    protein_pct: proteinPct,
+    fat_pct: fatPct,
+    carbs_pct: carbsPct,
+    protein_g: kcalTarget > 0 ? (kcalTarget * proteinPct / 100) / 4 : 0,
+    fat_g: kcalTarget > 0 ? (kcalTarget * fatPct / 100) / 9 : 0,
+    carbs_g: kcalTarget > 0 ? (kcalTarget * carbsPct / 100) / 4 : 0,
+    updated_at: null,
+  }
 }
 
 function formatDateShort(iso: string): string {
@@ -72,6 +94,11 @@ function ProgressBar({ value, target, unit, label, color }: {
 
 export function DiarioSection({ filters }: Props) {
   const { data: plan, isLoading: planLoading, isError: planError, error: planErr } = useDiarioActivePlan()
+  const { data: manualPlan, isLoading: manualPlanLoading } = useActiveDietPlan(todayLocalISO())
+
+  // Usa il piano manuale (regimen diet) se presente, altrimenti il piano dal diario
+  // Normalizza il piano manuale al formato DiarioPlan
+  const effectivePlan = manualPlan ? normalizeDietPlan(manualPlan) : plan
 
   // Fetch ALL daily totals once (all-time), then filter client-side. The table
   // is ~one row per day so 10 years ≈ 3650 entries — trivial.
@@ -205,6 +232,7 @@ export function DiarioSection({ filters }: Props) {
   }, [filtered])
 
   const planMissing = planError && (planErr as any)?.message?.includes("404")
+  const isLoading = planLoading || manualPlanLoading
 
   return (
     <div className="space-y-6">
@@ -221,35 +249,35 @@ export function DiarioSection({ filters }: Props) {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center justify-between">
             <span>Piano alimentare attivo</span>
-            {plan && <span className="text-xs font-normal text-muted-foreground">{plan.name}</span>}
+            {effectivePlan && <span className="text-xs font-normal text-muted-foreground">{manualPlan ? "🔧 " : ""}{effectivePlan.name}</span>}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {planLoading && <div className="h-16 animate-pulse bg-muted rounded" />}
-          {planMissing && <p className="text-sm text-muted-foreground">Nessun piano attivo nel diario.</p>}
-          {planError && !planMissing && (
+          {isLoading && <div className="h-16 animate-pulse bg-muted rounded" />}
+          {planMissing && !manualPlan && <p className="text-sm text-muted-foreground">Nessun piano attivo nel diario.</p>}
+          {planError && !planMissing && !manualPlan && (
             <p className="text-sm text-destructive">Diario alimentare non raggiungibile: {(planErr as Error)?.message}</p>
           )}
-          {plan && (
+          {effectivePlan && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="p-3 rounded-md border">
                 <p className="text-xs text-muted-foreground">Target kcal</p>
-                <p className="text-xl font-semibold tabular-nums">{plan.kcal_target.toLocaleString("it-IT")}</p>
+                <p className="text-xl font-semibold tabular-nums">{effectivePlan.kcal_target.toLocaleString("it-IT")}</p>
               </div>
               <div className="p-3 rounded-md border">
                 <p className="text-xs text-muted-foreground">Proteine</p>
-                <p className="text-xl font-semibold tabular-nums">{plan.protein_g} <span className="text-sm text-muted-foreground font-normal">g</span></p>
-                <p className="text-[11px] text-muted-foreground">{plan.protein_pct}%</p>
+                <p className="text-xl font-semibold tabular-nums">{effectivePlan.protein_g.toFixed(1)} <span className="text-sm text-muted-foreground font-normal">g</span></p>
+                <p className="text-[11px] text-muted-foreground">{effectivePlan.protein_pct}%</p>
               </div>
               <div className="p-3 rounded-md border">
                 <p className="text-xs text-muted-foreground">Grassi</p>
-                <p className="text-xl font-semibold tabular-nums">{plan.fat_g} <span className="text-sm text-muted-foreground font-normal">g</span></p>
-                <p className="text-[11px] text-muted-foreground">{plan.fat_pct}%</p>
+                <p className="text-xl font-semibold tabular-nums">{effectivePlan.fat_g.toFixed(1)} <span className="text-sm text-muted-foreground font-normal">g</span></p>
+                <p className="text-[11px] text-muted-foreground">{effectivePlan.fat_pct}%</p>
               </div>
               <div className="p-3 rounded-md border">
                 <p className="text-xs text-muted-foreground">Carboidrati</p>
-                <p className="text-xl font-semibold tabular-nums">{plan.carbs_g} <span className="text-sm text-muted-foreground font-normal">g</span></p>
-                <p className="text-[11px] text-muted-foreground">{plan.carbs_pct}%</p>
+                <p className="text-xl font-semibold tabular-nums">{effectivePlan.carbs_g.toFixed(1)} <span className="text-sm text-muted-foreground font-normal">g</span></p>
+                <p className="text-[11px] text-muted-foreground">{effectivePlan.carbs_pct}%</p>
               </div>
             </div>
           )}
@@ -275,13 +303,13 @@ export function DiarioSection({ filters }: Props) {
           {todayConsolidated && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <ProgressBar value={todayConsolidated.kcal} target={plan?.kcal_target ?? todayEntry?.kcal_target}
+                <ProgressBar value={todayConsolidated.kcal} target={effectivePlan?.kcal_target ?? todayEntry?.kcal_target}
                   unit="kcal" label="Calorie" color="#8b5cf6" />
-                <ProgressBar value={todayConsolidated.protein_g} target={plan?.protein_g}
+                <ProgressBar value={todayConsolidated.protein_g} target={effectivePlan?.protein_g}
                   unit="g" label="Proteine" color="#10b981" />
-                <ProgressBar value={todayConsolidated.fat_g} target={plan?.fat_g}
+                <ProgressBar value={todayConsolidated.fat_g} target={effectivePlan?.fat_g}
                   unit="g" label="Grassi" color="#f59e0b" />
-                <ProgressBar value={todayConsolidated.carbs_g} target={plan?.carbs_g}
+                <ProgressBar value={todayConsolidated.carbs_g} target={effectivePlan?.carbs_g}
                   unit="g" label="Carboidrati" color="#ef4444" />
               </div>
               {todayHasExternal && (
@@ -289,11 +317,11 @@ export function DiarioSection({ filters }: Props) {
                   Diario {todayEntry?.kcal ?? 0} + HealthKit esterne {Math.round(todayHkExternal.kcal)} = {Math.round(todayConsolidated.kcal)} kcal
                 </p>
               )}
-              {plan?.kcal_target && (
+              {effectivePlan?.kcal_target && (
                 <p className="text-xs text-muted-foreground mt-1 tabular-nums">
-                  {todayConsolidated.kcal > plan.kcal_target
-                    ? <>+{Math.round(todayConsolidated.kcal - plan.kcal_target)} kcal sopra il target</>
-                    : <>-{Math.round(plan.kcal_target - todayConsolidated.kcal)} kcal sotto il target</>}
+                  {todayConsolidated.kcal > effectivePlan.kcal_target
+                    ? <>+{Math.round(todayConsolidated.kcal - effectivePlan.kcal_target)} kcal sopra il target</>
+                    : <>-{Math.round(effectivePlan.kcal_target - todayConsolidated.kcal)} kcal sotto il target</>}
                 </p>
               )}
             </>

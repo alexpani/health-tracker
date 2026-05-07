@@ -17,9 +17,12 @@ export function RegimenTimeline({ regimens, isLoading, onRegimensChange }: Regim
   const [hoverRegimenId, setHoverRegimenId] = useState<number | null>(null)
   const [editingRegimen, setEditingRegimen] = useState<Regimen | null>(null)
 
-  const dateRange = useMemo(() => getDateRange(presetIdx, regimens), [presetIdx, regimens])
-  const { visibleGroups } = useRegimenTimeline(regimens, dateRange.start, dateRange.end)
-  const kmByRegimenId = useGearKm(regimens)
+  // Filtra out i regimen di tipo 'diet' dalla timeline
+  const timelineRegimens = useMemo(() => regimens.filter(r => r.kind !== 'diet'), [regimens])
+
+  const dateRange = useMemo(() => getDateRange(presetIdx, timelineRegimens), [presetIdx, timelineRegimens])
+  const { visibleGroups } = useRegimenTimeline(timelineRegimens, dateRange.start, dateRange.end)
+  const kmByRegimenId = useGearKm(timelineRegimens)
 
   // Filtro "mostra terminati": un gruppo e' "in corso" se almeno uno
   // dei suoi regimens lo e' (end_date null o futuro). I gruppi

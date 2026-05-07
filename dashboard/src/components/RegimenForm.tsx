@@ -16,9 +16,8 @@ const KIND_LABELS: Record<RegimenKind, string> = {
   gear: "Scarpe da corsa",
 }
 
-// I piani alimentari arrivano dall'app `diario-alimentare` — non si
-// inseriscono a mano qui. Tutto il resto si.
-const MANUAL_KINDS: RegimenKind[] = ["medication", "supplement", "training", "gear"]
+// Tutti i tipi si possono inserire manualmente
+const MANUAL_KINDS: RegimenKind[] = ["medication", "supplement", "diet", "training", "gear"]
 
 interface Props {
   /** Quando passato, il form e' in modalita' edit */
@@ -44,6 +43,11 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
   const [endDate, setEndDate] = useState(regimen?.end_date ?? "")
   const [dose, setDose] = useState(regimen?.dose ?? "")
   const [notes, setNotes] = useState(regimen?.notes ?? "")
+  const [kcalTarget, setKcalTarget] = useState(regimen?.metadata?.kcal_target ?? "")
+  const [proteinPct, setProteinPct] = useState(regimen?.metadata?.protein_pct ?? "")
+  const [fatPct, setFatPct] = useState(regimen?.metadata?.fat_pct ?? "")
+  const [carbsPct, setCarbsPct] = useState(regimen?.metadata?.carbs_pct ?? "")
+  const [showNutritionFields, setShowNutritionFields] = useState(kind === "diet" && !!regimen)
   const [error, setError] = useState<string | null>(null)
 
   const create = useCreateRegimen()
@@ -82,6 +86,10 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
       setEndDate(regimen.end_date ?? "")
       setDose(regimen.dose ?? "")
       setNotes(regimen.notes ?? "")
+      setKcalTarget(regimen.metadata?.kcal_target ?? "")
+      setProteinPct(regimen.metadata?.protein_pct ?? "")
+      setFatPct(regimen.metadata?.fat_pct ?? "")
+      setCarbsPct(regimen.metadata?.carbs_pct ?? "")
     }
   }, [regimen])
 
@@ -95,13 +103,25 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
       setError("La data di fine non può essere prima della data di inizio")
       return
     }
-    const payload = {
+    const payload: any = {
       kind,
       name: name.trim(),
       start_date: startDate || null,
       end_date: endDate || null,
       dose: dose.trim() || null,
       notes: notes.trim() || null,
+    }
+
+    // Aggiungi metadata per piani alimentari
+    if (kind === "diet") {
+      const meta: Record<string, number> = {}
+      if (kcalTarget) meta.kcal_target = parseFloat(String(kcalTarget))
+      if (proteinPct) meta.protein_pct = parseFloat(String(proteinPct))
+      if (fatPct) meta.fat_pct = parseFloat(String(fatPct))
+      if (carbsPct) meta.carbs_pct = parseFloat(String(carbsPct))
+      payload.metadata = Object.keys(meta).length > 0 ? meta : null
+    } else {
+      payload.metadata = null
     }
     try {
       if (isEdit && regimen) {
@@ -149,16 +169,8 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
               {MANUAL_KINDS.map(k => (
                 <SelectItem key={k} value={k}>{KIND_LABELS[k]}</SelectItem>
               ))}
-              {kind === "diet" && (
-                <SelectItem value="diet">{KIND_LABELS.diet}</SelectItem>
-              )}
             </SelectContent>
           </Select>
-          {kind === "diet" && (
-            <p className="text-xs text-muted-foreground">
-              I piani alimentari sono gestiti nell'app diario-alimentare.
-            </p>
-          )}
         </div>
 
         <div className="grid gap-2">
@@ -195,10 +207,78 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
           </div>
         </div>
 
-        <div className="grid gap-2">
-          <Label>Dose / dettagli</Label>
-          <Input value={dose} onChange={e => setDose(e.target.value)} placeholder="Es. 2000 UI/die" />
-        </div>
+        {kind === "diet" ? (
+          <div className="grid gap-2">
+            <button
+              type="button"
+              onClick={() => setShowNutritionFields(!showNutritionFields)}
+              className="flex items-center gap-2 text-left text-sm font-medium"
+            >
+              <span>{showNutritionFields ? "▼" : "▶"}</span>
+              Dati nutrizionali
+            </button>
+            {showNutritionFields && (
+              <div className="pl-4 space-y-3 border-l border-muted">
+                <div className="grid gap-2">
+                  <Label htmlFor="kcal">Kcal giornaliere</Label>
+                  <Input
+                    id="kcal"
+                    type="number"
+                    value={kcalTarget}
+                    onChange={e => setKcalTarget(e.target.value)}
+                    placeholder="Es. 2200"
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="grid gap-2">
+                    <Label htmlFor="protein">Proteine %</Label>
+                    <Input
+                      id="protein"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      value={proteinPct}
+                      onChange={e => setProteinPct(e.target.value)}
+                      placeholder="30"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="fat">Grassi %</Label>
+                    <Input
+                      id="fat"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      value={fatPct}
+                      onChange={e => setFatPct(e.target.value)}
+                      placeholder="25"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="carbs">Carboidrati %</Label>
+                    <Input
+                      id="carbs"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      value={carbsPct}
+                      onChange={e => setCarbsPct(e.target.value)}
+                      placeholder="45"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            <Label>Dose / dettagli</Label>
+            <Input value={dose} onChange={e => setDose(e.target.value)} placeholder="Es. 2000 UI/die" />
+          </div>
+        )}
 
         <div className="grid gap-2">
           <Label>Note</Label>

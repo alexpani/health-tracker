@@ -337,6 +337,12 @@ export interface Regimen {
   dose: string | null
   notes: string | null
   source: "manual" | "lab_backfill" | "diario"
+  metadata: {
+    kcal_target?: number
+    protein_pct?: number
+    fat_pct?: number
+    carbs_pct?: number
+  } | null
   created_at: string
   updated_at: string
 }

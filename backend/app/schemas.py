@@ -210,12 +210,13 @@ class DeletionPlanOut(BaseModel):
 
 
 class RegimenIn(BaseModel):
-    kind: str           # 'medication' | 'supplement' | 'diet' | 'training'
+    kind: str           # 'medication' | 'supplement' | 'diet' | 'training' | 'gear'
     name: str
     start_date: date_cls | None = None
     end_date: date_cls | None = None
     dose: str | None = None
     notes: str | None = None
+    metadata: dict | None = None  # for kind='diet': {kcal_target?, protein_pct?, fat_pct?, carbs_pct?}
 
 
 class RegimenPatch(BaseModel):
@@ -225,6 +226,7 @@ class RegimenPatch(BaseModel):
     end_date: date_cls | None = None
     dose: str | None = None
     notes: str | None = None
+    metadata: dict | None = None
     # use a sentinel via Field default to distinguish "set to null" vs "leave alone"
     # in Pydantic v2 we rely on `model_dump(exclude_unset=True)` at the router
     # level so any explicit null IS persisted. None == unset == "leave alone".
@@ -239,10 +241,11 @@ class RegimenOut(BaseModel):
     dose: str | None
     notes: str | None
     source: str
+    metadata: dict | None = Field(None, validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 # --- Day snapshot (calendar / day-view aggregator) ---

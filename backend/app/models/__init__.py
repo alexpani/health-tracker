@@ -234,6 +234,7 @@ class Regimen(Base):
     `end_date=NULL`   = "in corso adesso".
     `source='manual'` per l'inserimento dall'UI, `'lab_backfill'` per gli
     import retroattivi dai campi context dei panel lab confermati.
+    `metadata` (JSONB) per kind='diet': {kcal_target?, protein_pct?, fat_pct?, carbs_pct?}
     """
     __tablename__ = "regimens"
 
@@ -247,6 +248,7 @@ class Regimen(Base):
     source: Mapped[str] = mapped_column(
         String(20), nullable=False, default="manual", server_default="manual"
     )
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
