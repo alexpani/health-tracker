@@ -31,22 +31,41 @@ final class BackgroundTaskManager {
     private func handleSync(task: BGAppRefreshTask, syncService: SyncService) {
         logger.info("Background sync started")
 
-        // Schedule the next sync
+        // Always schedule the next sync FIRST. iOS only re-runs the task if
+        // it's been re-submitted; doing it here (not after the await) means
+        // that even if this run crashes or is killed, the next slot is queued.
         scheduleNextSync()
+
+        // Guard: setTaskCompleted must be called exactly once. Both the
+        // normal completion path and the expirationHandler can fire, and
+        // calling it twice is a hard crash on iOS.
+        let completed = OSAllocatedUnfairLock(initialState: false)
+        let finish: (Bool) -> Void = { success in
+            completed.withLock { done in
+                if done { return }
+                done = true
+                task.setTaskCompleted(success: success)
+            }
+        }
 
         let syncTask = Task {
             await syncService.performFullSync()
         }
 
         task.expirationHandler = {
+            // iOS gives BGAppRefreshTask ~30s. When it expires we MUST mark
+            // the task completed, otherwise iOS treats the run as "hung"
+            // and demotes the app's background priority — fewer (or zero)
+            // future BG launches.
+            self.logger.warning("Background sync expired (>30s)")
             syncTask.cancel()
-            self.logger.warning("Background sync expired")
+            finish(false)
         }
 
         Task {
             await syncTask.value
-            task.setTaskCompleted(success: true)
             self.logger.info("Background sync completed")
+            finish(true)
         }
     }
 }
