@@ -262,6 +262,33 @@ class Regimen(Base):
     )
 
 
+class HealthNote(Base):
+    """Note quotidiane sullo stato di salute (dolori, malattie, fastidi, sintomi).
+    Una riga per "ho avuto X dal giorno A al giorno B".
+    Periodo chiuso: start_date <= end_date, entrambi NOT NULL.
+    Per una nota di un solo giorno: start_date = end_date.
+    """
+    __tablename__ = "health_notes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    body_zone: Mapped[str | None] = mapped_column(String(50))
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    start_date: Mapped[date_cls] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date_cls] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_health_notes_dates", "start_date", "end_date"),
+        Index("idx_health_notes_category", "category"),
+    )
+
+
 class WorkoutRoute(Base):
     """GPS route per workout outdoor. Una riga per workout. I punti sono
     persistiti come array JSONB di {lat, lon, alt, ts, hAcc, vAcc, speed, course}

@@ -13,6 +13,7 @@ import {
   PlusCircle,
   Scale,
   Settings as SettingsIcon,
+  StickyNote,
   StretchHorizontal,
   Trophy,
 
@@ -29,6 +30,7 @@ const navItems = [
   { to: "/stretching", label: "Stretching", icon: StretchHorizontal },
   { to: "/sleep", label: "Sonno", icon: Moon },
   { to: "/regimens", label: "Regimi", icon: Pill },
+  { to: "/health-notes", label: "Note salute", icon: StickyNote },
   { to: "/lab", label: "Laboratorio", icon: FlaskConical },
   { to: "/activity", label: "Attivita", icon: ActivityIcon },
   { to: "/vitals", label: "Vitali", icon: Heart },

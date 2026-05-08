@@ -248,6 +248,38 @@ class RegimenOut(BaseModel):
     model_config = {"from_attributes": True, "populate_by_name": True}
 
 
+# --- Health notes (daily annotations: pain, illness, ...) ---
+
+
+class HealthNoteIn(BaseModel):
+    category: str  # 'pain' | 'illness' | 'discomfort' | 'symptom' | 'other'
+    body_zone: str | None = None
+    text: str
+    start_date: date_cls
+    end_date: date_cls | None = None  # default = start_date if omitted
+
+
+class HealthNotePatch(BaseModel):
+    category: str | None = None
+    body_zone: str | None = None
+    text: str | None = None
+    start_date: date_cls | None = None
+    end_date: date_cls | None = None
+
+
+class HealthNoteOut(BaseModel):
+    id: int
+    category: str
+    body_zone: str | None
+    text: str
+    start_date: date_cls
+    end_date: date_cls
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # --- Day snapshot (calendar / day-view aggregator) ---
 
 
@@ -261,6 +293,7 @@ class DaySnapshot(BaseModel):
     workouts: list[dict]
     lab_panels: list[dict]
     regimens_active: list[RegimenOut]
+    health_notes: list[HealthNoteOut] = []
 
 
 # --- Daily statistics (HKStatisticsCollectionQuery) ---

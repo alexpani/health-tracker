@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { useWorkouts } from "@/lib/queries"
+import { useHealthNoteDays, useWorkouts } from "@/lib/queries"
 
 interface Props {
   /// Data corrente selezionata in formato YYYY-MM-DD (locale).
@@ -46,15 +46,22 @@ export function DayCalendarSidebar({ selectedDate, onSelectDate, onClose }: Prop
     return { year: y, month: m - 1 }
   })
 
-  const { startIso, endIso } = useMemo(() => {
+  const { startIso, endIso, startLocal, endLocal } = useMemo(() => {
     const first = new Date(view.year, view.month, 1)
     const last = new Date(view.year, view.month + 1, 0, 23, 59, 59, 999)
-    return { startIso: first.toISOString(), endIso: last.toISOString() }
+    return {
+      startIso: first.toISOString(),
+      endIso: last.toISOString(),
+      startLocal: isoLocal(first),
+      endLocal: isoLocal(last),
+    }
   }, [view])
 
   // Fetch dei workout del mese visualizzato. Usiamo il filtro temporale
   // dell'endpoint esistente; per il mini-calendario serve solo la data.
   const { data: workouts } = useWorkouts({ start: startIso, end: endIso })
+  // Fetch delle note di salute del mese visualizzato (date espanse server-side).
+  const { data: noteDays } = useHealthNoteDays(startLocal, endLocal)
 
   // Set di date YYYY-MM-DD col workout (per lookup O(1) nel render griglia).
   const workoutDays = useMemo(() => {
@@ -62,6 +69,8 @@ export function DayCalendarSidebar({ selectedDate, onSelectDate, onClose }: Prop
     for (const w of workouts ?? []) s.add(workoutDayKey(w.start_date))
     return s
   }, [workouts])
+
+  const noteDaysSet = useMemo(() => new Set(noteDays ?? []), [noteDays])
 
   // Costruzione griglia: settimana lunedi-domenica.
   // Padding di giorni "fuori mese" all'inizio per allineare il primo
@@ -156,8 +165,9 @@ export function DayCalendarSidebar({ selectedDate, onSelectDate, onClose }: Prop
           const isSelected = cell.iso === selectedDate
           const isToday = cell.iso === today
           const hasWorkout = workoutDays.has(cell.iso)
+          const hasNote = noteDaysSet.has(cell.iso)
           // Stile combinato. Selezione vince su tutto.
-          let cls = "h-9 rounded text-xs font-medium tabular-nums transition-colors flex items-center justify-center "
+          let cls = "relative h-9 rounded text-xs font-medium tabular-nums transition-colors flex items-center justify-center "
           if (!cell.inMonth) {
             cls += "text-muted-foreground/40 hover:bg-accent/50 "
           } else if (isSelected) {
@@ -170,15 +180,21 @@ export function DayCalendarSidebar({ selectedDate, onSelectDate, onClose }: Prop
           if (isToday && !isSelected) {
             cls += "ring-1 ring-primary "
           }
+          const titleParts: string[] = [cell.iso]
+          if (hasWorkout) titleParts.push("workout")
+          if (hasNote) titleParts.push("nota di salute")
           return (
             <button
               key={cell.iso}
               type="button"
               onClick={() => onSelectDate(cell.iso)}
               className={cls}
-              title={cell.iso + (hasWorkout ? " · workout" : "")}
+              title={titleParts.join(" · ")}
             >
               {cell.day}
+              {hasNote && cell.inMonth && (
+                <span className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full ${isSelected ? "bg-primary-foreground" : "bg-rose-500"}`} />
+              )}
             </button>
           )
         })}
@@ -189,6 +205,10 @@ export function DayCalendarSidebar({ selectedDate, onSelectDate, onClose }: Prop
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground pt-2">
           <span className="inline-block w-3 h-3 rounded bg-emerald-500/25 ring-emerald-500/40" />
           <span>= giorno con workout</span>
+        </div>
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-rose-500" />
+          <span>= giorno con nota di salute</span>
         </div>
         <Button size="sm" variant="outline" className="w-full" onClick={goToToday}>
           Vai a oggi

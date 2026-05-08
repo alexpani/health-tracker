@@ -24,6 +24,7 @@ from app.database import get_db
 from app.models import (
     CategorySample,
     DailyStat,
+    HealthNote,
     HealthSample,
     Regimen,
     Workout,
@@ -359,6 +360,18 @@ async def _fetch_lab_panels(db: AsyncSession, d: date_cls) -> list[dict]:
     return out
 
 
+async def _fetch_health_notes(db: AsyncSession, d: date_cls) -> list[HealthNote]:
+    """Note di salute attive nel giorno (start_date <= d <= end_date)."""
+    rows = (
+        await db.execute(
+            select(HealthNote)
+            .where(and_(HealthNote.start_date <= d, HealthNote.end_date >= d))
+            .order_by(HealthNote.category.asc(), HealthNote.id.desc())
+        )
+    ).scalars().all()
+    return list(rows)
+
+
 async def _fetch_regimens_active(db: AsyncSession, d: date_cls) -> list[Regimen]:
     """Regimi manuali attivi nel giorno. Escludiamo `kind='diet'`: i piani
     alimentari vengono dal diario-alimentare via `_fetch_diet_plan`,
@@ -472,6 +485,7 @@ async def get_day(day_str: str, db: AsyncSession = Depends(get_db)):
     lab_panels = await _fetch_lab_panels(db, d)
     regimens = await _fetch_regimens_active(db, d)
     diet_plan = await _fetch_diet_plan(d)
+    health_notes = await _fetch_health_notes(db, d)
 
     regimens_active: list[dict] = [
         {
@@ -515,6 +529,20 @@ async def get_day(day_str: str, db: AsyncSession = Depends(get_db)):
             "source": "diario",
         })
 
+    health_notes_out: list[dict] = [
+        {
+            "id": n.id,
+            "category": n.category,
+            "body_zone": n.body_zone,
+            "text": n.text,
+            "start_date": n.start_date.isoformat(),
+            "end_date": n.end_date.isoformat(),
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+            "updated_at": n.updated_at.isoformat() if n.updated_at else None,
+        }
+        for n in health_notes
+    ]
+
     return {
         "date": d.isoformat(),
         "activity": activity,
@@ -525,4 +553,5 @@ async def get_day(day_str: str, db: AsyncSession = Depends(get_db)):
         "workouts": workouts,
         "lab_panels": lab_panels,
         "regimens_active": regimens_active,
+        "health_notes": health_notes_out,
     }
