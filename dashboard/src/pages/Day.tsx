@@ -96,6 +96,7 @@ export default function Day() {
     if (!r) return null
     return {
       ...r,
+      metadata: null,
       created_at: "",
       updated_at: "",
     }

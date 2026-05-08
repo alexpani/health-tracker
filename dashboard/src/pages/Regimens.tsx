@@ -57,6 +57,7 @@ export default function Regimens() {
       dose: dose.join(" · ") || null,
       notes: "Sincronizzato dal diario alimentare. Modifica nel diario.",
       source: "diario",
+      metadata: null,
       created_at: p.updated_at ?? "",
       updated_at: p.updated_at ?? "",
     }
