@@ -26,12 +26,20 @@ export default function Nutrition() {
 
   const [filters, setFilters] = useState<NutritionFilters>(saved.filters ?? {})
   const [showMobileFilters, setShowMobileFilters] = useState(false)
+  // Giorno verso cui far focalizzare il calendario. Si aggiorna quando cambia
+  // `filters.start` (filtro periodo preciso → primo giorno del periodo) e
+  // quando l'utente clicca una barra dell'istogramma storico.
+  const [calendarFocusDay, setCalendarFocusDay] = useState<string | null>(filters.start ?? null)
 
   const firstRender = useRef(true)
   useEffect(() => {
     if (firstRender.current) { firstRender.current = false; return }
     try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ filters })) } catch {}
   }, [filters])
+
+  useEffect(() => {
+    if (filters.start) setCalendarFocusDay(filters.start)
+  }, [filters.start])
 
   // Year chips: derive from the union of (a) diario daily-totals and (b)
   // HealthKit dietary facets — so a year with ONLY Lifesum samples (e.g.
@@ -88,9 +96,9 @@ export default function Nutrition() {
           </Button>
         </div>
 
-        <NutritionCalendar kcalTargetFilter={filters.kcal_target} />
+        <NutritionCalendar kcalTargetFilter={filters.kcal_target} focusDay={calendarFocusDay} />
 
-        <DiarioSection filters={filters} />
+        <DiarioSection filters={filters} onBarClick={setCalendarFocusDay} />
 
         <div className="border-t pt-8">
           <h2 className="text-xl font-semibold mb-1">Nutrizione da HealthKit</h2>

@@ -30,6 +30,7 @@ import type {
   Regimen,
   RegimenKind,
   RulesSummary,
+  Sample,
   SampleFacets,
   SamplesResponse,
   SyncSession,
@@ -567,6 +568,92 @@ export function useDiarioDailyTotals(from: string, to: string) {
     queryFn: () => apiGet<DiarioDailyTotal[]>("/api/v1/diario/daily-totals", { from, to }),
     staleTime: 60_000,
   })
+}
+
+// Totali giornalieri "consolidati" = diario + sample HK dietary di sorgenti
+// esterne (non scritti da noi). Usato dal calendario e dall'istogramma cosi'
+// che mostrino lo stesso totale per ogni giorno (i giorni storici pre-diario
+// hanno solo dati HK, es. Lifesum). Le query sottostanti sono identiche a
+// quelle in DiarioSection → TanStack Query dedup.
+const DIETARY_KCAL    = "HKQuantityTypeIdentifierDietaryEnergyConsumed"
+const DIETARY_PROTEIN = "HKQuantityTypeIdentifierDietaryProtein"
+const DIETARY_FAT     = "HKQuantityTypeIdentifierDietaryFatTotal"
+const DIETARY_CARBS   = "HKQuantityTypeIdentifierDietaryCarbohydrates"
+const DIARIO_OUR_SOURCE = "Health Tracker"
+
+function todayLocalISO_(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+/// Estensione di DiarioDailyTotal con la lista delle fonti che hanno
+/// contribuito al totale di quel giorno (es. ["Diario alimentare", "Lifesum"]).
+export interface ConsolidatedDayTotal extends DiarioDailyTotal {
+  sources: string[]
+}
+
+const DIARIO_SOURCE_LABEL = "Diario alimentare"
+
+export function useConsolidatedDailyTotals() {
+  const { data: allDaily, isLoading: dailyLoading } = useDiarioDailyTotals("2010-01-01", todayLocalISO_())
+  const hkKcal    = useSamples({ type: DIETARY_KCAL,    aggregation: "none", limit: 10000 })
+  const hkProtein = useSamples({ type: DIETARY_PROTEIN, aggregation: "none", limit: 10000 })
+  const hkFat     = useSamples({ type: DIETARY_FAT,     aggregation: "none", limit: 10000 })
+  const hkCarbs   = useSamples({ type: DIETARY_CARBS,   aggregation: "none", limit: 10000 })
+
+  const byDate = new Map<string, DiarioDailyTotal>()
+  const sourcesByDate = new Map<string, Set<string>>()
+  const addSource = (date: string, src: string) => {
+    let set = sourcesByDate.get(date)
+    if (!set) { set = new Set(); sourcesByDate.set(date, set) }
+    set.add(src)
+  }
+  for (const d of (allDaily ?? [])) {
+    byDate.set(d.date, { ...d })
+    addSource(d.date, DIARIO_SOURCE_LABEL)
+  }
+  const accumulate = (
+    samples: SamplesResponse | undefined,
+    key: "kcal" | "protein_g" | "fat_g" | "carbs_g",
+  ) => {
+    if (!samples?.data) return
+    // aggregation: "none" → array di Sample (non AggregatedPoint).
+    for (const s of samples.data as Sample[]) {
+      if ((s.source_name ?? "") === DIARIO_OUR_SOURCE) continue
+      const d = new Date(s.start_date)
+      const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+      const existing = byDate.get(localDate)
+      if (existing) {
+        existing[key] = (existing[key] ?? 0) + s.value
+      } else {
+        byDate.set(localDate, {
+          date: localDate,
+          kcal: 0, protein_g: 0, fat_g: 0, carbs_g: 0,
+          kcal_target: null,
+          [key]: s.value,
+        } as DiarioDailyTotal)
+      }
+      addSource(localDate, s.source_name || "Sconosciuta")
+    }
+  }
+  accumulate(hkKcal.data, "kcal")
+  accumulate(hkProtein.data, "protein_g")
+  accumulate(hkFat.data, "fat_g")
+  accumulate(hkCarbs.data, "carbs_g")
+
+  const consolidated: ConsolidatedDayTotal[] = Array.from(byDate.values())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(d => ({
+      ...d,
+      sources: Array.from(sourcesByDate.get(d.date) ?? []).sort((a, b) => {
+        // Diario alimentare sempre per primo, poi alfabetico.
+        if (a === DIARIO_SOURCE_LABEL) return -1
+        if (b === DIARIO_SOURCE_LABEL) return 1
+        return a.localeCompare(b)
+      }),
+    }))
+  const isLoading = dailyLoading || hkKcal.isLoading || hkProtein.isLoading || hkFat.isLoading || hkCarbs.isLoading
+  return { data: consolidated, isLoading }
 }
 
 export interface DiarioSyncResult {
