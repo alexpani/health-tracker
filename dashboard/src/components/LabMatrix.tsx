@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { ChevronDown, ChevronRight, X } from "lucide-react"
+import { ChevronDown, ChevronRight, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -168,6 +168,8 @@ export default function LabMatrix({
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [collapsedInitialized, setCollapsedInitialized] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const firstMatchRowRef = useRef<HTMLTableRowElement>(null)
 
   // Inietta analiti derivati (es. Col.tot/HDL) e applica eventuale filtro
   // "solo fuori range" lato client (post-fetch).
@@ -196,7 +198,26 @@ export default function LabMatrix({
 
   const grouped = useMemo(() => groupByCategory(data), [data])
 
-  // Al primo caricamento: colassa tutte le categorie tranne "lipidi".
+  // Set di id analiti che matchano la ricerca + categorie che li contengono.
+  // Match case-insensitive su display_name_it, slug e aliases.
+  const { matchedIds, matchedCategories } = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q || !data) {
+      return { matchedIds: new Set<number>(), matchedCategories: new Set<string>() }
+    }
+    const ids = new Set<number>()
+    const cats = new Set<string>()
+    for (const a of data.analytes) {
+      const haystacks: string[] = [a.display_name_it, a.slug, ...(a.aliases ?? [])]
+      if (haystacks.some(h => h && h.toLowerCase().includes(q))) {
+        ids.add(a.id)
+        cats.add(a.category)
+      }
+    }
+    return { matchedIds: ids, matchedCategories: cats }
+  }, [searchQuery, data])
+
+  // Al primo caricamento: collassa tutte le categorie tranne "lipidi".
   useEffect(() => {
     if (collapsedInitialized) return
     if (grouped.length === 0) return
@@ -206,6 +227,34 @@ export default function LabMatrix({
     setCollapsed(initial)
     setCollapsedInitialized(true)
   }, [grouped, collapsedInitialized])
+
+  // Quando cambia la ricerca: espande automaticamente le categorie che
+  // contengono almeno un analita matching, lasciando intatto lo stato delle
+  // altre. Lo svuotamento della query non re-collassa nulla — l'utente
+  // mantiene il controllo.
+  useEffect(() => {
+    if (matchedCategories.size === 0) return
+    setCollapsed(prev => {
+      let changed = false
+      const next = new Set(prev)
+      for (const cat of matchedCategories) {
+        if (next.has(cat)) {
+          next.delete(cat)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [matchedCategories])
+
+  // Scroll smooth al primo match quando la query cambia.
+  useEffect(() => {
+    if (!searchQuery.trim()) return
+    if (matchedIds.size === 0) return
+    const el = firstMatchRowRef.current
+    if (!el) return
+    el.scrollIntoView({ behavior: "smooth", block: "center" })
+  }, [searchQuery, matchedIds])
 
   function collapseAll() {
     setCollapsed(new Set(grouped.map(g => g.category)))
@@ -233,6 +282,37 @@ export default function LabMatrix({
 
   const filterBar = (
     <div className="flex flex-wrap items-end gap-3 mb-3">
+      <div>
+        <Label className="text-xs">Cerca analita</Label>
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            type="search"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="es. emoglobina, hdl, ferritina…"
+            className="h-8 text-sm w-56 pl-7 pr-7"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              aria-label="Pulisci ricerca"
+              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        {searchQuery.trim() && (
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {matchedIds.size} match
+            {matchedCategories.size > 0
+              ? ` in ${matchedCategories.size} ${matchedCategories.size === 1 ? "sezione" : "sezioni"}`
+              : ""}
+          </p>
+        )}
+      </div>
       <div>
         <Label className="text-xs">Dal</Label>
         <Input
@@ -377,21 +457,33 @@ export default function LabMatrix({
           </tr>
         </thead>
         <tbody>
-          {grouped.map(group => {
-            const isCollapsed = collapsed.has(group.category)
-            return (
-              <CategoryGroup
-                key={group.category}
-                category={group.category}
-                analytes={group.analytes}
-                panels={data.panels}
-                cells={data.cells}
-                collapsed={isCollapsed}
-                onToggle={() => toggleCategory(group.category)}
-                onJumpToTrends={onJumpToTrends}
-              />
-            )
-          })}
+          {(() => {
+            // Calcola il primo id matching nell'ordine visivo per ancorare il
+            // ref di scroll alla riga giusta.
+            let firstMatchAssigned = false
+            return grouped.map(group => {
+              const isCollapsed = collapsed.has(group.category)
+              const firstIdInGroup = !firstMatchAssigned
+                ? group.analytes.find(a => matchedIds.has(a.id))?.id ?? null
+                : null
+              if (firstIdInGroup != null) firstMatchAssigned = true
+              return (
+                <CategoryGroup
+                  key={group.category}
+                  category={group.category}
+                  analytes={group.analytes}
+                  panels={data.panels}
+                  cells={data.cells}
+                  collapsed={isCollapsed}
+                  onToggle={() => toggleCategory(group.category)}
+                  onJumpToTrends={onJumpToTrends}
+                  matchedIds={matchedIds}
+                  firstMatchId={firstIdInGroup}
+                  firstMatchRef={firstMatchRowRef}
+                />
+              )
+            })
+          })()}
           {data.panel_weights && Object.keys(data.panel_weights).length > 0 && (
             <>
               <tr className="bg-muted/50">
@@ -468,6 +560,9 @@ function CategoryGroup({
   collapsed,
   onToggle,
   onJumpToTrends,
+  matchedIds,
+  firstMatchId,
+  firstMatchRef,
 }: {
   category: string
   analytes: LabAnalyte[]
@@ -476,10 +571,15 @@ function CategoryGroup({
   collapsed: boolean
   onToggle: () => void
   onJumpToTrends?: (slug: string) => void
+  matchedIds: Set<number>
+  firstMatchId: number | null
+  firstMatchRef: React.RefObject<HTMLTableRowElement>
 }) {
+  const hasMatchInGroup =
+    matchedIds.size > 0 && analytes.some(a => matchedIds.has(a.id))
   return (
     <>
-      <tr className="bg-muted/50">
+      <tr className={cn("bg-muted/50", hasMatchInGroup && "ring-1 ring-yellow-400/60")}>
         <td
           className="sticky left-0 z-10 bg-muted/50 px-3 py-1.5 font-semibold cursor-pointer border-r"
           colSpan={1}
@@ -488,6 +588,11 @@ function CategoryGroup({
           <span className="flex items-center gap-1">
             {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
             {category} ({analytes.length})
+            {hasMatchInGroup && (
+              <span className="ml-1 inline-flex items-center rounded-sm bg-yellow-200 text-yellow-900 px-1 text-[10px] font-medium">
+                match
+              </span>
+            )}
           </span>
         </td>
         <td
@@ -500,11 +605,29 @@ function CategoryGroup({
         analytes.map(a => {
           const byPanel = cells[String(a.id)] ?? {}
           const hasAny = Object.keys(byPanel).length > 0
+          const isMatch = matchedIds.has(a.id)
           return (
-            <tr key={a.id} className={!hasAny ? "opacity-50" : ""}>
-              <td className="sticky left-0 z-10 bg-background px-3 py-1.5 border-r">
+            <tr
+              key={a.id}
+              ref={firstMatchId === a.id ? firstMatchRef : undefined}
+              className={cn(
+                !hasAny && "opacity-50",
+                isMatch && "bg-yellow-100/70 dark:bg-yellow-900/30"
+              )}
+            >
+              <td
+                className={cn(
+                  "sticky left-0 z-10 px-3 py-1.5 border-r",
+                  isMatch
+                    ? "bg-yellow-100/70 dark:bg-yellow-900/30"
+                    : "bg-background"
+                )}
+              >
                 <button
-                  className="text-left hover:underline"
+                  className={cn(
+                    "text-left hover:underline",
+                    isMatch && "font-semibold"
+                  )}
                   onClick={() => onJumpToTrends?.(a.slug)}
                   title={
                     a.unit_canonical
