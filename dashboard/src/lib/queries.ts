@@ -9,6 +9,9 @@ import type {
   DaySnapshot,
   DiarioDailyTotal,
   DiarioPlan,
+  HealthNote,
+  HealthNoteCategory,
+  HealthNoteFilters,
   LabAliasIn,
   LabAnalyte,
   LabConfirmResponse,
@@ -141,6 +144,103 @@ export function useDeleteRegimen() {
     mutationFn: (id: number) => apiDelete<{ ok: boolean; id: number }>(`/api/v1/regimens/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["regimens"] })
+      qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+    },
+  })
+}
+
+/** Hook per ottenere il piano alimentare (kind='diet') attivo in una data specifica.
+ * Ritorna il primo regimen di tipo 'diet' attivo, oppure null.
+ * Il metadata del regimen contiene: kcal_target?, protein_pct?, fat_pct?, carbs_pct?
+ */
+export function useActiveDietPlan(date?: string, enabled = true) {
+  const regimens = useRegimens({ kind: "diet", active_on: date, include_ended: true })
+  return {
+    ...regimens,
+    data: regimens.data?.[0] ?? null,
+  }
+}
+
+// --- Health notes ---
+
+interface HealthNoteInput {
+  category: HealthNoteCategory
+  body_zone?: string | null
+  text: string
+  start_date: string
+  end_date?: string | null
+}
+
+export function useHealthNotes(filters: HealthNoteFilters = {}) {
+  return useQuery({
+    queryKey: ["healthNotes", filters],
+    queryFn: () =>
+      apiGet<HealthNote[]>("/api/v1/health-notes", {
+        category: filters.category,
+        body_zone: filters.body_zone,
+        text_contains: filters.text_contains,
+        start: filters.start,
+        end: filters.end,
+        active_on: filters.active_on,
+      }),
+    staleTime: 30_000,
+  })
+}
+
+/** Lista di date ISO coperte da almeno una nota nel range [start, end].
+ * Usato dal mini-calendario per disegnare i pallini. */
+export function useHealthNoteDays(start: string, end: string, enabled = true) {
+  return useQuery({
+    queryKey: ["healthNoteDays", start, end],
+    queryFn: () => apiGet<string[]>("/api/v1/health-notes/days", { start, end }),
+    enabled: enabled && !!start && !!end,
+    staleTime: 60_000,
+  })
+}
+
+export function useHealthNoteZones() {
+  return useQuery({
+    queryKey: ["healthNoteZones"],
+    queryFn: () => apiGet<string[]>("/api/v1/health-notes/zones"),
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useCreateHealthNote() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: HealthNoteInput) => apiPost<HealthNote>("/api/v1/health-notes", input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["healthNotes"] })
+      qc.invalidateQueries({ queryKey: ["healthNoteDays"] })
+      qc.invalidateQueries({ queryKey: ["healthNoteZones"] })
+      qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+    },
+  })
+}
+
+export function useUpdateHealthNote() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: number; patch: Partial<HealthNoteInput> }) =>
+      apiPatch<HealthNote>(`/api/v1/health-notes/${id}`, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["healthNotes"] })
+      qc.invalidateQueries({ queryKey: ["healthNoteDays"] })
+      qc.invalidateQueries({ queryKey: ["healthNoteZones"] })
+      qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+    },
+  })
+}
+
+export function useDeleteHealthNote() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => apiDelete<{ ok: boolean; id: number }>(`/api/v1/health-notes/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["healthNotes"] })
+      qc.invalidateQueries({ queryKey: ["healthNoteDays"] })
+      qc.invalidateQueries({ queryKey: ["healthNoteZones"] })
       qc.invalidateQueries({ queryKey: ["daySnapshot"] })
     },
   })

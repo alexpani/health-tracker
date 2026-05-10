@@ -48,7 +48,7 @@ SwiftUI native app targeting iOS 17+.
 - Incremental sync with `lastSyncDate` per type in SwiftData
 - Memory-safe 90-day fetch windows; **parallel** HTTP uploads (4 concurrent); batch size 1000
 - **Real-time auto-sync**: `HKObserverQuery` + background delivery → app reacts to new HealthKit data, even when backgrounded
-- Auto-sync on launch + foreground (10-min throttle), plus hourly `BGAppRefreshTask` fallback
+- Auto-sync on launch + foreground (10-min throttle), plus hourly `BGAppRefreshTask` fallback and **Significant Location Changes** wake-ups (CoreLocation SLC monitoring; the app uses cell-tower changes as a wake signal only — no GPS, no coordinates persisted)
 - **Writes** pending data from web apps to Apple Health via `HKHealthStore.save()`
 - **Deletes** samples via `HKHealthStore.delete()` (only samples the app created — HealthKit rule)
 - **Propagates Apple Health deletions**: workouts and body-metric samples (peso, BMI, grasso, magra, altezza, vita) are synced via `HKAnchoredObjectQuery`, so cancellations on the phone side are mirrored to the backend (and auto-blacklisted so they can't re-appear)

@@ -1,8 +1,10 @@
 import SwiftUI
 import SwiftData
+import os
 
 @main
 struct HealthTrackerApp: App {
+    nonisolated private static let logger = Logger(subsystem: "com.healthtracker", category: "app")
     private let syncService = SyncService()
     @Environment(\.scenePhase) private var scenePhase
     private let healthKitManager = HealthKitManager()
@@ -10,6 +12,7 @@ struct HealthTrackerApp: App {
     let modelContainer: ModelContainer
 
     init() {
+        Self.logger.info("App init: starting")
         do {
             modelContainer = try ModelContainer(for: SyncState.self)
         } catch {
@@ -19,6 +22,7 @@ struct HealthTrackerApp: App {
         // Register the BGAppRefreshTask handler. MUST happen synchronously in
         // App.init (before app finished launching) per iOS rules.
         BackgroundTaskManager.shared.register(syncService: syncService)
+        Self.logger.info("App init: BGAppRefreshTask handler registered")
 
         // CRITICAL: HKObserverQuery + HK background delivery only work if the
         // observers are registered on every launch — including BACKGROUND
@@ -32,12 +36,30 @@ struct HealthTrackerApp: App {
         let svc = syncService
         let mc = modelContainer
         Task.detached(priority: .userInitiated) {
-            try? await hkm.requestAuthorization()
+            Self.logger.info("App init: requesting HK authorization")
+            do {
+                try await hkm.requestAuthorization()
+                Self.logger.info("App init: HK authorization done")
+            } catch {
+                Self.logger.error("App init: HK authorization FAILED: \(error.localizedDescription)")
+            }
             await MainActor.run { svc.setModelContainer(mc) }
             BackgroundTaskManager.shared.scheduleNextSync()
+            Self.logger.info("App init: scheduleNextSync called from app launch")
             await hkm.startObservingNewSamples { [svc] in
                 await svc.performQuickSync()
             }
+            Self.logger.info("App init: HKObserverQuery setup completed")
+
+            // Start Significant Location Changes as an additional wake-up
+            // signal: iOS launches/wakes the app on cell-tower changes even
+            // when BGAppRefreshTask is throttled / the app is suspended.
+            await MainActor.run {
+                LocationWakeManager.shared.start { [svc] in
+                    await svc.performQuickSync()
+                }
+            }
+            Self.logger.info("App init: SLC monitoring started")
         }
     }
 

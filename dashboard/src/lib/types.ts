@@ -337,8 +337,38 @@ export interface Regimen {
   dose: string | null
   notes: string | null
   source: "manual" | "lab_backfill" | "diario"
+  metadata: {
+    kcal_target?: number
+    protein_pct?: number
+    fat_pct?: number
+    carbs_pct?: number
+  } | null
   created_at: string
   updated_at: string
+}
+
+// --- Health notes (daily annotations: pain, illness, ...) ---
+
+export type HealthNoteCategory = "pain" | "illness" | "discomfort" | "symptom" | "other"
+
+export interface HealthNote {
+  id: number
+  category: HealthNoteCategory
+  body_zone: string | null
+  text: string
+  start_date: string  // ISO YYYY-MM-DD
+  end_date: string    // ISO YYYY-MM-DD
+  created_at: string
+  updated_at: string
+}
+
+export interface HealthNoteFilters {
+  category?: HealthNoteCategory
+  body_zone?: string
+  text_contains?: string
+  start?: string
+  end?: string
+  active_on?: string
 }
 
 // --- Day snapshot ---
@@ -438,6 +468,7 @@ export interface DaySnapshot {
     notes: string | null
     source: "manual" | "lab_backfill" | "diario"
   }>
+  health_notes: HealthNote[]
 }
 
 export interface DiarioPlan {

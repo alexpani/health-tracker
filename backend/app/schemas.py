@@ -210,12 +210,13 @@ class DeletionPlanOut(BaseModel):
 
 
 class RegimenIn(BaseModel):
-    kind: str           # 'medication' | 'supplement' | 'diet' | 'training'
+    kind: str           # 'medication' | 'supplement' | 'diet' | 'training' | 'gear'
     name: str
     start_date: date_cls | None = None
     end_date: date_cls | None = None
     dose: str | None = None
     notes: str | None = None
+    metadata: dict | None = None  # for kind='diet': {kcal_target?, protein_pct?, fat_pct?, carbs_pct?}
 
 
 class RegimenPatch(BaseModel):
@@ -225,6 +226,7 @@ class RegimenPatch(BaseModel):
     end_date: date_cls | None = None
     dose: str | None = None
     notes: str | None = None
+    metadata: dict | None = None
     # use a sentinel via Field default to distinguish "set to null" vs "leave alone"
     # in Pydantic v2 we rely on `model_dump(exclude_unset=True)` at the router
     # level so any explicit null IS persisted. None == unset == "leave alone".
@@ -239,6 +241,39 @@ class RegimenOut(BaseModel):
     dose: str | None
     notes: str | None
     source: str
+    metadata: dict | None = Field(None, validation_alias="metadata_")
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True, "populate_by_name": True}
+
+
+# --- Health notes (daily annotations: pain, illness, ...) ---
+
+
+class HealthNoteIn(BaseModel):
+    category: str  # 'pain' | 'illness' | 'discomfort' | 'symptom' | 'other'
+    body_zone: str | None = None
+    text: str
+    start_date: date_cls
+    end_date: date_cls | None = None  # default = start_date if omitted
+
+
+class HealthNotePatch(BaseModel):
+    category: str | None = None
+    body_zone: str | None = None
+    text: str | None = None
+    start_date: date_cls | None = None
+    end_date: date_cls | None = None
+
+
+class HealthNoteOut(BaseModel):
+    id: int
+    category: str
+    body_zone: str | None
+    text: str
+    start_date: date_cls
+    end_date: date_cls
     created_at: datetime
     updated_at: datetime
 
@@ -258,6 +293,7 @@ class DaySnapshot(BaseModel):
     workouts: list[dict]
     lab_panels: list[dict]
     regimens_active: list[RegimenOut]
+    health_notes: list[HealthNoteOut] = []
 
 
 # --- Daily statistics (HKStatisticsCollectionQuery) ---

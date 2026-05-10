@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -35,6 +35,14 @@ export default function Regimens() {
     include_ended: includeEnded,
   })
 
+  // Quando si passa a Timeline ma il filtro è "diet" (non visibile lì),
+  // resettiamo a "Tutti" per evitare una vista vuota.
+  useEffect(() => {
+    if (viewMode === 'timeline' && kindFilter === 'diet') {
+      setKindFilter(null)
+    }
+  }, [viewMode, kindFilter])
+
   // Piano alimentare attivo dal diario alimentare. Lo iniettamo come Regimen
   // sintetico (id=-1, source='diario') in modo che la pagina /regimens
   // mostri sotto "Piano alimentare" lo stesso piano che la /day/:date
@@ -57,6 +65,7 @@ export default function Regimens() {
       dose: dose.join(" · ") || null,
       notes: "Sincronizzato dal diario alimentare. Modifica nel diario.",
       source: "diario",
+      metadata: null,
       created_at: p.updated_at ?? "",
       updated_at: p.updated_at ?? "",
     }
@@ -106,6 +115,36 @@ export default function Regimens() {
         </Button>
       </div>
 
+      {/* Filtri kind (condivisi fra Timeline e Tabella) */}
+      <div className="flex flex-wrap gap-2">
+        <Button variant={kindFilter === null ? "default" : "outline"} size="sm" onClick={() => setKindFilter(null)}>
+          Tutti
+        </Button>
+        {KIND_ORDER.map(k => {
+          // "Piano alimentare" non e' visualizzato nella Timeline
+          if (viewMode === 'timeline' && k === 'diet') return null
+          return (
+            <Button
+              key={k}
+              variant={kindFilter === k ? "default" : "outline"}
+              size="sm"
+              onClick={() => setKindFilter(k)}
+            >
+              {KIND_LABELS[k]}
+            </Button>
+          )
+        })}
+        {viewMode === 'table' && (
+          <>
+            <div className="flex-1" />
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={includeEnded} onChange={e => setIncludeEnded(e.target.checked)} />
+              Mostra terminati
+            </label>
+          </>
+        )}
+      </div>
+
       {/* Timeline view */}
       {viewMode === 'timeline' && (
         <>
@@ -128,27 +167,6 @@ export default function Regimens() {
       {/* Table view */}
       {viewMode === 'table' && (
         <>
-          <div className="flex flex-wrap gap-2">
-            <Button variant={kindFilter === null ? "default" : "outline"} size="sm" onClick={() => setKindFilter(null)}>
-              Tutti
-            </Button>
-            {KIND_ORDER.map(k => (
-              <Button
-                key={k}
-                variant={kindFilter === k ? "default" : "outline"}
-                size="sm"
-                onClick={() => setKindFilter(k)}
-              >
-                {KIND_LABELS[k]}
-              </Button>
-            ))}
-            <div className="flex-1" />
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={includeEnded} onChange={e => setIncludeEnded(e.target.checked)} />
-              Mostra terminati
-            </label>
-          </div>
-
           <Section title="In corso" items={grouped.ongoing} onEdit={r => { setShowAdd(false); setEditing(r) }} />
           {includeEnded && grouped.ended.length > 0 && (
             <Section title="Terminati" items={grouped.ended} onEdit={r => { setShowAdd(false); setEditing(r) }} />

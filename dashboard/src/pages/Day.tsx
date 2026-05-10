@@ -12,14 +12,17 @@ import {
   Moon,
   Pill,
   Scale,
+  StickyNote,
   Plus,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { useDaySnapshot } from "@/lib/queries"
-import type { DaySnapshot, RegimenKind, Regimen } from "@/lib/types"
+import type { DaySnapshot, HealthNote, RegimenKind, Regimen } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
+import { HealthNoteForm } from "@/components/HealthNoteForm"
+import { CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/healthNotes"
 import { DayCalendarSidebar } from "@/components/DayCalendarSidebar"
 
 function todayLocal(): string {
@@ -89,6 +92,8 @@ export default function Day() {
 
   const [showAddRegimen, setShowAddRegimen] = useState(false)
   const [editRegimenId, setEditRegimenId] = useState<number | null>(null)
+  const [showAddNote, setShowAddNote] = useState(false)
+  const [editNoteId, setEditNoteId] = useState<number | null>(null)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const editRegimen: Regimen | null = useMemo(() => {
     if (editRegimenId == null || !data) return null
@@ -96,10 +101,16 @@ export default function Day() {
     if (!r) return null
     return {
       ...r,
+      metadata: null,
       created_at: "",
       updated_at: "",
     }
   }, [editRegimenId, data])
+
+  const editNote: HealthNote | null = useMemo(() => {
+    if (editNoteId == null || !data) return null
+    return data.health_notes.find(n => n.id === editNoteId) ?? null
+  }, [editNoteId, data])
 
   return (
     <div className="flex gap-6 -m-6 p-0 min-h-[calc(100vh-0px)]">
@@ -162,6 +173,11 @@ export default function Day() {
                 onAdd={() => { setShowAddRegimen(true); setEditRegimenId(null) }}
                 onEdit={id => { setEditRegimenId(id); setShowAddRegimen(false) }}
               />
+              <HealthNotesCard
+                data={data}
+                onAdd={() => { setShowAddNote(true); setEditNoteId(null) }}
+                onEdit={id => { setEditNoteId(id); setShowAddNote(false) }}
+              />
             </div>
 
             {showAddRegimen && (
@@ -174,6 +190,18 @@ export default function Day() {
               <RegimenForm
                 regimen={editRegimen}
                 onClose={() => setEditRegimenId(null)}
+              />
+            )}
+            {showAddNote && (
+              <HealthNoteForm
+                defaults={{ start_date: date, end_date: date }}
+                onClose={() => setShowAddNote(false)}
+              />
+            )}
+            {editNote && (
+              <HealthNoteForm
+                note={editNote}
+                onClose={() => setEditNoteId(null)}
               />
             )}
           </>
@@ -408,6 +436,75 @@ function LabCard({ data }: { data: DaySnapshot }) {
       </ul>
     </DayCard>
   )
+}
+
+function HealthNotesCard({
+  data,
+  onAdd,
+  onEdit,
+}: {
+  data: DaySnapshot
+  onAdd: () => void
+  onEdit: (id: number) => void
+}) {
+  const grouped: Record<string, HealthNote[]> = {}
+  for (const n of data.health_notes) {
+    if (!grouped[n.category]) grouped[n.category] = []
+    grouped[n.category].push(n)
+  }
+
+  return (
+    <DayCard
+      icon={StickyNote}
+      title="Note di salute"
+      action={
+        <Button variant="outline" size="sm" className="h-7 px-2" onClick={onAdd}>
+          <Plus className="h-3.5 w-3.5 mr-1" /> Aggiungi
+        </Button>
+      }
+    >
+      {data.health_notes.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Nessuna nota per questo giorno.</p>
+      ) : (
+        <div className="space-y-2">
+          {CATEGORY_ORDER.map(cat => grouped[cat] && grouped[cat].length > 0 && (
+            <div key={cat}>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-0.5 flex items-center gap-1">
+                <span className={`inline-block h-1.5 w-1.5 rounded-full ${CATEGORY_COLORS[cat as keyof typeof CATEGORY_COLORS].dot}`} />
+                {CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS]}
+              </p>
+              <ul className="space-y-1">
+                {grouped[cat].map(n => {
+                  const isPeriod = n.start_date !== n.end_date
+                  return (
+                    <li key={n.id}>
+                      <button
+                        onClick={() => onEdit(n.id)}
+                        className="w-full text-left text-xs px-2 py-1 rounded border bg-secondary/50 hover:bg-accent"
+                      >
+                        {n.body_zone && <span className="font-medium">{n.body_zone}: </span>}
+                        <span>{n.text}</span>
+                        {isPeriod && (
+                          <span className="ml-1 text-[10px] text-muted-foreground">
+                            ({fmtDateShort(n.start_date)} → {fmtDateShort(n.end_date)})
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </DayCard>
+  )
+}
+
+function fmtDateShort(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number)
+  return `${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${String(y).slice(2)}`
 }
 
 function RegimensCard({

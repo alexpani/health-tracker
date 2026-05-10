@@ -47,6 +47,7 @@ async def create_regimen(payload: RegimenIn, db: AsyncSession = Depends(get_db))
         end_date=payload.end_date,
         dose=payload.dose,
         notes=payload.notes,
+        metadata_=payload.metadata,
         source="manual",
     )
     db.add(row)

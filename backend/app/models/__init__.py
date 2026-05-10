@@ -234,6 +234,7 @@ class Regimen(Base):
     `end_date=NULL`   = "in corso adesso".
     `source='manual'` per l'inserimento dall'UI, `'lab_backfill'` per gli
     import retroattivi dai campi context dei panel lab confermati.
+    `metadata` (JSONB) per kind='diet': {kcal_target?, protein_pct?, fat_pct?, carbs_pct?}
     """
     __tablename__ = "regimens"
 
@@ -247,6 +248,7 @@ class Regimen(Base):
     source: Mapped[str] = mapped_column(
         String(20), nullable=False, default="manual", server_default="manual"
     )
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -257,6 +259,33 @@ class Regimen(Base):
     __table_args__ = (
         Index("idx_regimens_kind", "kind"),
         Index("idx_regimens_dates", "start_date", "end_date"),
+    )
+
+
+class HealthNote(Base):
+    """Note quotidiane sullo stato di salute (dolori, malattie, fastidi, sintomi).
+    Una riga per "ho avuto X dal giorno A al giorno B".
+    Periodo chiuso: start_date <= end_date, entrambi NOT NULL.
+    Per una nota di un solo giorno: start_date = end_date.
+    """
+    __tablename__ = "health_notes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    body_zone: Mapped[str | None] = mapped_column(String(50))
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    start_date: Mapped[date_cls] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date_cls] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_health_notes_dates", "start_date", "end_date"),
+        Index("idx_health_notes_category", "category"),
     )
 
 

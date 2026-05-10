@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		024DD69C8EE8241C57FAC34C /* LocationWakeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BFA0B291004C1B140F15854 /* LocationWakeManager.swift */; };
 		32AEC81BA1B30951B54E49A4 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC5DF57A8D3D04EEADD97F8 /* SettingsView.swift */; };
 		3A39797E4504AB5A6A822F83 /* HealthTrackerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5E1835B5C8F30F9D4BD65B4 /* HealthTrackerApp.swift */; };
 		4548E28E934C123E620D305C /* BackgroundTaskManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530A32699A717CF84543FA74 /* BackgroundTaskManager.swift */; };
@@ -27,6 +28,7 @@
 		4DC5DF57A8D3D04EEADD97F8 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		530A32699A717CF84543FA74 /* BackgroundTaskManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundTaskManager.swift; sourceTree = "<group>"; };
 		5BEC369264AB7988CB443F12 /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
+		6BFA0B291004C1B140F15854 /* LocationWakeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationWakeManager.swift; sourceTree = "<group>"; };
 		6D98CF1A3E203B0805534D5C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		831ADC7ADC3C000F57AAFC09 /* SyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncState.swift; sourceTree = "<group>"; };
 		A1E3F3AFC2132124704CFB06 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
@@ -101,6 +103,7 @@
 				46126F0450B493E6B724CFFD /* APIClient.swift */,
 				530A32699A717CF84543FA74 /* BackgroundTaskManager.swift */,
 				A1E3F3AFC2132124704CFB06 /* HealthKitManager.swift */,
+				6BFA0B291004C1B140F15854 /* LocationWakeManager.swift */,
 				5BEC369264AB7988CB443F12 /* SyncService.swift */,
 			);
 			path = Services;
@@ -177,6 +180,7 @@
 				691355C902F6DC39D831A355 /* ContentView.swift in Sources */,
 				C110D0EF6A9380D7CBFC9EB6 /* HealthKitManager.swift in Sources */,
 				3A39797E4504AB5A6A822F83 /* HealthTrackerApp.swift in Sources */,
+				024DD69C8EE8241C57FAC34C /* LocationWakeManager.swift in Sources */,
 				32AEC81BA1B30951B54E49A4 /* SettingsView.swift in Sources */,
 				EAEEB979DC9D1D24BAD1C97F /* SyncService.swift in Sources */,
 				F8F8D286E57F47576CE15213 /* SyncState.swift in Sources */,
