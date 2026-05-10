@@ -134,9 +134,18 @@ final class SyncService {
     /// triggers (HKObserverQuery, app launch, scene change).
     @MainActor
     func performQuickSync(minInterval: TimeInterval = 120) async {
-        if isSyncing { return }
-        if let last = lastSyncDate, Date().timeIntervalSince(last) < minInterval {
+        let inBg = isAppInBackground()
+        logger.info("Quick sync triggered (minInterval=\(Int(minInterval))s, inBg=\(inBg))")
+        if isSyncing {
+            logger.info("Quick sync skipped: already syncing")
             return
+        }
+        if let last = lastSyncDate {
+            let elapsed = Date().timeIntervalSince(last)
+            if elapsed < minInterval {
+                logger.info("Quick sync skipped: throttled (last \(Int(elapsed))s < \(Int(minInterval))s)")
+                return
+            }
         }
         await performFullSync()
     }
@@ -346,6 +355,12 @@ final class SyncService {
         typeProgress = 0
         isSyncing = false
         shouldStop = false
+
+        // Re-arm the BG task chain at the end of every sync (foreground or
+        // background, manual or auto). BGTaskScheduler.submit() is idempotent
+        // for the same identifier, so this is safe even when handleSync()
+        // already scheduled the next launch at the very start of the run.
+        BackgroundTaskManager.shared.scheduleNextSync()
     }
 
     /// Polls the backend for pending writes and writes them to Apple Health.

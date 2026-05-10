@@ -169,6 +169,7 @@ actor HealthKitManager {
             log.info("HKObserverQuery fired: \(typeName)")
             Task {
                 await onChange()
+                log.info("HKObserverQuery callback completed: \(typeName)")
                 completion()
             }
         }
@@ -212,6 +213,18 @@ actor HealthKitManager {
         store.execute(workoutQuery)
         registered += 1
         store.enableBackgroundDelivery(for: .workoutType(), frequency: .hourly, withCompletion: bgCompletion("HKWorkoutType"))
+
+        // GPS routes arrive a few seconds after the workout sample; without a
+        // dedicated observer they would only be picked up on the next manual
+        // sync. Watching HKSeriesType.workoutRoute() ensures route-only
+        // updates wake the app too.
+        let routeType = HKSeriesType.workoutRoute()
+        let routeQuery = HKObserverQuery(sampleType: routeType, predicate: nil) { _, completion, _ in
+            runCallback("HKWorkoutRoute", completion)
+        }
+        store.execute(routeQuery)
+        registered += 1
+        store.enableBackgroundDelivery(for: routeType, frequency: .hourly, withCompletion: bgCompletion("HKWorkoutRoute"))
 
         log.info("HKObserverQuery setup: \(registered) types registered (BG delivery requested)")
     }
