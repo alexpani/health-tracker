@@ -40,6 +40,8 @@ export interface BarPosition {
 }
 
 const PRESETS = [
+  { label: 'Ultimo mese', days: 30 },
+  { label: 'Ultimi 3 mesi', days: 90 },
   { label: 'Ultimo anno', days: 365 },
   { label: 'Ultimi 3 anni', days: 365 * 3 },
   { label: 'Ultimi 5 anni', days: 365 * 5 },

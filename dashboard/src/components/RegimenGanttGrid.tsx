@@ -125,6 +125,8 @@ export function RegimenGanttGrid({
             {groups.map(group => {
               const color = getKindColor(group.kind)
               const groupHasUnknownStart = group.regimens.some(r => !r.start_date)
+              const hasMultipleBlocks = group.regimens.length > 1
+              const barRounding = hasMultipleBlocks ? 'rounded-xl' : 'rounded'
 
               return (
                 <div
@@ -168,7 +170,7 @@ export function RegimenGanttGrid({
                     return (
                       <div
                         key={regimen.id}
-                        className={`absolute h-10 rounded cursor-pointer transition-all ${color} ${
+                        className={`absolute h-10 ${barRounding} cursor-pointer transition-all ${color} ${
                           isHovered ? 'ring-2 ring-primary shadow-md' : 'shadow-sm'
                         }`}
                         style={barStyle}

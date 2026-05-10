@@ -12,7 +12,7 @@ interface RegimenTimelineProps {
 }
 
 export function RegimenTimeline({ regimens, isLoading, onRegimensChange }: RegimenTimelineProps) {
-  const [presetIdx, setPresetIdx] = useState(1) // "Ultimo anno" default
+  const [presetIdx, setPresetIdx] = useState(0) // "Ultimo mese" default
   const [showEnded, setShowEnded] = useState(true)
   const [hoverRegimenId, setHoverRegimenId] = useState<number | null>(null)
   const [editingRegimen, setEditingRegimen] = useState<Regimen | null>(null)
@@ -42,10 +42,12 @@ export function RegimenTimeline({ regimens, isLoading, onRegimensChange }: Regim
   }
 
   const presets = [
-    { label: 'Ultimo anno', idx: 0 },
-    { label: 'Ultimi 3 anni', idx: 1 },
-    { label: 'Ultimi 5 anni', idx: 2 },
-    { label: 'Tutto', idx: 3 },
+    { label: 'Ultimo mese', idx: 0 },
+    { label: 'Ultimi 3 mesi', idx: 1 },
+    { label: 'Ultimo anno', idx: 2 },
+    { label: 'Ultimi 3 anni', idx: 3 },
+    { label: 'Ultimi 5 anni', idx: 4 },
+    { label: 'Tutto', idx: 5 },
   ]
 
   return (
