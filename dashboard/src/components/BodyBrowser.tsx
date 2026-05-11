@@ -358,8 +358,13 @@ export default function BodyBrowser() {
 
   const tooltipLabel = (iso: string) => {
     const d = new Date(iso)
-    return d.toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })
-      + " " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
+    const datePart = d.toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })
+    // Per i bucket daily/weekly/monthly il timestamp è troncato a mezzanotte
+    // (vedi bucketFloor), quindi mostrare l'ora porterebbe sempre "00:00".
+    if (aggregation === "none" || aggregation === "hourly") {
+      return datePart + " " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
+    }
+    return datePart
   }
 
   const CustomTooltip = ({ active, payload, label }: any) => {
