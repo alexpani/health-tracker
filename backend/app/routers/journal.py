@@ -15,8 +15,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import JournalEntry
+from pydantic import BaseModel
+
 from app.schemas import JournalEntryIn, JournalEntryOut, JournalEntryPatch
 from app.services.journal_sanitize import normalize_tags, sanitize_journal_html
+
+
+class JournalBulkIn(BaseModel):
+    ids: list[int]
+    action: str  # "delete" | "add_tag" | "remove_tag"
+    tag: str | None = None
+
+
+class JournalTagRenameIn(BaseModel):
+    old: str
+    new: str | None  # None = elimina il tag da tutte le voci
 
 router = APIRouter(prefix="/api/v1/journal", tags=["journal"])
 
@@ -117,7 +130,17 @@ async def list_journal_entries(
         # JSONB contains [norm]
         stmt = stmt.where(JournalEntry.tags.op("@>")([norm]))
     if text_contains:
-        stmt = stmt.where(JournalEntry.content_text.ilike(f"%{text_contains}%"))
+        q = text_contains.strip()
+        # Single word senza spazi / quote → ILIKE (matching substring,
+        # rapido su query corte).
+        # Altrimenti FTS italiano via websearch_to_tsquery (multi-word
+        # AND, supporta "phrase" e -negation).
+        if any(c.isspace() or c == '"' for c in q):
+            stmt = stmt.where(
+                text("search_tsv @@ websearch_to_tsquery('italian', :q)").bindparams(q=q)
+            )
+        else:
+            stmt = stmt.where(JournalEntry.content_text.ilike(f"%{q}%"))
 
     stmt = stmt.order_by(JournalEntry.date.desc(), JournalEntry.id.desc()).offset(offset).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
@@ -171,6 +194,94 @@ async def update_journal_entry(
     await db.commit()
     await db.refresh(row)
     return row
+
+
+@router.post("/bulk")
+async def bulk_journal(payload: JournalBulkIn, db: AsyncSession = Depends(get_db)):
+    """Azione in massa su un set di voci.
+
+    Actions:
+      - `delete`: elimina tutte le voci negli `ids`.
+      - `add_tag` / `remove_tag`: aggiunge/rimuove il tag normalizzato
+        su tutte le voci. Idempotente (no-op se gia' presente/assente).
+    """
+    if not payload.ids:
+        return {"updated": 0, "deleted": 0}
+
+    action = payload.action
+    if action == "delete":
+        res = await db.execute(
+            JournalEntry.__table__.delete().where(JournalEntry.id.in_(payload.ids))
+        )
+        await db.commit()
+        return {"deleted": res.rowcount or 0}
+
+    if action not in {"add_tag", "remove_tag"}:
+        raise HTTPException(status_code=400, detail=f"unknown action {action}")
+    if not payload.tag:
+        raise HTTPException(status_code=400, detail="tag richiesto per add_tag/remove_tag")
+    norm_tags = normalize_tags([payload.tag])
+    if not norm_tags:
+        raise HTTPException(status_code=400, detail="tag non valido dopo normalizzazione")
+    tag = norm_tags[0]
+
+    rows = (
+        await db.execute(select(JournalEntry).where(JournalEntry.id.in_(payload.ids)))
+    ).scalars().all()
+    updated = 0
+    for row in rows:
+        cur = list(row.tags or [])
+        if action == "add_tag":
+            if tag not in cur:
+                cur.append(tag)
+                row.tags = cur
+                updated += 1
+        else:  # remove_tag
+            if tag in cur:
+                cur = [t for t in cur if t != tag]
+                row.tags = cur
+                updated += 1
+    await db.commit()
+    return {"updated": updated}
+
+
+@router.post("/tags/rename")
+async def rename_tag(payload: JournalTagRenameIn, db: AsyncSession = Depends(get_db)):
+    """Rinomina o elimina un tag su tutte le voci che lo contengono.
+
+    - `{old, new}` → sostituisce `old` con `new` (con normalizzazione e
+      dedup).
+    - `{old, new: null}` → rimuove `old` da tutte le voci.
+    """
+    old_norm = normalize_tags([payload.old])
+    if not old_norm:
+        raise HTTPException(status_code=400, detail="tag sorgente non valido")
+    old = old_norm[0]
+
+    new: str | None = None
+    if payload.new is not None:
+        new_norm = normalize_tags([payload.new])
+        if not new_norm:
+            raise HTTPException(status_code=400, detail="tag destinazione non valido")
+        new = new_norm[0]
+
+    rows = (
+        await db.execute(
+            select(JournalEntry).where(JournalEntry.tags.op("@>")([old]))
+        )
+    ).scalars().all()
+    updated = 0
+    for row in rows:
+        cur = list(row.tags or [])
+        if old not in cur:
+            continue
+        cur = [t for t in cur if t != old]
+        if new is not None and new not in cur:
+            cur.append(new)
+        row.tags = cur
+        updated += 1
+    await db.commit()
+    return {"updated": updated, "old": old, "new": new}
 
 
 @router.delete("/{entry_id}")

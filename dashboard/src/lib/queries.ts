@@ -355,6 +355,41 @@ export function useDeleteJournal() {
   })
 }
 
+export type JournalBulkAction = "delete" | "add_tag" | "remove_tag"
+
+export function useJournalBulk() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { ids: number[]; action: JournalBulkAction; tag?: string }) =>
+      apiPost<{ updated?: number; deleted?: number }>("/api/v1/journal/bulk", input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["journalEntry"] })
+      qc.invalidateQueries({ queryKey: ["journalDays"] })
+      qc.invalidateQueries({ queryKey: ["journalTags"] })
+      qc.invalidateQueries({ queryKey: ["journalList"] })
+      qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+    },
+  })
+}
+
+export function useRenameJournalTag() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { old: string; new: string | null }) =>
+      apiPost<{ updated: number; old: string; new: string | null }>(
+        "/api/v1/journal/tags/rename",
+        input,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["journalEntry"] })
+      qc.invalidateQueries({ queryKey: ["journalDays"] })
+      qc.invalidateQueries({ queryKey: ["journalTags"] })
+      qc.invalidateQueries({ queryKey: ["journalList"] })
+      qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+    },
+  })
+}
+
 export function useDailyStats(type: string, start?: string, end?: string, enabled = true) {
   return useQuery({
     queryKey: ["dailyStats", type, start, end],

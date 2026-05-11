@@ -1,13 +1,31 @@
 import { useState } from "react"
 import { Outlet } from "react-router-dom"
-import { Menu, X } from "lucide-react"
+import { BookOpen, Menu, X } from "lucide-react"
 import Sidebar from "./Sidebar"
 import { Button } from "@/components/ui/button"
+import { QuickJournalProvider, useQuickJournal } from "@/components/QuickJournalProvider"
+
+function QuickJournalButton() {
+  const { openOnToday } = useQuickJournal()
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-8 w-8 shrink-0"
+      onClick={openOnToday}
+      title="Diario di oggi (Cmd/Ctrl+J)"
+      aria-label="Apri diario di oggi"
+    >
+      <BookOpen className="h-4 w-4" />
+    </Button>
+  )
+}
 
 export default function Layout() {
   const [open, setOpen] = useState(false)
 
   return (
+    <QuickJournalProvider>
     <div className="flex flex-col h-full bg-slate-100 dark:bg-slate-900">
       {/* Top bar:
           - mobile/tablet (<lg): hamburger + titolo, drawer al click
@@ -32,6 +50,9 @@ export default function Layout() {
         <div className="hidden lg:flex flex-1 min-w-0">
           <Sidebar orientation="horizontal" />
         </div>
+
+        {/* Quick journal: sempre visibile in topbar */}
+        <QuickJournalButton />
       </header>
 
       {/* Main content — boxed: max-w 1680px + bg-background + ombra, su
@@ -61,5 +82,6 @@ export default function Layout() {
         </div>
       )}
     </div>
+    </QuickJournalProvider>
   )
 }
