@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
-import { ChevronLeft, ChevronRight, MoreHorizontal, Pencil, Plus, Search, Trash2, X } from "lucide-react"
+import { useNavigate } from "react-router-dom"
+import { CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, Search, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -397,9 +397,11 @@ export default function Journal() {
                           className="mt-1 h-4 w-4 cursor-pointer"
                           aria-label={`Seleziona voce ${e.date}`}
                         />
-                        <Link
-                          to={`/day/${e.date}`}
-                          className="flex-1 min-w-0 cursor-pointer"
+                        <button
+                          type="button"
+                          onClick={() => setEditEntry(e)}
+                          className="flex-1 min-w-0 cursor-pointer text-left"
+                          aria-label={`Modifica voce ${e.date}`}
                         >
                           <div className="flex items-baseline justify-between gap-2">
                             <span className="text-sm font-medium capitalize">{fmtDateIT(e.date)}</span>
@@ -419,16 +421,16 @@ export default function Journal() {
                           <p className="mt-1 text-sm text-muted-foreground line-clamp-3 break-words">
                             {highlightMatches(truncatePlain(e.content_text), filters.text_contains ?? "")}
                           </p>
-                        </Link>
+                        </button>
                         <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                           <button
                             type="button"
-                            onClick={() => setEditEntry(e)}
+                            onClick={() => navigate(`/day/${e.date}`)}
                             className="h-7 w-7 rounded inline-flex items-center justify-center hover:bg-accent"
-                            title="Modifica"
-                            aria-label="Modifica"
+                            title="Vai al calendario di questo giorno"
+                            aria-label="Vai al calendario"
                           >
-                            <Pencil className="h-3.5 w-3.5" />
+                            <CalendarDays className="h-3.5 w-3.5" />
                           </button>
                           <button
                             type="button"
