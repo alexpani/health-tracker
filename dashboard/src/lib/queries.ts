@@ -12,6 +12,8 @@ import type {
   HealthNote,
   HealthNoteCategory,
   HealthNoteFilters,
+  JournalEntry,
+  JournalFilters,
   LabAliasIn,
   LabAnalyte,
   LabConfirmResponse,
@@ -242,6 +244,112 @@ export function useDeleteHealthNote() {
       qc.invalidateQueries({ queryKey: ["healthNotes"] })
       qc.invalidateQueries({ queryKey: ["healthNoteDays"] })
       qc.invalidateQueries({ queryKey: ["healthNoteZones"] })
+      qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+    },
+  })
+}
+
+// --- Journal entries (daily diary: rich text + tags) ---
+
+export interface JournalUpsertInput {
+  date: string
+  content_html: string
+  tags?: string[]
+}
+
+/** Voce diario per una specifica data, o null se assente. Risolve il 404
+ * silenziosamente cosi' il chiamante distingue "nessuna voce" da "errore". */
+export function useJournalEntry(date: string, enabled = true) {
+  return useQuery({
+    queryKey: ["journalEntry", date],
+    queryFn: async () => {
+      try {
+        return await apiGet<JournalEntry>(`/api/v1/journal/by-date/${date}`)
+      } catch (err: unknown) {
+        // apiGet incapsula lo status nel messaggio: "API 404: ..."
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg.startsWith("API 404")) return null
+        throw err
+      }
+    },
+    enabled: enabled && !!date,
+    staleTime: 30_000,
+  })
+}
+
+export function useJournalDays(start: string, end: string, enabled = true) {
+  return useQuery({
+    queryKey: ["journalDays", start, end],
+    queryFn: () => apiGet<string[]>("/api/v1/journal/days", { start, end }),
+    enabled: enabled && !!start && !!end,
+    staleTime: 60_000,
+  })
+}
+
+export function useJournalTags() {
+  return useQuery({
+    queryKey: ["journalTags"],
+    queryFn: () => apiGet<string[]>("/api/v1/journal/tags"),
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useJournalList(filters: JournalFilters = {}) {
+  return useQuery({
+    queryKey: ["journalList", filters],
+    queryFn: () =>
+      apiGet<JournalEntry[]>("/api/v1/journal", {
+        start: filters.start,
+        end: filters.end,
+        tag: filters.tag,
+        text_contains: filters.text_contains,
+        limit: filters.limit,
+        offset: filters.offset,
+      }),
+    staleTime: 30_000,
+  })
+}
+
+export function useUpsertJournal() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: JournalUpsertInput) =>
+      apiPost<JournalEntry>("/api/v1/journal", input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["journalEntry"] })
+      qc.invalidateQueries({ queryKey: ["journalDays"] })
+      qc.invalidateQueries({ queryKey: ["journalTags"] })
+      qc.invalidateQueries({ queryKey: ["journalList"] })
+      qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+    },
+  })
+}
+
+export function useUpdateJournal() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: number; patch: { content_html?: string; tags?: string[] } }) =>
+      apiPatch<JournalEntry>(`/api/v1/journal/${id}`, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["journalEntry"] })
+      qc.invalidateQueries({ queryKey: ["journalDays"] })
+      qc.invalidateQueries({ queryKey: ["journalTags"] })
+      qc.invalidateQueries({ queryKey: ["journalList"] })
+      qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+    },
+  })
+}
+
+export function useDeleteJournal() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiDelete<{ ok: boolean; id: number }>(`/api/v1/journal/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["journalEntry"] })
+      qc.invalidateQueries({ queryKey: ["journalDays"] })
+      qc.invalidateQueries({ queryKey: ["journalTags"] })
+      qc.invalidateQueries({ queryKey: ["journalList"] })
       qc.invalidateQueries({ queryKey: ["daySnapshot"] })
     },
   })

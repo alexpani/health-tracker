@@ -18,6 +18,7 @@ import LabReview from "@/pages/LabReview"
 import Day from "@/pages/Day"
 import Regimens from "@/pages/Regimens"
 import HealthNotes from "@/pages/HealthNotes"
+import Journal from "@/pages/Journal"
 import Settings from "@/pages/Settings"
 
 export default function App() {
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="/day/:date" element={<Day />} />
         <Route path="/regimens" element={<Regimens />} />
         <Route path="/health-notes" element={<HealthNotes />} />
+        <Route path="/journal" element={<Journal />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>

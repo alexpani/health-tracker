@@ -289,6 +289,32 @@ class HealthNote(Base):
     )
 
 
+class JournalEntry(Base):
+    """Voce diario giornaliera (rich text + tag). Una sola entry per data
+    (UNIQUE su `date`). `content_html` e' HTML sanitizzato lato server
+    (whitelist tag, no script/iframe). `content_text` e' il plain text
+    estratto per ricerca / preview. `tags` e' un array di stringhe gia'
+    normalizzate (lowercase, trim, dedup)."""
+    __tablename__ = "journal_entries"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    date: Mapped[date_cls] = mapped_column(Date, unique=True, nullable=False)
+    content_html: Mapped[str] = mapped_column(Text, nullable=False)
+    content_text: Mapped[str] = mapped_column(Text, nullable=False)
+    tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_journal_entries_date", "date"),
+        Index("idx_journal_entries_tags", "tags", postgresql_using="gin"),
+    )
+
+
 class WorkoutRoute(Base):
     """GPS route per workout outdoor. Una riga per workout. I punti sono
     persistiti come array JSONB di {lat, lon, alt, ts, hAcc, vAcc, speed, course}

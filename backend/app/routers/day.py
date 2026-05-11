@@ -26,6 +26,7 @@ from app.models import (
     DailyStat,
     HealthNote,
     HealthSample,
+    JournalEntry,
     Regimen,
     Workout,
 )
@@ -360,6 +361,13 @@ async def _fetch_lab_panels(db: AsyncSession, d: date_cls) -> list[dict]:
     return out
 
 
+async def _fetch_journal(db: AsyncSession, d: date_cls) -> JournalEntry | None:
+    """Voce diario per il giorno (al massimo una, UNIQUE su date)."""
+    return (
+        await db.execute(select(JournalEntry).where(JournalEntry.date == d))
+    ).scalar_one_or_none()
+
+
 async def _fetch_health_notes(db: AsyncSession, d: date_cls) -> list[HealthNote]:
     """Note di salute attive nel giorno (start_date <= d <= end_date)."""
     rows = (
@@ -486,6 +494,7 @@ async def get_day(day_str: str, db: AsyncSession = Depends(get_db)):
     regimens = await _fetch_regimens_active(db, d)
     diet_plan = await _fetch_diet_plan(d)
     health_notes = await _fetch_health_notes(db, d)
+    journal_entry = await _fetch_journal(db, d)
 
     regimens_active: list[dict] = [
         {
@@ -554,4 +563,17 @@ async def get_day(day_str: str, db: AsyncSession = Depends(get_db)):
         "lab_panels": lab_panels,
         "regimens_active": regimens_active,
         "health_notes": health_notes_out,
+        "journal": (
+            {
+                "id": journal_entry.id,
+                "date": journal_entry.date.isoformat(),
+                "content_html": journal_entry.content_html,
+                "content_text": journal_entry.content_text,
+                "tags": journal_entry.tags or [],
+                "created_at": journal_entry.created_at.isoformat() if journal_entry.created_at else None,
+                "updated_at": journal_entry.updated_at.isoformat() if journal_entry.updated_at else None,
+            }
+            if journal_entry is not None
+            else None
+        ),
     }

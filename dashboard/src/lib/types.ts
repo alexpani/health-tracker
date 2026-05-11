@@ -469,6 +469,28 @@ export interface DaySnapshot {
     source: "manual" | "lab_backfill" | "diario"
   }>
   health_notes: HealthNote[]
+  journal: JournalEntry | null
+}
+
+// --- Journal entries (daily diary: rich text + tags) ---
+
+export interface JournalEntry {
+  id: number
+  date: string  // ISO YYYY-MM-DD
+  content_html: string
+  content_text: string
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface JournalFilters {
+  start?: string
+  end?: string
+  tag?: string
+  text_contains?: string
+  limit?: number
+  offset?: number
 }
 
 export interface DiarioPlan {

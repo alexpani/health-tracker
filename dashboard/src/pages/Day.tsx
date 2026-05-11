@@ -14,6 +14,8 @@ import {
   Scale,
   StickyNote,
   Plus,
+  BookOpen,
+  Pencil,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -22,6 +24,7 @@ import { useDaySnapshot } from "@/lib/queries"
 import type { DaySnapshot, HealthNote, RegimenKind, Regimen } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
 import { HealthNoteForm } from "@/components/HealthNoteForm"
+import { JournalForm } from "@/components/JournalForm"
 import { CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/healthNotes"
 import { DayCalendarSidebar } from "@/components/DayCalendarSidebar"
 
@@ -94,6 +97,7 @@ export default function Day() {
   const [editRegimenId, setEditRegimenId] = useState<number | null>(null)
   const [showAddNote, setShowAddNote] = useState(false)
   const [editNoteId, setEditNoteId] = useState<number | null>(null)
+  const [showJournalForm, setShowJournalForm] = useState(false)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const editRegimen: Regimen | null = useMemo(() => {
     if (editRegimenId == null || !data) return null
@@ -160,6 +164,8 @@ export default function Day() {
               </Card>
             )}
 
+            <JournalCard data={data} onOpen={() => setShowJournalForm(true)} />
+
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               <ActivityCard data={data} />
               <BodyCard data={data} />
@@ -202,6 +208,13 @@ export default function Day() {
               <HealthNoteForm
                 note={editNote}
                 onClose={() => setEditNoteId(null)}
+              />
+            )}
+            {showJournalForm && (
+              <JournalForm
+                date={date}
+                entry={data.journal}
+                onClose={() => setShowJournalForm(false)}
               />
             )}
           </>
@@ -435,6 +448,59 @@ function LabCard({ data }: { data: DaySnapshot }) {
         ))}
       </ul>
     </DayCard>
+  )
+}
+
+function JournalCard({
+  data,
+  onOpen,
+}: {
+  data: DaySnapshot
+  onOpen: () => void
+}) {
+  const entry = data.journal
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between p-3 pb-1 space-y-0">
+        <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+          <BookOpen className="h-4 w-4" /> Diario
+        </CardTitle>
+        <Button variant="outline" size="sm" className="h-7 px-2" onClick={onOpen}>
+          {entry ? (
+            <><Pencil className="h-3.5 w-3.5 mr-1" /> Modifica</>
+          ) : (
+            <><Plus className="h-3.5 w-3.5 mr-1" /> Scrivi</>
+          )}
+        </Button>
+      </CardHeader>
+      <CardContent className="p-3 pt-1">
+        {!entry ? (
+          <p className="text-xs text-muted-foreground">
+            Nessuna voce per questo giorno. Clicca "Scrivi" per aggiungerne una.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            <div
+              className="journal-rendered text-sm"
+              // Server-side: HTML gia' passato per bleach.clean prima di entrare in DB.
+              dangerouslySetInnerHTML={{ __html: entry.content_html }}
+            />
+            {entry.tags && entry.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {entry.tags.map(t => (
+                  <span
+                    key={t}
+                    className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-200"
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

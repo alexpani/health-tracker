@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { useHealthNoteDays, useWorkouts } from "@/lib/queries"
+import { useHealthNoteDays, useJournalDays, useWorkouts } from "@/lib/queries"
 
 interface Props {
   /// Data corrente selezionata in formato YYYY-MM-DD (locale).
@@ -62,6 +62,8 @@ export function DayCalendarSidebar({ selectedDate, onSelectDate, onClose }: Prop
   const { data: workouts } = useWorkouts({ start: startIso, end: endIso })
   // Fetch delle note di salute del mese visualizzato (date espanse server-side).
   const { data: noteDays } = useHealthNoteDays(startLocal, endLocal)
+  // Fetch dei giorni con voce diario nel mese visualizzato.
+  const { data: journalDayList } = useJournalDays(startLocal, endLocal)
 
   // Set di date YYYY-MM-DD col workout (per lookup O(1) nel render griglia).
   const workoutDays = useMemo(() => {
@@ -71,6 +73,7 @@ export function DayCalendarSidebar({ selectedDate, onSelectDate, onClose }: Prop
   }, [workouts])
 
   const noteDaysSet = useMemo(() => new Set(noteDays ?? []), [noteDays])
+  const journalDaysSet = useMemo(() => new Set(journalDayList ?? []), [journalDayList])
 
   // Costruzione griglia: settimana lunedi-domenica.
   // Padding di giorni "fuori mese" all'inizio per allineare il primo
@@ -166,6 +169,7 @@ export function DayCalendarSidebar({ selectedDate, onSelectDate, onClose }: Prop
           const isToday = cell.iso === today
           const hasWorkout = workoutDays.has(cell.iso)
           const hasNote = noteDaysSet.has(cell.iso)
+          const hasJournal = journalDaysSet.has(cell.iso)
           // Stile combinato. Selezione vince su tutto.
           let cls = "relative h-9 rounded text-xs font-medium tabular-nums transition-colors flex items-center justify-center "
           if (!cell.inMonth) {
@@ -183,6 +187,7 @@ export function DayCalendarSidebar({ selectedDate, onSelectDate, onClose }: Prop
           const titleParts: string[] = [cell.iso]
           if (hasWorkout) titleParts.push("workout")
           if (hasNote) titleParts.push("nota di salute")
+          if (hasJournal) titleParts.push("diario")
           return (
             <button
               key={cell.iso}
@@ -192,8 +197,15 @@ export function DayCalendarSidebar({ selectedDate, onSelectDate, onClose }: Prop
               title={titleParts.join(" · ")}
             >
               {cell.day}
-              {hasNote && cell.inMonth && (
-                <span className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full ${isSelected ? "bg-primary-foreground" : "bg-rose-500"}`} />
+              {cell.inMonth && (hasNote || hasJournal) && (
+                <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 flex gap-0.5">
+                  {hasNote && (
+                    <span className={`h-1 w-1 rounded-full ${isSelected ? "bg-primary-foreground" : "bg-rose-500"}`} />
+                  )}
+                  {hasJournal && (
+                    <span className={`h-1 w-1 rounded-full ${isSelected ? "bg-primary-foreground" : "bg-indigo-500"}`} />
+                  )}
+                </span>
               )}
             </button>
           )
@@ -209,6 +221,10 @@ export function DayCalendarSidebar({ selectedDate, onSelectDate, onClose }: Prop
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-rose-500" />
           <span>= giorno con nota di salute</span>
+        </div>
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-indigo-500" />
+          <span>= giorno con voce diario</span>
         </div>
         <Button size="sm" variant="outline" className="w-full" onClick={goToToday}>
           Vai a oggi

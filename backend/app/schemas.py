@@ -280,6 +280,32 @@ class HealthNoteOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# --- Journal entries (daily free-form diary, rich text + tags) ---
+
+
+class JournalEntryIn(BaseModel):
+    date: date_cls
+    content_html: str
+    tags: list[str] | None = None
+
+
+class JournalEntryPatch(BaseModel):
+    content_html: str | None = None
+    tags: list[str] | None = None
+
+
+class JournalEntryOut(BaseModel):
+    id: int
+    date: date_cls
+    content_html: str
+    content_text: str
+    tags: list[str]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # --- Day snapshot (calendar / day-view aggregator) ---
 
 
@@ -294,6 +320,7 @@ class DaySnapshot(BaseModel):
     lab_panels: list[dict]
     regimens_active: list[RegimenOut]
     health_notes: list[HealthNoteOut] = []
+    journal: JournalEntryOut | None = None
 
 
 # --- Daily statistics (HKStatisticsCollectionQuery) ---
