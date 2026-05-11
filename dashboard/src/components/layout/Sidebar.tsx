@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils"
 const navItems = [
   { to: "/", label: "Home", icon: Home, end: true },
   { to: "/day", label: "Calendario", icon: CalendarDays },
+  { to: "/journal", label: "Diario", icon: BookOpen },
   { to: "/workouts", label: "Workout", icon: Dumbbell },
   { to: "/body", label: "Corpo", icon: Scale },
   { to: "/nutrition", label: "Nutrizione", icon: Apple },
@@ -32,7 +33,6 @@ const navItems = [
   { to: "/sleep", label: "Sonno", icon: Moon },
   { to: "/regimens", label: "Regimi", icon: Pill },
   { to: "/health-notes", label: "Note salute", icon: StickyNote },
-  { to: "/journal", label: "Diario", icon: BookOpen },
   { to: "/lab", label: "Laboratorio", icon: FlaskConical },
   { to: "/activity", label: "Attivita", icon: ActivityIcon },
   { to: "/vitals", label: "Vitali", icon: Heart },
