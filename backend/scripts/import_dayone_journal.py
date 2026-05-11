@@ -23,7 +23,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 from html import escape
-from urllib import error as urlerror, request as urlrequest
+from urllib import request as urlrequest
 
 
 def quill_to_html(delta: dict) -> str:
@@ -152,42 +152,9 @@ def audio_footer(entry: dict) -> str:
     return "".join(out)
 
 
-def build_day_html(day: str, entries: list[dict]) -> str:
-    """Costruisce il content_html per un giorno.
-
-    Una entry sola -> solo il suo HTML.
-    Piu' entries  -> ognuna preceduta da <h3>HH:MM</h3>, ordinate
-    cronologicamente.
-    """
-    entries_sorted = sorted(entries, key=lambda e: e.get("creationDate", ""))
-    if len(entries_sorted) == 1:
-        e = entries_sorted[0]
-        return entry_to_html(e) + photo_footer(e) + audio_footer(e)
-
-    out: list[str] = []
-    for e in entries_sorted:
-        ts = e.get("creationDate", "")
-        try:
-            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            label = dt.strftime("%H:%M")
-        except Exception:
-            label = ts[11:16] if len(ts) >= 16 else ts
-        out.append(f"<h3>{label}</h3>")
-        out.append(entry_to_html(e))
-        out.append(photo_footer(e))
-        out.append(audio_footer(e))
-    return "".join(out)
-
-
-def api_get_or_none(api_url: str, path: str) -> dict | None:
-    req = urlrequest.Request(f"{api_url}{path}")
-    try:
-        with urlrequest.urlopen(req, timeout=10) as r:
-            return json.loads(r.read())
-    except urlerror.HTTPError as e:
-        if e.code == 404:
-            return None
-        raise
+def build_entry_html(entry: dict) -> str:
+    """HTML per una singola entry DayOne (testo + footer foto + audio)."""
+    return entry_to_html(entry) + photo_footer(entry) + audio_footer(entry)
 
 
 def api_post(api_url: str, path: str, body: dict) -> dict:
@@ -202,13 +169,47 @@ def api_post(api_url: str, path: str, body: dict) -> dict:
         return json.loads(r.read())
 
 
+def api_delete_tag(api_url: str, tag: str) -> int:
+    """Elimina TUTTE le voci che contengono `tag`. Ritorna il numero di
+    voci cancellate. Usato dal flag --delete-tag-before per ripulire un
+    import precedente prima di re-importare. Paginazione interna (il
+    list endpoint cappa a 1000 entries per request)."""
+    ids: list[int] = []
+    offset = 0
+    while True:
+        req = urlrequest.Request(
+            f"{api_url}/api/v1/journal?tag={tag}&limit=1000&offset={offset}"
+        )
+        with urlrequest.urlopen(req, timeout=20) as r:
+            page = json.loads(r.read())
+        if not page:
+            break
+        ids.extend(e["id"] for e in page)
+        if len(page) < 1000:
+            break
+        offset += len(page)
+    if not ids:
+        return 0
+    res = api_post(api_url, "/api/v1/journal/bulk", {"ids": ids, "action": "delete"})
+    return int(res.get("deleted", 0))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("file", help="DayOne JSON export")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--api-url", default="http://192.168.68.166:8000")
-    ap.add_argument("--extra-tag", default="dayone",
-                    help="comma-separated tags da applicare a tutte le voci")
+    ap.add_argument(
+        "--extra-tag",
+        default="dayone",
+        help="comma-separated tags da applicare a tutte le voci",
+    )
+    ap.add_argument(
+        "--delete-tag-before",
+        default=None,
+        help="Prima dell'import, cancella TUTTE le voci che hanno questo tag. "
+             "Utile per re-importare un export.",
+    )
     args = ap.parse_args()
 
     with open(args.file) as f:
@@ -220,6 +221,15 @@ def main() -> int:
     if tags:
         print(f"[info] auto-tag: {tags}")
 
+    # Cleanup pre-import
+    if args.delete_tag_before:
+        cleanup_tag = args.delete_tag_before.strip().lower()
+        if args.dry_run:
+            print(f"[DRY] avrei cancellato tutte le voci con tag '{cleanup_tag}'")
+        else:
+            n = api_delete_tag(args.api_url, cleanup_tag)
+            print(f"[cleanup] cancellate {n} voci preesistenti con tag '{cleanup_tag}'")
+
     by_day: dict[str, list[dict]] = defaultdict(list)
     for e in entries:
         cd = e.get("creationDate") or ""
@@ -227,51 +237,43 @@ def main() -> int:
         if day:
             by_day[day].append(e)
 
-    print(f"[info] distinct days: {len(by_day)}")
+    print(f"[info] {len(entries)} entry su {len(by_day)} giorni distinti")
 
     n_created = 0
-    n_skipped_exists = 0
     n_failed = 0
-    skipped_days: list[str] = []
-    failed_days: list[tuple[str, str]] = []
+    failed: list[tuple[str, str]] = []
 
+    # IMPORTANTE: una entry DayOne = una nota nel diario (non piu' merge
+    # per giorno). I giorni con piu' entry creano piu' note.
     for day in sorted(by_day.keys()):
-        day_entries = by_day[day]
-        html = build_day_html(day, day_entries)
-        body = {"date": day, "content_html": html, "tags": tags}
+        day_entries = sorted(by_day[day], key=lambda e: e.get("creationDate", ""))
+        for idx, e in enumerate(day_entries):
+            html = build_entry_html(e)
+            body = {"date": day, "content_html": html, "tags": tags}
+            label = day if len(day_entries) == 1 else f"{day} [{idx+1}/{len(day_entries)}]"
 
-        # Conflict check
-        existing = None
-        if not args.dry_run:
-            existing = api_get_or_none(args.api_url, f"/api/v1/journal/by-date/{day}")
-        if existing is not None:
-            n_skipped_exists += 1
-            skipped_days.append(day)
-            print(f"  [skip] {day}: voce gia' presente (id={existing.get('id')})")
-            continue
+            if args.dry_run:
+                preview = html[:120].replace("\n", " ")
+                print(f"  [DRY] {label}: -> {len(html)} chars / preview: {preview}")
+                continue
 
-        if args.dry_run:
-            preview = html[:120].replace("\n", " ")
-            print(f"  [DRY] {day}: {len(day_entries)} entry(s) -> {len(html)} chars HTML / preview: {preview}")
-            continue
-
-        try:
-            res = api_post(args.api_url, "/api/v1/journal", body)
-            n_created += 1
-            print(f"  [ok]   {day}: id={res['id']} text_len={len(res['content_text'])}")
-        except Exception as exc:
-            n_failed += 1
-            failed_days.append((day, str(exc)))
-            print(f"  [FAIL] {day}: {exc}")
+            try:
+                res = api_post(args.api_url, "/api/v1/journal", body)
+                n_created += 1
+                print(f"  [ok]   {label}: id={res['id']} text_len={len(res['content_text'])}")
+            except Exception as exc:
+                n_failed += 1
+                failed.append((label, str(exc)))
+                print(f"  [FAIL] {label}: {exc}")
 
     print("\n=== summary ===")
-    print(f"  days total:   {len(by_day)}")
-    print(f"  created:      {n_created}")
-    print(f"  skipped(exists): {n_skipped_exists}")
+    print(f"  entry totali: {len(entries)}")
+    print(f"  giorni:       {len(by_day)}")
+    print(f"  create:       {n_created}")
     print(f"  failed:       {n_failed}")
-    if failed_days:
+    if failed:
         print("  failed details:")
-        for d, msg in failed_days:
+        for d, msg in failed:
             print(f"    {d}: {msg}")
     if args.dry_run:
         print("  (dry-run: nessuna scrittura)")

@@ -292,6 +292,7 @@ class JournalEntryIn(BaseModel):
 class JournalEntryPatch(BaseModel):
     content_html: str | None = None
     tags: list[str] | None = None
+    date: date_cls | None = None
 
 
 class JournalEntryOut(BaseModel):
@@ -320,7 +321,7 @@ class DaySnapshot(BaseModel):
     lab_panels: list[dict]
     regimens_active: list[RegimenOut]
     health_notes: list[HealthNoteOut] = []
-    journal: JournalEntryOut | None = None
+    journal: list[JournalEntryOut] = []
 
 
 # --- Daily statistics (HKStatisticsCollectionQuery) ---

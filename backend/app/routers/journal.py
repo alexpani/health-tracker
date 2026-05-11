@@ -1,16 +1,16 @@
 """Journal router.
 
-Voce diario giornaliera (rich text + tag). Una sola entry per data.
-L'HTML in input viene sanitizzato server-side (whitelist tag); il plain
-text estratto viene salvato in `content_text` per la ricerca ILIKE.
+Voce diario (rich text + tag). N voci per giorno: la `date` e' editabile
+e puoi spostare una nota da un giorno all'altro. L'HTML in input viene
+sanitizzato server-side (whitelist tag); il plain text estratto viene
+salvato in `content_text` per la ricerca (ILIKE / FTS italiano).
 """
 from __future__ import annotations
 
 from datetime import date as date_cls
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select, text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -42,34 +42,19 @@ def _sanitize_or_400(raw_html: str) -> tuple[str, str]:
 
 
 @router.post("", response_model=JournalEntryOut, status_code=201)
-async def upsert_journal_entry(payload: JournalEntryIn, db: AsyncSession = Depends(get_db)):
-    """Upsert per data: una sola entry esiste per giorno. Se gia' presente,
-    aggiorna content_html / content_text / tags."""
+async def create_journal_entry(payload: JournalEntryIn, db: AsyncSession = Depends(get_db)):
+    """Crea una nuova voce per `payload.date`. Un giorno puo' avere N voci."""
     html_clean, plain = _sanitize_or_400(payload.content_html)
     tags = normalize_tags(payload.tags)
 
-    stmt = (
-        pg_insert(JournalEntry)
-        .values(
-            date=payload.date,
-            content_html=html_clean,
-            content_text=plain,
-            tags=tags,
-        )
-        .on_conflict_do_update(
-            index_elements=["date"],
-            set_={
-                "content_html": html_clean,
-                "content_text": plain,
-                "tags": tags,
-                "updated_at": func.now(),
-            },
-        )
-        .returning(JournalEntry)
+    row = JournalEntry(
+        date=payload.date,
+        content_html=html_clean,
+        content_text=plain,
+        tags=tags,
     )
-    res = await db.execute(stmt)
+    db.add(row)
     await db.commit()
-    row = res.scalar_one()
     await db.refresh(row)
     return row
 
@@ -147,18 +132,22 @@ async def list_journal_entries(
     return rows
 
 
-@router.get("/by-date/{day_str}", response_model=JournalEntryOut)
+@router.get("/by-date/{day_str}", response_model=list[JournalEntryOut])
 async def get_by_date(day_str: str, db: AsyncSession = Depends(get_db)):
+    """Lista (anche vuota) delle voci per quel giorno, ordinate per
+    `created_at` ascendente."""
     try:
         d = date_cls.fromisoformat(day_str)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date, expected YYYY-MM-DD")
-    row = (
-        await db.execute(select(JournalEntry).where(JournalEntry.date == d))
-    ).scalar_one_or_none()
-    if row is None:
-        raise HTTPException(status_code=404, detail="not found")
-    return row
+    rows = (
+        await db.execute(
+            select(JournalEntry)
+            .where(JournalEntry.date == d)
+            .order_by(JournalEntry.created_at.asc(), JournalEntry.id.asc())
+        )
+    ).scalars().all()
+    return list(rows)
 
 
 @router.get("/{entry_id}", response_model=JournalEntryOut)
@@ -190,6 +179,8 @@ async def update_journal_entry(
         row.content_text = plain
     if "tags" in data:
         row.tags = normalize_tags(data["tags"])
+    if "date" in data and data["date"] is not None:
+        row.date = data["date"]
 
     await db.commit()
     await db.refresh(row)

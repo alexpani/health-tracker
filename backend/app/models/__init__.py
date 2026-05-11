@@ -290,15 +290,16 @@ class HealthNote(Base):
 
 
 class JournalEntry(Base):
-    """Voce diario giornaliera (rich text + tag). Una sola entry per data
-    (UNIQUE su `date`). `content_html` e' HTML sanitizzato lato server
-    (whitelist tag, no script/iframe). `content_text` e' il plain text
-    estratto per ricerca / preview. `tags` e' un array di stringhe gia'
-    normalizzate (lowercase, trim, dedup)."""
+    """Voce diario (rich text + tag). N voci per giorno: la data e'
+    editabile (puoi spostare una nota da un giorno all'altro).
+    `content_html` e' HTML sanitizzato lato server (whitelist tag, no
+    script/iframe). `content_text` e' il plain text estratto per ricerca
+    e preview. `tags` e' un array di stringhe normalizzate (lowercase,
+    trim, dedup)."""
     __tablename__ = "journal_entries"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    date: Mapped[date_cls] = mapped_column(Date, unique=True, nullable=False)
+    date: Mapped[date_cls] = mapped_column(Date, nullable=False)
     content_html: Mapped[str] = mapped_column(Text, nullable=False)
     content_text: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")

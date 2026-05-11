@@ -1,6 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react"
 import { JournalForm } from "@/components/JournalForm"
-import { useJournalEntry } from "@/lib/queries"
 
 interface QuickJournalContextValue {
   openOnDate: (iso: string) => void
@@ -21,7 +20,9 @@ function todayLocalISO(): string {
 }
 
 /** Provider che abilita l'apertura del modal del diario da qualsiasi
- * pagina, e installa la scorciatoia da tastiera Cmd/Ctrl+J. */
+ * pagina, e installa la scorciatoia da tastiera Cmd/Ctrl+J. Apre
+ * sempre una NUOVA nota (oggi puoi avere piu' note per lo stesso
+ * giorno). */
 export function QuickJournalProvider({ children }: { children: React.ReactNode }) {
   const [openDate, setOpenDate] = useState<string | null>(null)
 
@@ -30,10 +31,7 @@ export function QuickJournalProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Cmd+J su Mac, Ctrl+J su Windows/Linux
       if ((e.metaKey || e.ctrlKey) && (e.key === "j" || e.key === "J")) {
-        // Evita conflitto col downloads di Chrome (usa anche Cmd+J).
-        // L'utente in self-host con use intenso accettera' lo stop default.
         e.preventDefault()
         openOnToday()
       }
@@ -45,21 +43,13 @@ export function QuickJournalProvider({ children }: { children: React.ReactNode }
   return (
     <QuickJournalContext.Provider value={{ openOnDate, openOnToday }}>
       {children}
-      {openDate && <QuickModal date={openDate} onClose={() => setOpenDate(null)} />}
+      {openDate && (
+        <JournalForm
+          date={openDate}
+          entry={null}
+          onClose={() => setOpenDate(null)}
+        />
+      )}
     </QuickJournalContext.Provider>
   )
-}
-
-/** Wrapper che fa il fetch dell'entry corrente (se esiste) e passa il
- * risultato a JournalForm. */
-function QuickModal({ date, onClose }: { date: string; onClose: () => void }) {
-  const q = useJournalEntry(date)
-  if (q.isLoading) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-        <div className="bg-card rounded-lg p-6 shadow-2xl">Caricamento…</div>
-      </div>
-    )
-  }
-  return <JournalForm date={date} entry={q.data ?? null} onClose={onClose} />
 }

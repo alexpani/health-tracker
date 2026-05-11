@@ -469,7 +469,7 @@ export interface DaySnapshot {
     source: "manual" | "lab_backfill" | "diario"
   }>
   health_notes: HealthNote[]
-  journal: JournalEntry | null
+  journal: JournalEntry[]
 }
 
 // --- Journal entries (daily diary: rich text + tags) ---

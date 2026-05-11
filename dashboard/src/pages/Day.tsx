@@ -97,7 +97,9 @@ export default function Day() {
   const [editRegimenId, setEditRegimenId] = useState<number | null>(null)
   const [showAddNote, setShowAddNote] = useState(false)
   const [editNoteId, setEditNoteId] = useState<number | null>(null)
-  const [showJournalForm, setShowJournalForm] = useState(false)
+  /** journalModal: null = chiuso, {entryId: null} = nuova nota,
+   * {entryId: N} = edit nota N */
+  const [journalModal, setJournalModal] = useState<{ entryId: number | null } | null>(null)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const editRegimen: Regimen | null = useMemo(() => {
     if (editRegimenId == null || !data) return null
@@ -164,7 +166,11 @@ export default function Day() {
               </Card>
             )}
 
-            <JournalCard data={data} onOpen={() => setShowJournalForm(true)} />
+            <JournalCard
+              data={data}
+              onAdd={() => setJournalModal({ entryId: null })}
+              onEdit={id => setJournalModal({ entryId: id })}
+            />
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               <ActivityCard data={data} />
@@ -210,11 +216,15 @@ export default function Day() {
                 onClose={() => setEditNoteId(null)}
               />
             )}
-            {showJournalForm && (
+            {journalModal && (
               <JournalForm
                 date={date}
-                entry={data.journal}
-                onClose={() => setShowJournalForm(false)}
+                entry={
+                  journalModal.entryId == null
+                    ? null
+                    : data.journal.find(j => j.id === journalModal.entryId) ?? null
+                }
+                onClose={() => setJournalModal(null)}
               />
             )}
           </>
@@ -453,50 +463,70 @@ function LabCard({ data }: { data: DaySnapshot }) {
 
 function JournalCard({
   data,
-  onOpen,
+  onAdd,
+  onEdit,
 }: {
   data: DaySnapshot
-  onOpen: () => void
+  onAdd: () => void
+  onEdit: (id: number) => void
 }) {
-  const entry = data.journal
+  const entries = data.journal
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between p-3 pb-1 space-y-0">
         <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
           <BookOpen className="h-4 w-4" /> Diario
-        </CardTitle>
-        <Button variant="outline" size="sm" className="h-7 px-2" onClick={onOpen}>
-          {entry ? (
-            <><Pencil className="h-3.5 w-3.5 mr-1" /> Modifica</>
-          ) : (
-            <><Plus className="h-3.5 w-3.5 mr-1" /> Scrivi</>
+          {entries.length > 0 && (
+            <span className="ml-1 text-xs font-normal text-muted-foreground">
+              ({entries.length} {entries.length === 1 ? "nota" : "note"})
+            </span>
           )}
+        </CardTitle>
+        <Button variant="outline" size="sm" className="h-7 px-2" onClick={onAdd}>
+          <Plus className="h-3.5 w-3.5 mr-1" /> Nuova nota
         </Button>
       </CardHeader>
       <CardContent className="p-3 pt-1">
-        {!entry ? (
+        {entries.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            Nessuna voce per questo giorno. Clicca "Scrivi" per aggiungerne una.
+            Nessuna nota per questo giorno. Clicca "Nuova nota" per aggiungerne una.
           </p>
         ) : (
-          <div className="space-y-2">
-            <div
-              className="journal-rendered text-sm"
-              // Server-side: HTML gia' passato per bleach.clean prima di entrare in DB.
-              dangerouslySetInnerHTML={{ __html: entry.content_html }}
-            />
-            {entry.tags && entry.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1 pt-1">
-                {entry.tags.map(t => (
-                  <span
-                    key={t}
-                    className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-200"
+          <div className="space-y-3">
+            {entries.map(entry => (
+              <div
+                key={entry.id}
+                className="group rounded-md border bg-card/40 p-2.5 space-y-1.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div
+                    className="journal-rendered text-sm flex-1 min-w-0"
+                    dangerouslySetInnerHTML={{ __html: entry.content_html }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onEdit(entry.id)}
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent shrink-0"
+                    title="Modifica"
+                    aria-label="Modifica nota"
                   >
-                    {t}
-                  </span>
-                ))}
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                {entry.tags && entry.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {entry.tags.map(t => (
+                      <span
+                        key={t}
+                        className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-200"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </div>
         )}
       </CardContent>

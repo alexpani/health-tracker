@@ -251,27 +251,23 @@ export function useDeleteHealthNote() {
 
 // --- Journal entries (daily diary: rich text + tags) ---
 
-export interface JournalUpsertInput {
+export interface JournalCreateInput {
   date: string
   content_html: string
   tags?: string[]
 }
 
-/** Voce diario per una specifica data, o null se assente. Risolve il 404
- * silenziosamente cosi' il chiamante distingue "nessuna voce" da "errore". */
-export function useJournalEntry(date: string, enabled = true) {
+export interface JournalUpdateInput {
+  content_html?: string
+  tags?: string[]
+  date?: string  // editabile: sposta la nota a un altro giorno
+}
+
+/** Lista voci diario per una specifica data (puo' essere vuota). */
+export function useJournalEntries(date: string, enabled = true) {
   return useQuery({
-    queryKey: ["journalEntry", date],
-    queryFn: async () => {
-      try {
-        return await apiGet<JournalEntry>(`/api/v1/journal/by-date/${date}`)
-      } catch (err: unknown) {
-        // apiGet incapsula lo status nel messaggio: "API 404: ..."
-        const msg = err instanceof Error ? err.message : String(err)
-        if (msg.startsWith("API 404")) return null
-        throw err
-      }
-    },
+    queryKey: ["journalEntries", date],
+    queryFn: () => apiGet<JournalEntry[]>(`/api/v1/journal/by-date/${date}`),
     enabled: enabled && !!date,
     staleTime: 30_000,
   })
@@ -310,13 +306,13 @@ export function useJournalList(filters: JournalFilters = {}) {
   })
 }
 
-export function useUpsertJournal() {
+export function useCreateJournal() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: JournalUpsertInput) =>
+    mutationFn: (input: JournalCreateInput) =>
       apiPost<JournalEntry>("/api/v1/journal", input),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["journalEntry"] })
+      qc.invalidateQueries({ queryKey: ["journalEntries"] })
       qc.invalidateQueries({ queryKey: ["journalDays"] })
       qc.invalidateQueries({ queryKey: ["journalTags"] })
       qc.invalidateQueries({ queryKey: ["journalList"] })
@@ -328,10 +324,10 @@ export function useUpsertJournal() {
 export function useUpdateJournal() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, patch }: { id: number; patch: { content_html?: string; tags?: string[] } }) =>
+    mutationFn: ({ id, patch }: { id: number; patch: JournalUpdateInput }) =>
       apiPatch<JournalEntry>(`/api/v1/journal/${id}`, patch),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["journalEntry"] })
+      qc.invalidateQueries({ queryKey: ["journalEntries"] })
       qc.invalidateQueries({ queryKey: ["journalDays"] })
       qc.invalidateQueries({ queryKey: ["journalTags"] })
       qc.invalidateQueries({ queryKey: ["journalList"] })
@@ -346,7 +342,7 @@ export function useDeleteJournal() {
     mutationFn: (id: number) =>
       apiDelete<{ ok: boolean; id: number }>(`/api/v1/journal/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["journalEntry"] })
+      qc.invalidateQueries({ queryKey: ["journalEntries"] })
       qc.invalidateQueries({ queryKey: ["journalDays"] })
       qc.invalidateQueries({ queryKey: ["journalTags"] })
       qc.invalidateQueries({ queryKey: ["journalList"] })
@@ -363,7 +359,7 @@ export function useJournalBulk() {
     mutationFn: (input: { ids: number[]; action: JournalBulkAction; tag?: string }) =>
       apiPost<{ updated?: number; deleted?: number }>("/api/v1/journal/bulk", input),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["journalEntry"] })
+      qc.invalidateQueries({ queryKey: ["journalEntries"] })
       qc.invalidateQueries({ queryKey: ["journalDays"] })
       qc.invalidateQueries({ queryKey: ["journalTags"] })
       qc.invalidateQueries({ queryKey: ["journalList"] })
@@ -381,7 +377,7 @@ export function useRenameJournalTag() {
         input,
       ),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["journalEntry"] })
+      qc.invalidateQueries({ queryKey: ["journalEntries"] })
       qc.invalidateQueries({ queryKey: ["journalDays"] })
       qc.invalidateQueries({ queryKey: ["journalTags"] })
       qc.invalidateQueries({ queryKey: ["journalList"] })
