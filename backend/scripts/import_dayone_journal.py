@@ -127,6 +127,31 @@ def photo_footer(entry: dict) -> str:
     return f"<p>📷 {n} {word} (non importate)</p>"
 
 
+def audio_footer(entry: dict) -> str:
+    """Per ogni audio con `transcription` non vuoto, lo aggiungo in coda
+    come blockquote. Gli audio senza transcription vengono comunque
+    contati con una nota testuale (come per le foto)."""
+    audios = entry.get("audios") or []
+    if not audios:
+        return ""
+    out: list[str] = []
+    no_transcript = 0
+    for a in audios:
+        tr = (a.get("transcription") or "").strip()
+        if tr:
+            out.append(
+                f"<blockquote>🎙️ Trascrizione audio: {escape(tr)}</blockquote>"
+            )
+        else:
+            no_transcript += 1
+    if no_transcript:
+        word = "audio allegato" if no_transcript == 1 else "audio allegati"
+        out.append(
+            f"<p>🎙️ {no_transcript} {word} (senza trascrizione)</p>"
+        )
+    return "".join(out)
+
+
 def build_day_html(day: str, entries: list[dict]) -> str:
     """Costruisce il content_html per un giorno.
 
@@ -137,7 +162,7 @@ def build_day_html(day: str, entries: list[dict]) -> str:
     entries_sorted = sorted(entries, key=lambda e: e.get("creationDate", ""))
     if len(entries_sorted) == 1:
         e = entries_sorted[0]
-        return entry_to_html(e) + photo_footer(e)
+        return entry_to_html(e) + photo_footer(e) + audio_footer(e)
 
     out: list[str] = []
     for e in entries_sorted:
@@ -150,6 +175,7 @@ def build_day_html(day: str, entries: list[dict]) -> str:
         out.append(f"<h3>{label}</h3>")
         out.append(entry_to_html(e))
         out.append(photo_footer(e))
+        out.append(audio_footer(e))
     return "".join(out)
 
 
