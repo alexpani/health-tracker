@@ -274,6 +274,39 @@ export function getKindColor(kind: RegimenKind): string {
   return KIND_COLORS[kind] || 'bg-gray-500 hover:bg-gray-600'
 }
 
+/** Calcola le posizioni (in %) dei confini anno solare (1 gen) tra
+ * rangeStart e rangeEnd, per disegnare le linee verticali separatrici. */
+export function computeYearBoundaries(rangeStart: string, rangeEnd: string): Array<{ year: number; pct: number }> {
+  const start = stringToDate(rangeStart)
+  const end = stringToDate(rangeEnd)
+  const totalMs = end.getTime() - start.getTime()
+  if (totalMs <= 0) return []
+  const result: Array<{ year: number; pct: number }> = []
+  for (let y = start.getFullYear() + 1; y <= end.getFullYear(); y++) {
+    const boundary = new Date(y, 0, 1).getTime()
+    if (boundary > start.getTime() && boundary < end.getTime()) {
+      result.push({ year: y, pct: ((boundary - start.getTime()) / totalMs) * 100 })
+    }
+  }
+  return result
+}
+
+/** Colore della barra timeline. Per training distingue tre famiglie:
+ *  - Corsa outdoor → sky-blue
+ *  - Tapis roulant (corsa/camminata indoor) → teal
+ *  - Altro (forza/HIIT/flessibilita'/…) → amber default kind color */
+export function getRegimenBarColor(kind: RegimenKind, name: string): string {
+  if (kind === 'training') {
+    if (/tapis roulant|treadmill/i.test(name)) {
+      return 'bg-teal-500 hover:bg-teal-600'
+    }
+    if (/\bcorsa\b/i.test(name)) {
+      return 'bg-sky-500 hover:bg-sky-600'
+    }
+  }
+  return getKindColor(kind)
+}
+
 export function getKindLabel(kind: RegimenKind): string {
   return KIND_LABELS[kind] || kind
 }

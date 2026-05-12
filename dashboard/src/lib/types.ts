@@ -336,7 +336,7 @@ export interface Regimen {
   end_date: string | null
   dose: string | null
   notes: string | null
-  source: "manual" | "lab_backfill" | "diario"
+  source: "manual" | "lab_backfill" | "diario" | "training_autodetect"
   metadata: {
     kcal_target?: number
     protein_pct?: number
@@ -349,7 +349,15 @@ export interface Regimen {
 
 // --- Health notes (daily annotations: pain, illness, ...) ---
 
-export type HealthNoteCategory = "pain" | "illness" | "discomfort" | "symptom" | "other"
+export type HealthNoteCategory =
+  | "pain"
+  | "illness"
+  | "discomfort"
+  | "symptom"
+  | "treatment"
+  | "care"
+  | "intervention"
+  | "other"
 
 export interface HealthNote {
   id: number
@@ -466,7 +474,7 @@ export interface DaySnapshot {
     end_date: string | null
     dose: string | null
     notes: string | null
-    source: "manual" | "lab_backfill" | "diario"
+    source: "manual" | "lab_backfill" | "diario" | "training_autodetect"
   }>
   health_notes: HealthNote[]
   journal: JournalEntry[]

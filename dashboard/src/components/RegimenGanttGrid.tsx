@@ -4,7 +4,8 @@ import { RegimenTimelineTooltip } from './RegimenTimelineTooltip'
 import {
   RegimenGroup,
   calculateBarPosition,
-  getKindColor,
+  getRegimenBarColor,
+  computeYearBoundaries,
   formatDateMarkers,
   formatDateForDisplay,
 } from '@/hooks/useRegimenTimeline'
@@ -98,7 +99,21 @@ export function RegimenGanttGrid({
 
         {/* Timeline scrollabile orizzontalmente */}
         <div className="flex-1 overflow-x-auto">
-          <div className="min-w-[600px] flex flex-col">
+          <div className="min-w-[600px] flex flex-col relative">
+            {/* Linee verticali separatrici anno solare (1 gen di ogni anno
+                tra rangeStart e rangeEnd). Spanno tutta l'altezza
+                (header + righe gruppi) via absolute. */}
+            {computeYearBoundaries(rangeStart, rangeEnd).map(({ year, pct }) => (
+              <div
+                key={year}
+                className="absolute top-0 bottom-0 w-px bg-border/70 pointer-events-none z-0"
+                style={{ left: `${pct}%` }}
+              >
+                <span className="absolute -top-0.5 left-1 text-[10px] font-medium text-muted-foreground/80 whitespace-nowrap">
+                  {year}
+                </span>
+              </div>
+            ))}
             {/* Header con date markers */}
             <div className="h-12 border-b border-border flex items-end px-2 relative">
               {decimatedMarkers.map((marker, i) => {
@@ -123,7 +138,7 @@ export function RegimenGanttGrid({
 
             {/* Una riga per gruppo, multiple barre se il gruppo ha piu' "vite" */}
             {groups.map(group => {
-              const color = getKindColor(group.kind)
+              const color = getRegimenBarColor(group.kind, group.regimens[0]?.name ?? '')
               const groupHasUnknownStart = group.regimens.some(r => !r.start_date)
               const hasMultipleBlocks = group.regimens.length > 1
               const barRounding = hasMultipleBlocks ? 'rounded-xl' : 'rounded'

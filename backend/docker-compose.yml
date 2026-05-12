@@ -30,6 +30,7 @@ services:
     volumes:
       - ./alembic/versions:/app/alembic/versions
       - ./data/lab_documents:/app/data/lab_documents
+      - ./scripts:/app/scripts:ro
     depends_on:
       db:
         condition: service_healthy

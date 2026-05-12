@@ -108,7 +108,7 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
       name: name.trim(),
       start_date: startDate || null,
       end_date: endDate || null,
-      dose: dose.trim() || null,
+      dose: kind === "training" ? null : (dose.trim() || null),
       notes: notes.trim() || null,
     }
 
@@ -197,13 +197,33 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
         <div className="grid grid-cols-2 gap-4">
           <div className="grid gap-2">
             <Label>Inizio</Label>
-            <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-            <p className="text-xs text-muted-foreground">Vuoto = "iniziato prima del tracking"</p>
+            <Input
+              type="date"
+              value={startDate}
+              onChange={e => setStartDate(e.target.value)}
+              disabled={regimen?.source === "training_autodetect"}
+              title={regimen?.source === "training_autodetect" ? "Calcolato automaticamente dai workout, non modificabile" : undefined}
+            />
+            <p className="text-xs text-muted-foreground">
+              {regimen?.source === "training_autodetect"
+                ? "Calcolato dallo script di autodetect"
+                : 'Vuoto = "iniziato prima del tracking"'}
+            </p>
           </div>
           <div className="grid gap-2">
             <Label>Fine</Label>
-            <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
-            <p className="text-xs text-muted-foreground">Vuoto = "in corso"</p>
+            <Input
+              type="date"
+              value={endDate}
+              onChange={e => setEndDate(e.target.value)}
+              disabled={regimen?.source === "training_autodetect"}
+              title={regimen?.source === "training_autodetect" ? "Calcolato automaticamente dai workout, non modificabile" : undefined}
+            />
+            <p className="text-xs text-muted-foreground">
+              {regimen?.source === "training_autodetect"
+                ? "Calcolato dallo script di autodetect"
+                : 'Vuoto = "in corso"'}
+            </p>
           </div>
         </div>
 
@@ -273,7 +293,7 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
               </div>
             )}
           </div>
-        ) : (
+        ) : kind === "training" ? null : (
           <div className="grid gap-2">
             <Label>Dose / dettagli</Label>
             <Input value={dose} onChange={e => setDose(e.target.value)} placeholder="Es. 2000 UI/die" />

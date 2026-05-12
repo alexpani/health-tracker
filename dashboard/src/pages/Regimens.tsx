@@ -212,7 +212,7 @@ function Section({ title, items, onEdit }: { title: string; items: Regimen[]; on
               <thead className="bg-muted/50 text-muted-foreground">
                 <tr>
                   <th className="text-left p-3">Nome</th>
-                  <th className="text-left p-3 hidden md:table-cell">Dose</th>
+                  {kind !== "training" && <th className="text-left p-3 hidden md:table-cell">Dose</th>}
                   <th className="text-left p-3">Periodo</th>
                   <th className="text-left p-3 hidden lg:table-cell">Note</th>
                   <th className="p-3 w-16"></th>
@@ -235,8 +235,13 @@ function Section({ title, items, onEdit }: { title: string; items: Regimen[]; on
                             dal diario
                           </span>
                         )}
+                        {r.source === "training_autodetect" && (
+                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-400" title="Generato automaticamente dai workout sincronizzati">
+                            da workout
+                          </span>
+                        )}
                       </td>
-                      <td className="p-3 hidden md:table-cell">{r.dose ?? "—"}</td>
+                      {kind !== "training" && <td className="p-3 hidden md:table-cell">{r.dose ?? "—"}</td>}
                       <td className="p-3 tabular-nums whitespace-nowrap">
                         {fromDiario
                           ? <em className="text-emerald-600">in corso</em>
