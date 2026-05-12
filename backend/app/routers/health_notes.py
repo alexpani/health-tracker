@@ -15,7 +15,11 @@ from app.schemas import HealthNoteIn, HealthNoteOut, HealthNotePatch
 
 router = APIRouter(prefix="/api/v1/health-notes", tags=["health-notes"])
 
-ALLOWED_CATEGORIES = {"pain", "illness", "discomfort", "symptom", "other"}
+ALLOWED_CATEGORIES = {
+    "pain", "illness", "discomfort", "symptom",
+    "treatment", "care", "intervention",
+    "other",
+}
 
 
 def _validate_category(category: str) -> None:
