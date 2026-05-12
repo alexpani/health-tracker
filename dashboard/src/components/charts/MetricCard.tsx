@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react"
+import { Link } from "react-router-dom"
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 
@@ -10,11 +11,13 @@ interface Props {
   color?: string
   subtitle?: string
   loading?: boolean
+  /** Se valorizzato, la card diventa un Link cliccabile (con hover state). */
+  to?: string
 }
 
-export function MetricCard({ label, value, unit, icon: Icon, color = "#3b82f6", subtitle, loading }: Props) {
-  return (
-    <Card>
+export function MetricCard({ label, value, unit, icon: Icon, color = "#3b82f6", subtitle, loading, to }: Props) {
+  const card = (
+    <Card className={cn(to && "transition-colors hover:bg-accent/40 cursor-pointer")}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between">
           <div className="space-y-1">
@@ -41,4 +44,8 @@ export function MetricCard({ label, value, unit, icon: Icon, color = "#3b82f6", 
       </CardContent>
     </Card>
   )
+  if (to) {
+    return <Link to={to} className="block">{card}</Link>
+  }
+  return card
 }

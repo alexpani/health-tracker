@@ -102,6 +102,7 @@ export default function Home() {
           icon={Footprints}
           color={getMeta("HKQuantityTypeIdentifierStepCount").color}
           loading={steps.isLoading}
+          to="/activity"
         />
         <MetricCard
           label="Calorie attive"
@@ -110,6 +111,7 @@ export default function Home() {
           icon={Flame}
           color={getMeta("HKQuantityTypeIdentifierActiveEnergyBurned").color}
           loading={activeCal.isLoading}
+          to="/activity"
         />
         <MetricCard
           label="Sonno notte scorsa"
@@ -120,6 +122,7 @@ export default function Home() {
             lastNightSleep ? `al risveglio del ${formatDate(lastNightSleep.wakeDate)}` : undefined
           }
           loading={sleepCats.isLoading}
+          to="/sleep"
         />
         <MetricCard
           label="Peso (ultimo)"
@@ -129,6 +132,7 @@ export default function Home() {
           color={getMeta("HKQuantityTypeIdentifierBodyMass").color}
           subtitle={latestWeight.data?.data?.start_date ? formatDateTime(latestWeight.data.data.start_date) : undefined}
           loading={latestWeight.isLoading}
+          to="/body"
         />
       </div>
 
