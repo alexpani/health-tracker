@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
-import { ArrowDown, ArrowUp, ArrowUpDown, Filter, Trash2, Undo2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Filter, GitCompare, Trash2, Undo2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { WorkoutFiltersSidebar } from "@/components/WorkoutFiltersSidebar"
 import { useDeleteWorkout, useRestoreWorkout, useWorkouts } from "@/lib/queries"
 import { workoutDisplayTitle, workoutName } from "@/lib/healthkit"
+import { deriveEffectiveType } from "@/lib/compareUtils"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { Workout, WorkoutFilters } from "@/lib/types"
 
@@ -116,6 +117,14 @@ export default function Workouts() {
   const [sortKey, setSortKey] = useState<SortKey>(saved.sortKey ?? "start_date")
   const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir ?? "desc")
 
+  // Compare mode: when active, rows show a checkbox and clicks don't navigate.
+  // Slots A and B accept any workout; once A is set the row filter restricts
+  // to the same effective_type so users can't accidentally cross types.
+  const [compareMode, setCompareMode] = useState(false)
+  const [slotA, setSlotA] = useState<Workout | null>(null)
+  const [slotB, setSlotB] = useState<Workout | null>(null)
+  const compareTypeFilter = slotA ? deriveEffectiveType(slotA) : null
+
   const firstRender = useRef(true)
   useEffect(() => {
     if (firstRender.current) { firstRender.current = false; return }
@@ -152,7 +161,10 @@ export default function Workouts() {
 
   const workouts = useMemo(() => {
     if (!rawWorkouts) return rawWorkouts
-    const arr = [...rawWorkouts]
+    let arr = [...rawWorkouts]
+    if (compareMode && compareTypeFilter) {
+      arr = arr.filter(w => deriveEffectiveType(w) === compareTypeFilter)
+    }
     arr.sort((a, b) => {
       switch (sortKey) {
         case "start_date": return compare(a.start_date, b.start_date, sortDir)
@@ -167,7 +179,7 @@ export default function Workouts() {
       }
     })
     return arr
-  }, [rawWorkouts, sortKey, sortDir])
+  }, [rawWorkouts, sortKey, sortDir, compareMode, compareTypeFilter])
 
   // Undo snapshot
   const [undoSnapshot, setUndoSnapshot] = useState<{
@@ -360,13 +372,42 @@ export default function Workouts() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle>Elenco workout</CardTitle></CardHeader>
+          <CardHeader>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle>Elenco workout</CardTitle>
+              <Button
+                size="sm"
+                variant={compareMode ? "default" : "outline"}
+                onClick={() => {
+                  const next = !compareMode
+                  setCompareMode(next)
+                  if (!next) { setSlotA(null); setSlotB(null) }
+                }}
+              >
+                <GitCompare className="h-4 w-4 mr-2" />
+                {compareMode ? "Esci dal confronto" : "Confronta"}
+              </Button>
+            </div>
+            {compareMode && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Seleziona due workout da confrontare.
+                {compareTypeFilter && (
+                  <> Filtrato sullo stesso tipo del primo selezionato. <button
+                    type="button"
+                    className="underline hover:text-foreground"
+                    onClick={() => { setSlotA(null); setSlotB(null) }}
+                  >Reset</button></>
+                )}
+              </p>
+            )}
+          </CardHeader>
           <CardContent>
             {isLoading && <div className="h-40 animate-pulse bg-muted rounded" />}
             {!isLoading && workouts && workouts.length > 0 && (
               <Table>
                 <TableHeader>
                   <TableRow>
+                    {compareMode && <TableHead className="w-[40px]"></TableHead>}
                     <TableHead><SortHeader k="start_date">Data</SortHeader></TableHead>
                     <TableHead><SortHeader k="title">Titolo</SortHeader></TableHead>
                     <TableHead><SortHeader k="activity">Attivita</SortHeader></TableHead>
@@ -380,8 +421,35 @@ export default function Workouts() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {workouts.map(w => (
-                    <TableRow key={w.uuid} className="cursor-pointer" onClick={() => navigate(`/workouts/${w.uuid}`)}>
+                  {workouts.map(w => {
+                    const isA = slotA?.uuid === w.uuid
+                    const isB = slotB?.uuid === w.uuid
+                    const isSelected = isA || isB
+                    const onRowClick = () => {
+                      if (!compareMode) { navigate(`/workouts/${w.uuid}`); return }
+                      if (isA) { setSlotA(null); return }
+                      if (isB) { setSlotB(null); return }
+                      if (!slotA) setSlotA(w)
+                      else if (!slotB) setSlotB(w)
+                      else setSlotB(w)
+                    }
+                    return (
+                    <TableRow
+                      key={w.uuid}
+                      className={`cursor-pointer ${isSelected ? "bg-primary/5" : ""}`}
+                      onClick={onRowClick}
+                    >
+                      {compareMode && (
+                        <TableCell onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={onRowClick}
+                            className="h-4 w-4 accent-primary cursor-pointer"
+                            aria-label={`Seleziona ${workoutDisplayTitle(w)} per il confronto`}
+                          />
+                        </TableCell>
+                      )}
                       <TableCell>{formatDateTime(w.start_date)}</TableCell>
                       <TableCell
                         className="max-w-[220px] truncate font-medium"
@@ -419,7 +487,8 @@ export default function Workouts() {
                         </Button>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    )
+                  })}
                 </TableBody>
               </Table>
             )}
@@ -441,6 +510,54 @@ export default function Workouts() {
               onClose={() => setShowMobileFilters(false)}
             />
           </div>
+        </div>
+      )}
+
+      {compareMode && (slotA || slotB) && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-card border shadow-lg rounded-lg p-3 flex items-center gap-3 z-40 animate-in slide-in-from-bottom-4 max-w-[95vw]">
+          <div className="text-sm space-y-0.5">
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />
+              <span className="text-muted-foreground text-xs">A:</span>
+              <span className="font-medium truncate max-w-[200px]">
+                {slotA ? workoutDisplayTitle(slotA) : "vuoto"}
+              </span>
+              {slotA && (
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => setSlotA(null)}
+                  aria-label="Rimuovi A"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-orange-500" />
+              <span className="text-muted-foreground text-xs">B:</span>
+              <span className="font-medium truncate max-w-[200px]">
+                {slotB ? workoutDisplayTitle(slotB) : "vuoto"}
+              </span>
+              {slotB && (
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => setSlotB(null)}
+                  aria-label="Rimuovi B"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          </div>
+          <Button
+            size="sm"
+            disabled={!slotA || !slotB}
+            onClick={() => slotA && slotB && navigate(`/workouts/compare?a=${slotA.uuid}&b=${slotB.uuid}`)}
+          >
+            <GitCompare className="h-4 w-4 mr-1" /> Confronta
+          </Button>
         </div>
       )}
 
