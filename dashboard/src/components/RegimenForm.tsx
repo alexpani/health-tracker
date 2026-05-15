@@ -131,6 +131,9 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
       }
       onClose()
     } catch (e: unknown) {
+      // Log esplicito in console: se la modal copre il messaggio di
+      // errore in basso, almeno l'utente puo' aprire devtools.
+      console.error("RegimenForm submit failed:", e, "payload:", payload)
       const msg = e instanceof Error ? e.message : "Errore"
       setError(msg)
     }
@@ -143,6 +146,7 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
       await remove.mutateAsync(regimen.id)
       onClose()
     } catch (e: unknown) {
+      console.error("RegimenForm delete failed:", e)
       const msg = e instanceof Error ? e.message : "Errore"
       setError(msg)
     }
@@ -161,6 +165,13 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
         <CardTitle>{isEdit ? "Modifica regime" : "Nuovo regime"}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Errore in alto cosi' e' sempre visibile (la modal puo' essere
+            piu' alta del viewport, ma l'utente vede sempre la testata). */}
+        {error && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        )}
         <div className="grid gap-2">
           <Label>Tipo</Label>
           <Select value={kind} onValueChange={v => setKind(v as RegimenKind)}>
@@ -305,20 +316,20 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
           <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} />
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
-
         <div className="flex justify-between">
           <div>
             {isEdit && allowDelete && (
               <Button variant="destructive" onClick={handleDelete} disabled={remove.isPending}>
-                Elimina
+                {remove.isPending ? "Eliminazione…" : "Elimina"}
               </Button>
             )}
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose}>Annulla</Button>
             <Button onClick={submit} disabled={create.isPending || update.isPending}>
-              {isEdit ? "Salva" : "Crea"}
+              {create.isPending || update.isPending
+                ? "Salvataggio…"
+                : isEdit ? "Salva" : "Crea"}
             </Button>
           </div>
         </div>
