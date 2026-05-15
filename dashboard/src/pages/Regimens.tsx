@@ -26,23 +26,39 @@ function fmtDate(iso: string | null): string {
 
 export default function Regimens() {
   const [viewMode, setViewMode] = useState<'timeline' | 'table'>('timeline')
-  const [kindFilter, setKindFilter] = useState<RegimenKind | null>(null)
+  // Filtri kind multi-select indipendenti. Set vuoto = "Tutti" (nessun
+  // filtro, mostra tutto). Set con uno o piu' kind = mostra solo quelli.
+  // Filtro applicato client-side (i regimi sono pochi — decine — quindi
+  // fetcho tutto e filtro qui invece di duplicare le call al backend).
+  const [selectedKinds, setSelectedKinds] = useState<Set<RegimenKind>>(new Set())
   const [includeEnded, setIncludeEnded] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [editing, setEditing] = useState<Regimen | null>(null)
 
   const q = useRegimens({
-    kind: kindFilter ?? undefined,
     include_ended: includeEnded,
   })
 
-  // Quando si passa a Timeline ma il filtro è "diet" (non visibile lì),
-  // resettiamo a "Tutti" per evitare una vista vuota.
+  const toggleKind = (k: RegimenKind) => {
+    setSelectedKinds(prev => {
+      const next = new Set(prev)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return next
+    })
+  }
+
+  // Quando si passa a Timeline e "diet" e' nel set (non e' rappresentato
+  // nella Timeline), lo rimuoviamo per evitare confusione.
   useEffect(() => {
-    if (viewMode === 'timeline' && kindFilter === 'diet') {
-      setKindFilter(null)
+    if (viewMode === 'timeline' && selectedKinds.has('diet')) {
+      setSelectedKinds(prev => {
+        const next = new Set(prev)
+        next.delete('diet')
+        return next
+      })
     }
-  }, [viewMode, kindFilter])
+  }, [viewMode, selectedKinds])
 
   // Piano alimentare attivo dal diario alimentare. Lo iniettamo come Regimen
   // sintetico (id=-1, source='diario') in modo che la pagina /regimens
@@ -72,19 +88,26 @@ export default function Regimens() {
     }
   }, [dietQ.data])
 
+  // Applica il filtro multi-kind. Set vuoto = nessun filtro.
+  const filteredRegimens = useMemo(() => {
+    const all = q.data ?? []
+    if (selectedKinds.size === 0) return all
+    return all.filter(r => selectedKinds.has(r.kind as RegimenKind))
+  }, [q.data, selectedKinds])
+
   const grouped = useMemo(() => {
     const out: Record<"ongoing" | "ended", Regimen[]> = { ongoing: [], ended: [] }
-    for (const r of q.data ?? []) {
+    for (const r of filteredRegimens) {
       ;(isOngoing(r) ? out.ongoing : out.ended).push(r)
     }
     // Inietto il piano del diario in cima alla sezione "ongoing" (e' attivo
     // per definizione: il diario espone solo il piano corrente). Solo se
-    // il filtro kindFilter consente "diet" (null = tutti, o "diet").
-    if (dietPlanRegimen && (kindFilter === null || kindFilter === "diet")) {
+    // il filtro consente "diet" (set vuoto = tutti, o set che contiene "diet").
+    if (dietPlanRegimen && (selectedKinds.size === 0 || selectedKinds.has("diet"))) {
       out.ongoing.unshift(dietPlanRegimen)
     }
     return out
-  }, [q.data, dietPlanRegimen, kindFilter])
+  }, [filteredRegimens, dietPlanRegimen, selectedKinds])
 
   return (
     <div className="space-y-6">
@@ -116,20 +139,27 @@ export default function Regimens() {
         </Button>
       </div>
 
-      {/* Filtri kind (condivisi fra Timeline e Tabella) */}
+      {/* Filtri kind multi-select indipendenti, condivisi fra Timeline e
+          Tabella. "Tutti" = set vuoto; click su un chip kind lo aggiunge
+          o lo rimuove dal set. */}
       <div className="flex flex-wrap gap-2">
-        <Button variant={kindFilter === null ? "default" : "outline"} size="sm" onClick={() => setKindFilter(null)}>
+        <Button
+          variant={selectedKinds.size === 0 ? "default" : "outline"}
+          size="sm"
+          onClick={() => setSelectedKinds(new Set())}
+        >
           Tutti
         </Button>
         {KIND_ORDER.map(k => {
           // "Piano alimentare" non e' visualizzato nella Timeline
           if (viewMode === 'timeline' && k === 'diet') return null
+          const isOn = selectedKinds.has(k)
           return (
             <Button
               key={k}
-              variant={kindFilter === k ? "default" : "outline"}
+              variant={isOn ? "default" : "outline"}
               size="sm"
-              onClick={() => setKindFilter(k)}
+              onClick={() => toggleKind(k)}
             >
               {KIND_LABELS[k]}
             </Button>
@@ -150,12 +180,12 @@ export default function Regimens() {
       {viewMode === 'timeline' && (
         <>
           <RegimenTimeline
-            regimens={q.data ?? []}
+            regimens={filteredRegimens}
             isLoading={q.isLoading}
             onRegimensChange={() => q.refetch()}
           />
           {q.isLoading && <div className="h-32 animate-pulse bg-muted rounded" />}
-          {q.data && q.data.length === 0 && (
+          {q.data && filteredRegimens.length === 0 && (
             <Card>
               <CardContent className="py-8 text-center text-muted-foreground">
                 Nessun regime registrato. Premi <strong>Nuovo</strong> per aggiungerne uno.
