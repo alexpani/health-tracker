@@ -16,6 +16,7 @@ import Fitness from "@/pages/Fitness"
 import Insert from "@/pages/Insert"
 import Lab from "@/pages/Lab"
 import LabReview from "@/pages/LabReview"
+import Clinical from "@/pages/Clinical"
 import Day from "@/pages/Day"
 import Regimens from "@/pages/Regimens"
 import HealthNotes from "@/pages/HealthNotes"
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/insert" element={<Insert />} />
         <Route path="/lab" element={<Lab />} />
         <Route path="/lab/panels/:id/review" element={<LabReview />} />
+        <Route path="/clinical" element={<Clinical />} />
         <Route path="/day" element={<Day />} />
         <Route path="/day/:date" element={<Day />} />
         <Route path="/regimens" element={<Regimens />} />

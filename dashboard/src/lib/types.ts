@@ -766,3 +766,42 @@ export interface LabRecentOutOfRange {
   ref_low: number | null
   ref_high: number | null
 }
+
+// --- HealthKit Clinical Records (FHIR) ---
+
+export interface ClinicalRecord {
+  id: number
+  hk_uuid: string
+  // HKClinicalTypeIdentifier rawValue (es. "HKClinicalTypeIdentifierAllergyRecord")
+  category: string
+  // FHIR resourceType (es. "AllergyIntolerance", "Observation", ...)
+  resource_type: string | null
+  source_name: string | null
+  source_url: string | null
+  display_name: string | null
+  start_date: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ClinicalRecordDetail extends ClinicalRecord {
+  // Payload FHIR completo (qualunque structure FHIR — keys/types eterogenei).
+  fhir_json: Record<string, unknown>
+}
+
+export interface ClinicalFacets {
+  categories: { value: string; count: number }[]
+  resource_types: { value: string; count: number }[]
+  sources: { value: string; count: number }[]
+  years: { value: number; count: number }[]
+}
+
+export interface ClinicalFilters {
+  category?: string
+  resource_type?: string
+  source_name?: string
+  start?: string
+  end?: string
+  limit?: number
+  offset?: number
+}

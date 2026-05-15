@@ -36,3 +36,6 @@ backend/data/lab_documents/
 backend/data/apns/
 *.p8
 ios/HealthTracker/build/
+
+# Node deps
+node_modules/

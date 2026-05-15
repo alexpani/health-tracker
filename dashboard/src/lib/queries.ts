@@ -4,6 +4,10 @@ import type {
   Aggregation,
   BlacklistEntry,
   CategorySample,
+  ClinicalFacets,
+  ClinicalFilters,
+  ClinicalRecord,
+  ClinicalRecordDetail,
   CorrelatedSample,
   DailyStatPoint,
   DaySnapshot,
@@ -1077,6 +1081,43 @@ export function useLabRecentOutOfRange(limit = 10) {
     queryKey: ["labRecentOor", limit],
     queryFn: () => apiGet<LabRecentOutOfRange[]>("/api/v1/lab/recent-out-of-range", { limit }),
     staleTime: 60_000,
+  })
+}
+
+// ---------- HealthKit Clinical Records (FHIR) ----------
+
+export function useClinicalRecords(filters: ClinicalFilters = {}, enabled = true) {
+  return useQuery({
+    queryKey: ["clinicalRecords", filters],
+    queryFn: () =>
+      apiGet<ClinicalRecord[]>("/api/v1/clinical", {
+        category: filters.category,
+        resource_type: filters.resource_type,
+        source_name: filters.source_name,
+        start: filters.start,
+        end: filters.end,
+        limit: filters.limit,
+        offset: filters.offset,
+      }),
+    enabled,
+    placeholderData: keepPreviousData,
+    refetchInterval: 30 * 60_000, // 30 min — stesso ritmo degli altri "sync-driven"
+  })
+}
+
+export function useClinicalRecord(id: number | null | undefined) {
+  return useQuery({
+    queryKey: ["clinicalRecord", id],
+    queryFn: () => apiGet<ClinicalRecordDetail>(`/api/v1/clinical/${id}`),
+    enabled: id != null,
+  })
+}
+
+export function useClinicalFacets() {
+  return useQuery({
+    queryKey: ["clinicalFacets"],
+    queryFn: () => apiGet<ClinicalFacets>("/api/v1/clinical/facets"),
+    refetchInterval: 30 * 60_000,
   })
 }
 
