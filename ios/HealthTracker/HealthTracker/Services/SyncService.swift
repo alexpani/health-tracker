@@ -34,6 +34,33 @@ func isProtectedDataError(_ error: Error) -> Bool {
     return nsErr.localizedDescription.contains("Protected health data is inaccessible")
 }
 
+/// Errore lanciato quando una HK fetch supera il timeout (vedi `runWithTimeout`).
+struct HKFetchTimeoutError: Error, LocalizedError {
+    let seconds: TimeInterval
+    var errorDescription: String? { "HK fetch timeout after \(Int(seconds))s" }
+}
+
+/// Esegue `op` con un timeout esplicito. Usato per le HK fetch che possono
+/// hangare se HealthKit non chiama il completion handler (osservato su
+/// `HKStatisticsCollectionQuery` per tipi che non hanno mai avuto dati su
+/// quel device — il completion non arriva mai e il sync resta bloccato a
+/// quel tipo). Cancella il gruppo all'uscita per non lasciare task orfani.
+func runWithTimeout<T: Sendable>(
+    seconds: TimeInterval,
+    _ op: @Sendable @escaping () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await op() }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw HKFetchTimeoutError(seconds: seconds)
+        }
+        defer { group.cancelAll() }
+        // Prendi il primo risultato (op success, op error, o timeout).
+        return try await group.next()!
+    }
+}
+
 /// Persisted summary of a single completed sync
 struct LastSyncSummary: Codable, Identifiable, Hashable {
     var startedAt: Date
@@ -922,9 +949,19 @@ final class SyncService {
 
                 group.addTask { [self, dayFmt] in
                     do {
-                        let points = try await healthKitManager.fetchDailyStatistics(
-                            type: typeId, unit: unit, from: from, to: endOfToday
-                        )
+                        // Timeout 30s. HKStatisticsCollectionQuery puo'
+                        // hangare indefinitamente per tipi senza dati (o
+                        // edge case HK), facendo bloccare l'intero sync a
+                        // "Daily statistics" al N% senza modo di sapere
+                        // quale tipo e' quello bloccato. Col timeout, il
+                        // tipo problematico viene marcato `failed` e gli
+                        // altri continuano normalmente.
+                        let healthKitRef = healthKitManager
+                        let points = try await runWithTimeout(seconds: 30) {
+                            try await healthKitRef.fetchDailyStatistics(
+                                type: typeId, unit: unit, from: from, to: endOfToday
+                            )
+                        }
                         let nonZero = points.filter { $0.value > 0 }
                         var upserted = 0
                         if !nonZero.isEmpty {
