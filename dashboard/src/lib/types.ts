@@ -647,6 +647,25 @@ export interface LabBodySnapshot {
   bmi: LabBodyHkSample | null
 }
 
+export interface LabAutoContextItem {
+  id?: number
+  label: string
+  detail?: string | null
+  start_date: string | null
+  end_date: string | null
+  kind?: string
+  source: "regimen" | "health_note" | "journal" | "workout"
+}
+
+export interface LabAutoContext {
+  medications: LabAutoContextItem[]
+  supplements: LabAutoContextItem[]
+  training: LabAutoContextItem[]
+  diet: LabAutoContextItem | null
+  health_notes: LabAutoContextItem[]
+  journal: LabAutoContextItem[]
+}
+
 export interface LabPanelDetail extends LabPanelSummary {
   activity_text: string | null
   medications_text: string | null
@@ -655,6 +674,7 @@ export interface LabPanelDetail extends LabPanelSummary {
   diet_text: string | null
   workout_text: string | null
   body_snapshot?: LabBodySnapshot
+  auto_context?: LabAutoContext
   results: LabResult[]
 }
 
@@ -737,6 +757,8 @@ export interface LabMatrixResponse {
   panel_weights?: Record<string, LabMatrixWeight>
   // Note di contesto per panel (editabili inline nella Matrice).
   panel_context?: Record<string, LabPanelContextRow>
+  // Auto-context aggregato da regimens / health_notes / journal / workouts.
+  panel_auto_context?: Record<string, LabAutoContext>
 }
 
 export interface LabTimeseriesPoint {

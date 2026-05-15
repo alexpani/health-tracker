@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models import HealthSample, Workout
+from app.models import HealthSample, Workout, Regimen, HealthNote, JournalEntry
 from app.models.lab import (
     LabAnalyte,
     LabAnalyteAlias,
@@ -301,6 +301,169 @@ async def list_panels(
 # GET /panels/{id}
 # ---------------------------------------------------------------------------
 
+def _workout_label(w: Workout) -> str:
+    """Etichetta breve per un workout nella riga auto-context training."""
+    base = w.title or w.activity_name or f"Workout #{w.activity_type}"
+    bits = [base]
+    if w.duration:
+        mins = int(round(w.duration / 60))
+        bits.append(f"{mins}'")
+    if w.total_distance:
+        km = w.total_distance / 1000.0
+        bits.append(f"{km:.2f} km")
+    return " · ".join(bits)
+
+
+def _journal_preview(e: JournalEntry, max_len: int = 120) -> str:
+    txt = (e.content_text or "").strip().replace("\n", " ")
+    if len(txt) > max_len:
+        txt = txt[: max_len - 1].rstrip() + "…"
+    return txt or "(voce vuota)"
+
+
+def _regimen_item(r: Regimen) -> dict[str, Any]:
+    return {
+        "id": r.id,
+        "label": r.name,
+        "detail": r.dose,
+        "start_date": r.start_date.isoformat() if r.start_date else None,
+        "end_date": r.end_date.isoformat() if r.end_date else None,
+        "kind": r.kind,
+        "source": "regimen",
+    }
+
+
+def _health_note_item(n: HealthNote) -> dict[str, Any]:
+    label_bits = []
+    if n.body_zone:
+        label_bits.append(n.body_zone)
+    if n.text:
+        txt = n.text.strip().replace("\n", " ")
+        if len(txt) > 80:
+            txt = txt[:79].rstrip() + "…"
+        label_bits.append(txt)
+    return {
+        "id": n.id,
+        "label": " — ".join(label_bits) if label_bits else "(nota)",
+        "detail": n.category,
+        "start_date": n.start_date.isoformat(),
+        "end_date": n.end_date.isoformat(),
+        "source": "health_note",
+    }
+
+
+def _journal_item(e: JournalEntry) -> dict[str, Any]:
+    return {
+        "id": e.id,
+        "label": _journal_preview(e),
+        "detail": ", ".join(e.tags) if e.tags else None,
+        "start_date": e.date.isoformat(),
+        "end_date": e.date.isoformat(),
+        "source": "journal",
+    }
+
+
+def _workout_item(w: Workout) -> dict[str, Any]:
+    return {
+        "id": w.id,
+        "label": _workout_label(w),
+        "detail": w.source_name,
+        "start_date": w.start_date.date().isoformat(),
+        "end_date": w.start_date.date().isoformat(),
+        "source": "workout",
+    }
+
+
+def _empty_auto_context() -> dict[str, Any]:
+    return {
+        "medications": [],
+        "supplements": [],
+        "training": [],
+        "diet": None,
+        "health_notes": [],
+        "journal": [],
+    }
+
+
+async def _build_auto_context(
+    db: AsyncSession, test_date: date,
+) -> dict[str, Any]:
+    """Aggrega regimens / health_notes / journal / workouts attivi/del giorno
+    per il test_date di un panel lab. Restituito sia da /panels/{id} che, per
+    batch, da /matrix."""
+    regimens_rows = (await db.execute(
+        select(Regimen)
+        .where(Regimen.kind.in_(("medication", "supplement", "training", "diet")))
+        .where((Regimen.start_date.is_(None)) | (Regimen.start_date <= test_date))
+        .where((Regimen.end_date.is_(None)) | (Regimen.end_date >= test_date))
+        .order_by(Regimen.kind, Regimen.name)
+    )).scalars().all()
+
+    notes_rows = (await db.execute(
+        select(HealthNote)
+        .where(HealthNote.start_date <= test_date)
+        .where(HealthNote.end_date >= test_date)
+        .order_by(HealthNote.category, HealthNote.start_date.desc())
+    )).scalars().all()
+
+    journal_rows = (await db.execute(
+        select(JournalEntry)
+        .where(JournalEntry.date == test_date)
+        .order_by(JournalEntry.created_at)
+    )).scalars().all()
+
+    sod = datetime.combine(test_date, time.min, tzinfo=timezone.utc)
+    eod = datetime.combine(test_date, time.max, tzinfo=timezone.utc)
+    workout_rows = (await db.execute(
+        select(Workout)
+        .where(Workout.start_date >= sod)
+        .where(Workout.start_date <= eod)
+        .order_by(Workout.start_date)
+    )).scalars().all()
+
+    # Dedup per (kind, name lowercased trimmed): se per la stessa data sono
+    # attivi piu' regimens con stesso nome (es. una "vita" precedente non
+    # chiusa correttamente + una ripresa), teniamo solo quello con
+    # start_date piu' recente (None = ignoto, conta come piu' vecchio).
+    seen: dict[tuple[str, str], Regimen] = {}
+    for r in regimens_rows:
+        key = (r.kind, (r.name or "").strip().lower())
+        prev = seen.get(key)
+        if prev is None:
+            seen[key] = r
+            continue
+        prev_start = prev.start_date or date.min
+        cur_start = r.start_date or date.min
+        if cur_start > prev_start:
+            seen[key] = r
+    deduped = list(seen.values())
+
+    ctx = _empty_auto_context()
+    for r in deduped:
+        if r.kind == "medication":
+            ctx["medications"].append(_regimen_item(r))
+        elif r.kind == "supplement":
+            ctx["supplements"].append(_regimen_item(r))
+        elif r.kind == "training":
+            ctx["training"].append(_regimen_item(r))
+        elif r.kind == "diet" and ctx["diet"] is None:
+            item = _regimen_item(r)
+            meta = r.metadata_ or {}
+            extras = []
+            if meta.get("kcal_target"):
+                extras.append(f"{int(meta['kcal_target'])} kcal")
+            if extras:
+                item["detail"] = " · ".join(
+                    [item.get("detail") or "", *extras]
+                ).strip(" ·")
+            ctx["diet"] = item
+    for w in workout_rows:
+        ctx["training"].append(_workout_item(w))
+    ctx["health_notes"] = [_health_note_item(n) for n in notes_rows]
+    ctx["journal"] = [_journal_item(e) for e in journal_rows]
+    return ctx
+
+
 async def _latest_hk_value(
     db: AsyncSession, type_: str, before: datetime, window_days: int = 30,
 ) -> dict[str, Any] | None:
@@ -361,6 +524,7 @@ async def get_panel(
         "diet_text": panel.diet_text,
         "workout_text": panel.workout_text,
         "body_snapshot": body_snapshot,
+        "auto_context": await _build_auto_context(db, panel.test_date),
         "results": [
             {
                 "id": r.id,
@@ -1057,6 +1221,7 @@ async def get_matrix(
             "cells": {},
             "panel_weights": {},
             "panel_context": {},
+            "panel_auto_context": {},
         }
 
     analyte_ids = [a["id"] for a in analytes]
@@ -1136,12 +1301,100 @@ async def get_matrix(
         for r in ctx_rows
     }
 
+    # Auto-context per ogni panel (regimens / health_notes / journal / workouts
+    # del giorno del prelievo). Batched: una query globale per ciascuna sorgente
+    # nel range [min(test_date), max(test_date)], poi filtraggio per panel.
+    panel_dates = {p["id"]: date.fromisoformat(p["test_date"]) for p in panels}
+    min_date = min(panel_dates.values())
+    max_date = max(panel_dates.values())
+
+    all_regimens = (await db.execute(
+        select(Regimen)
+        .where(Regimen.kind.in_(("medication", "supplement", "training", "diet")))
+        .where((Regimen.start_date.is_(None)) | (Regimen.start_date <= max_date))
+        .where((Regimen.end_date.is_(None)) | (Regimen.end_date >= min_date))
+        .order_by(Regimen.kind, Regimen.name)
+    )).scalars().all()
+
+    all_notes = (await db.execute(
+        select(HealthNote)
+        .where(HealthNote.start_date <= max_date)
+        .where(HealthNote.end_date >= min_date)
+        .order_by(HealthNote.category, HealthNote.start_date.desc())
+    )).scalars().all()
+
+    panel_date_set = set(panel_dates.values())
+    all_journal = (await db.execute(
+        select(JournalEntry)
+        .where(JournalEntry.date.in_(panel_date_set))
+        .order_by(JournalEntry.created_at)
+    )).scalars().all()
+
+    sod_global = datetime.combine(min_date, time.min, tzinfo=timezone.utc)
+    eod_global = datetime.combine(max_date, time.max, tzinfo=timezone.utc)
+    all_workouts = (await db.execute(
+        select(Workout)
+        .where(Workout.start_date >= sod_global)
+        .where(Workout.start_date <= eod_global)
+        .order_by(Workout.start_date)
+    )).scalars().all()
+
+    panel_auto_context: dict[int, dict[str, Any]] = {}
+    for pid, td in panel_dates.items():
+        ctx = _empty_auto_context()
+        # Dedup per (kind, name): tieni il regimen con start_date piu' recente
+        # tra quelli attivi al giorno td.
+        seen: dict[tuple[str, str], Regimen] = {}
+        for r in all_regimens:
+            if r.start_date is not None and r.start_date > td:
+                continue
+            if r.end_date is not None and r.end_date < td:
+                continue
+            key = (r.kind, (r.name or "").strip().lower())
+            prev = seen.get(key)
+            if prev is None:
+                seen[key] = r
+                continue
+            prev_start = prev.start_date or date.min
+            cur_start = r.start_date or date.min
+            if cur_start > prev_start:
+                seen[key] = r
+        for r in seen.values():
+            if r.kind == "medication":
+                ctx["medications"].append(_regimen_item(r))
+            elif r.kind == "supplement":
+                ctx["supplements"].append(_regimen_item(r))
+            elif r.kind == "training":
+                ctx["training"].append(_regimen_item(r))
+            elif r.kind == "diet" and ctx["diet"] is None:
+                item = _regimen_item(r)
+                meta = r.metadata_ or {}
+                extras = []
+                if meta.get("kcal_target"):
+                    extras.append(f"{int(meta['kcal_target'])} kcal")
+                if extras:
+                    item["detail"] = " · ".join(
+                        [item.get("detail") or "", *extras]
+                    ).strip(" ·")
+                ctx["diet"] = item
+        for w in all_workouts:
+            if w.start_date.date() == td:
+                ctx["training"].append(_workout_item(w))
+        for n in all_notes:
+            if n.start_date <= td <= n.end_date:
+                ctx["health_notes"].append(_health_note_item(n))
+        for e in all_journal:
+            if e.date == td:
+                ctx["journal"].append(_journal_item(e))
+        panel_auto_context[pid] = ctx
+
     return {
         "analytes": analytes,
         "panels": panels,
         "cells": cells,
         "panel_weights": panel_weights,
         "panel_context": panel_context,
+        "panel_auto_context": panel_auto_context,
     }
 
 

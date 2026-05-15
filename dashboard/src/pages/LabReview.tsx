@@ -21,9 +21,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { API_URL } from "@/lib/api"
-import { formatDate } from "@/lib/utils"
-import { Textarea } from "@/components/ui/textarea"
+import { formatDate, cn } from "@/lib/utils"
 import {
+  useHealthNotes,
+  useJournalEntries,
   useLabAddResult,
   useLabAnalytes,
   useLabConfirmPanel,
@@ -35,8 +36,12 @@ import {
   useLabPatchResult,
   useLatestWeightBefore,
 } from "@/lib/queries"
+import { HealthNoteForm } from "@/components/HealthNoteForm"
+import { JournalForm } from "@/components/JournalForm"
 import type {
   LabAnalyte,
+  LabAutoContext,
+  LabAutoContextItem,
   LabBodySnapshot,
   LabPanelDetail,
   LabResult,
@@ -58,6 +63,12 @@ export default function LabReview() {
   const [showNewAnalyteForm, setShowNewAnalyteForm] = useState(false)
   // ID della riga da cui stiamo creando un analita al volo (form inline).
   const [createFromRowId, setCreateFromRowId] = useState<number | null>(null)
+  // Modal per quick-create/edit di Note salute / Diario sul giorno del prelievo.
+  const [quickModal, setQuickModal] = useState<
+    | { kind: "note"; id: number | null }
+    | { kind: "journal"; id: number | null }
+    | null
+  >(null)
 
   const analyteById = useMemo(() => {
     const m = new Map<number, LabAnalyte>()
@@ -147,7 +158,20 @@ export default function LabReview() {
 
       <BodySnapshotCard snapshot={panel.body_snapshot ?? null} testDate={panel.test_date} />
 
-      <ContextSection panel={panel} />
+      <AutoContextSection
+        auto={panel.auto_context ?? null}
+        testDate={panel.test_date}
+        onOpenNote={(id) => setQuickModal({ kind: "note", id })}
+        onOpenJournal={(id) => setQuickModal({ kind: "journal", id })}
+      />
+
+      {quickModal && (
+        <QuickEntryModal
+          modal={quickModal}
+          date={panel.test_date}
+          onClose={() => setQuickModal(null)}
+        />
+      )}
 
       {!isConfirmed && (
         <div>
@@ -723,6 +747,224 @@ function PanelHeader({
   )
 }
 
+function formatAutoTooltip(item: LabAutoContextItem, testDate: string): string {
+  if (item.source === "journal") {
+    return `Voce diario del ${formatDate(item.start_date ?? testDate)}`
+  }
+  if (item.source === "workout") {
+    return `Workout del ${formatDate(item.start_date ?? testDate)}${
+      item.detail ? ` · ${item.detail}` : ""
+    }`
+  }
+  if (item.source === "health_note") {
+    const s = item.start_date ? formatDate(item.start_date) : "?"
+    const e = item.end_date ? formatDate(item.end_date) : "?"
+    return s === e ? `Nota del ${s}` : `Nota dal ${s} al ${e}`
+  }
+  // regimen
+  const s = item.start_date ? formatDate(item.start_date) : "data ignota"
+  const e = item.end_date ? formatDate(item.end_date) : "in corso"
+  return `Periodo: ${s} → ${e}${item.detail ? ` · ${item.detail}` : ""}`
+}
+
+const AUTO_ROWS: {
+  key: "medications" | "supplements" | "training" | "diet" | "health_notes" | "journal"
+  label: string
+}[] = [
+  { key: "medications", label: "Farmaci" },
+  { key: "supplements", label: "Integratori" },
+  { key: "training", label: "Piano allenamento" },
+  { key: "diet", label: "Piano alimentare" },
+  { key: "health_notes", label: "Note salute" },
+  { key: "journal", label: "Diario" },
+]
+
+function AutoContextChip({
+  item,
+  testDate,
+}: {
+  item: LabAutoContextItem
+  testDate: string
+}) {
+  const isWorkout = item.source === "workout"
+  return (
+    <span
+      title={formatAutoTooltip(item, testDate)}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs",
+        "bg-white/70 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800",
+        isWorkout && "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800",
+      )}
+    >
+      <span className="font-medium">{item.label}</span>
+      {item.detail && !isWorkout && (
+        <span className="text-muted-foreground">· {item.detail}</span>
+      )}
+    </span>
+  )
+}
+
+function AutoContextSection({
+  auto,
+  testDate,
+  onOpenNote,
+  onOpenJournal,
+}: {
+  auto: LabAutoContext | null
+  testDate: string
+  onOpenNote: (id: number | null) => void
+  onOpenJournal: (id: number | null) => void
+}) {
+  const rows = AUTO_ROWS.map(r => {
+    const raw = auto ? auto[r.key] : null
+    const items: LabAutoContextItem[] = Array.isArray(raw)
+      ? raw
+      : raw
+      ? [raw]
+      : []
+    return { ...r, items }
+  })
+  const totalCount = rows.reduce((s, r) => s + r.items.length, 0)
+  return (
+    <div className="rounded-md border border-indigo-200 dark:border-indigo-900 bg-indigo-50/60 dark:bg-indigo-950/30 p-3 space-y-2">
+      <div className="text-sm font-semibold flex items-center justify-between">
+        <span>Contesto automatico ({formatDate(testDate)})</span>
+        <span className="text-xs font-normal text-muted-foreground">
+          {totalCount} voci · da regimi / note salute / diario / workout
+        </span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1.5">
+        {rows.map(r => {
+          const isClickable = r.key === "health_notes" || r.key === "journal"
+          const onItemClick = (id: number | null) => {
+            if (r.key === "health_notes") onOpenNote(id)
+            else if (r.key === "journal") onOpenJournal(id)
+          }
+          return (
+            <div key={r.key} className="flex items-start gap-2 text-sm">
+              <span className="font-medium text-xs uppercase tracking-wide text-indigo-700 dark:text-indigo-300 min-w-[120px] pt-0.5">
+                {r.label}
+              </span>
+              <div className="flex flex-wrap gap-1 flex-1 items-center">
+                {r.items.length === 0 ? (
+                  isClickable ? (
+                    <button
+                      type="button"
+                      onClick={() => onItemClick(null)}
+                      className="text-xs text-indigo-700 dark:text-indigo-300 hover:underline italic"
+                    >
+                      + aggiungi per {formatDate(testDate)}
+                    </button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">—</span>
+                  )
+                ) : (
+                  <>
+                    {r.items.map((it, idx) =>
+                      isClickable ? (
+                        <button
+                          key={`${r.key}-${idx}`}
+                          type="button"
+                          onClick={() => onItemClick(it.id ?? null)}
+                          title={`${formatAutoTooltip(it, testDate)} · click per modificare`}
+                          className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs bg-white/70 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition-colors text-left"
+                        >
+                          <span className="font-medium">{it.label}</span>
+                          {it.detail && (
+                            <span className="text-muted-foreground">· {it.detail}</span>
+                          )}
+                        </button>
+                      ) : (
+                        <AutoContextChip
+                          key={`${r.key}-${idx}`}
+                          item={it}
+                          testDate={testDate}
+                        />
+                      )
+                    )}
+                    {isClickable && (
+                      <button
+                        type="button"
+                        onClick={() => onItemClick(null)}
+                        title={`Nuova per ${formatDate(testDate)}`}
+                        className="inline-flex items-center justify-center h-5 w-5 rounded-full border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-xs font-bold"
+                      >
+                        +
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function QuickEntryModal({
+  modal,
+  date,
+  onClose,
+}: {
+  modal:
+    | { kind: "note"; id: number | null }
+    | { kind: "journal"; id: number | null }
+  date: string
+  onClose: () => void
+}) {
+  // Fetch entity per modalita' edit
+  const notes = useHealthNotes(
+    modal.kind === "note" && modal.id != null
+      ? { active_on: date }
+      : {},
+  )
+  const journal = useJournalEntries(date, modal.kind === "journal")
+  const noteToEdit =
+    modal.kind === "note" && modal.id != null
+      ? notes.data?.find(n => n.id === modal.id) ?? null
+      : null
+  const journalToEdit =
+    modal.kind === "journal" && modal.id != null
+      ? journal.data?.find(e => e.id === modal.id) ?? null
+      : null
+
+  const stillLoading =
+    (modal.kind === "note" && modal.id != null && !notes.data) ||
+    (modal.kind === "journal" && modal.id != null && !journal.data)
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-12"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {stillLoading ? (
+          <div className="rounded-md border bg-background p-6 text-sm text-muted-foreground">
+            Caricamento…
+          </div>
+        ) : modal.kind === "note" ? (
+          <HealthNoteForm
+            note={noteToEdit}
+            defaults={{ start_date: date, end_date: date }}
+            onClose={onClose}
+          />
+        ) : (
+          <JournalForm
+            date={date}
+            entry={journalToEdit}
+            onClose={onClose}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
 function BodySnapshotCard({
   snapshot,
   testDate,
@@ -780,97 +1022,6 @@ function BodySnapshotCard({
         Ultimi valori Apple Health ≤ data del prelievo ({formatDate(testDate)}). Non
         modificabili.
       </div>
-    </div>
-  )
-}
-
-const CONTEXT_FIELDS: {
-  key: keyof LabPanelDetail
-  label: string
-  placeholder: string
-}[] = [
-  { key: "activity_text", label: "Attività fisica", placeholder: "Es. corsa 3×/settimana…" },
-  { key: "medications_text", label: "Farmaci", placeholder: "Es. tamsulosina 0.4mg…" },
-  { key: "supplements_text", label: "Integratori", placeholder: "Es. vit D 2000 UI…" },
-  { key: "nutrition_text", label: "Alimentazione", placeholder: "Note generiche sull'alimentazione" },
-  {
-    key: "diet_text",
-    label: "Dieta (auto-fill da diario)",
-    placeholder: "Riassunto calorie/macro del giorno",
-  },
-  {
-    key: "workout_text",
-    label: "Workout (auto-fill da HealthKit)",
-    placeholder: "Attività del giorno o del giorno precedente",
-  },
-  { key: "notes", label: "Note libere", placeholder: "Altro…" },
-]
-
-function ContextSection({ panel }: { panel: LabPanelDetail }) {
-  const patch = useLabPatchPanel()
-  const [open, setOpen] = useState(false)
-  const [values, setValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      CONTEXT_FIELDS.map(f => [f.key as string, ((panel as any)[f.key] as string | null) ?? ""])
-    )
-  )
-  const [savingKey, setSavingKey] = useState<string | null>(null)
-
-  async function commit(key: string) {
-    const newVal = values[key] ?? ""
-    const stored = ((panel as any)[key] as string | null) ?? ""
-    if (newVal === stored) return
-    setSavingKey(key)
-    try {
-      await patch.mutateAsync({
-        panelId: panel.id,
-        patch: { [key]: newVal || null },
-      })
-    } catch (e) {
-      alert(`Errore salvataggio ${key}: ${e instanceof Error ? e.message : String(e)}`)
-    } finally {
-      setSavingKey(null)
-    }
-  }
-
-  const filledCount = CONTEXT_FIELDS.filter(
-    f => ((panel as any)[f.key] as string | null)?.trim()
-  ).length
-
-  return (
-    <div className="border rounded">
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-accent"
-      >
-        <span className="font-medium">
-          Contesto del prelievo{" "}
-          <span className="text-xs text-muted-foreground">
-            ({filledCount} / {CONTEXT_FIELDS.length} compilati)
-          </span>
-        </span>
-        <span className="text-xs text-muted-foreground">{open ? "chiudi" : "apri"}</span>
-      </button>
-      {open && (
-        <div className="border-t p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-          {CONTEXT_FIELDS.map(f => (
-            <div key={f.key as string}>
-              <Label className="text-xs mb-1 block">{f.label}</Label>
-              <Textarea
-                value={values[f.key as string] ?? ""}
-                onChange={e =>
-                  setValues(prev => ({ ...prev, [f.key as string]: e.target.value }))
-                }
-                onBlur={() => commit(f.key as string)}
-                placeholder={f.placeholder}
-                className="text-sm min-h-[60px]"
-                disabled={savingKey === (f.key as string)}
-              />
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   )
 }

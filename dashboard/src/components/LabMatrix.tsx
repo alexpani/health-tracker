@@ -11,12 +11,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useLabAnalytes, useLabMatrix, useLabPatchPanel } from "@/lib/queries"
+import {
+  useHealthNotes,
+  useJournalEntries,
+  useLabAnalytes,
+  useLabMatrix,
+} from "@/lib/queries"
+import { HealthNoteForm } from "@/components/HealthNoteForm"
+import { JournalForm } from "@/components/JournalForm"
 import type {
   LabAnalyte,
+  LabAutoContext,
+  LabAutoContextItem,
   LabMatrixCell,
   LabMatrixResponse,
-  LabPanelContextRow,
 } from "@/lib/types"
 import { formatDate } from "@/lib/utils"
 import { cn } from "@/lib/utils"
@@ -80,14 +88,21 @@ function injectDerivedAnalytes(
   }
 }
 
-const CONTEXT_ROWS: { key: keyof LabPanelContextRow; label: string }[] = [
-  { key: "activity_text", label: "Attività fisica" },
-  { key: "medications_text", label: "Farmaci" },
-  { key: "supplements_text", label: "Integratori" },
-  { key: "nutrition_text", label: "Alimentazione" },
-  { key: "diet_text", label: "Dieta (piano)" },
-  { key: "workout_text", label: "Workout" },
-  { key: "notes", label: "Note" },
+type AutoContextKey =
+  | "medications"
+  | "supplements"
+  | "training"
+  | "diet"
+  | "health_notes"
+  | "journal"
+
+const AUTO_ROWS: { key: AutoContextKey; label: string }[] = [
+  { key: "medications", label: "Farmaci" },
+  { key: "supplements", label: "Integratori" },
+  { key: "training", label: "Piano allenamento" },
+  { key: "diet", label: "Piano alimentare" },
+  { key: "health_notes", label: "Note salute" },
+  { key: "journal", label: "Diario" },
 ]
 
 interface MatrixFilters {
@@ -141,6 +156,11 @@ export default function LabMatrix({
   onJumpToTrends?: (slug: string) => void
 }) {
   const [filters, setFilters] = useState<MatrixFilters>(EMPTY_FILTERS)
+  const [quickModal, setQuickModal] = useState<{
+    kind: "note" | "journal"
+    date: string
+    id: number | null
+  } | null>(null)
   useLabAnalytes() // pre-warm cache — usata altrove
   const queryParams = useMemo(
     () => ({
@@ -534,13 +554,34 @@ export default function LabMatrix({
                   )
                 })}
               </tr>
-              {CONTEXT_ROWS.map(row => (
-                <ContextMatrixRow
+            </>
+          )}
+          {data.panel_auto_context && (
+            <>
+              <tr className="bg-indigo-100/70 dark:bg-indigo-950/40">
+                <td
+                  className="sticky left-0 z-10 bg-indigo-100/70 dark:bg-indigo-950/40 px-3 py-1.5 font-semibold border-r text-sm"
+                  colSpan={1}
+                >
+                  Contesto automatico
+                </td>
+                <td
+                  colSpan={data.panels.length}
+                  className="bg-indigo-100/70 dark:bg-indigo-950/40 text-xs text-muted-foreground px-3"
+                >
+                  Da regimi / note salute / diario / workout
+                </td>
+              </tr>
+              {AUTO_ROWS.map(row => (
+                <AutoContextMatrixRow
                   key={row.key}
                   label={row.label}
                   fieldKey={row.key}
                   panels={data.panels}
-                  context={data.panel_context ?? {}}
+                  autoContext={data.panel_auto_context!}
+                  onQuickEntry={(kind, date, id) =>
+                    setQuickModal({ kind, date, id })
+                  }
                 />
               ))}
             </>
@@ -548,7 +589,66 @@ export default function LabMatrix({
         </tbody>
       </table>
     </div>
+    {quickModal && (
+      <LabQuickEntryModal
+        modal={quickModal}
+        onClose={() => setQuickModal(null)}
+      />
+    )}
     </>
+  )
+}
+
+function LabQuickEntryModal({
+  modal,
+  onClose,
+}: {
+  modal: { kind: "note" | "journal"; date: string; id: number | null }
+  onClose: () => void
+}) {
+  const notes = useHealthNotes(
+    modal.kind === "note" && modal.id != null ? { active_on: modal.date } : {},
+  )
+  const journal = useJournalEntries(modal.date, modal.kind === "journal")
+  const noteToEdit =
+    modal.kind === "note" && modal.id != null
+      ? notes.data?.find(n => n.id === modal.id) ?? null
+      : null
+  const journalToEdit =
+    modal.kind === "journal" && modal.id != null
+      ? journal.data?.find(e => e.id === modal.id) ?? null
+      : null
+  const stillLoading =
+    (modal.kind === "note" && modal.id != null && !notes.data) ||
+    (modal.kind === "journal" && modal.id != null && !journal.data)
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 py-12"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {stillLoading ? (
+          <div className="rounded-md border bg-background p-6 text-sm text-muted-foreground">
+            Caricamento…
+          </div>
+        ) : modal.kind === "note" ? (
+          <HealthNoteForm
+            note={noteToEdit}
+            defaults={{ start_date: modal.date, end_date: modal.date }}
+            onClose={onClose}
+          />
+        ) : (
+          <JournalForm
+            date={modal.date}
+            entry={journalToEdit}
+            onClose={onClose}
+          />
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -687,74 +787,139 @@ function groupByCategory(data: LabMatrixResponse | undefined) {
   return sortCategories(groups)
 }
 
-function ContextMatrixRow({
+function formatAutoTooltip(item: LabAutoContextItem): string {
+  if (item.source === "journal") {
+    return `Voce diario del ${formatDate(item.start_date ?? "")}`
+  }
+  if (item.source === "workout") {
+    return `Workout del ${formatDate(item.start_date ?? "")}${
+      item.detail ? ` · ${item.detail}` : ""
+    }`
+  }
+  if (item.source === "health_note") {
+    const s = item.start_date ? formatDate(item.start_date) : "?"
+    const e = item.end_date ? formatDate(item.end_date) : "?"
+    return s === e ? `Nota del ${s}` : `Nota dal ${s} al ${e}`
+  }
+  const s = item.start_date ? formatDate(item.start_date) : "data ignota"
+  const e = item.end_date ? formatDate(item.end_date) : "in corso"
+  return `Periodo: ${s} → ${e}${item.detail ? ` · ${item.detail}` : ""}`
+}
+
+export function AutoContextMatrixRow({
   label,
   fieldKey,
   panels,
-  context,
+  autoContext,
+  onQuickEntry,
 }: {
   label: string
-  fieldKey: keyof LabPanelContextRow
+  fieldKey: AutoContextKey
   panels: LabMatrixResponse["panels"]
-  context: Record<string, LabPanelContextRow>
+  autoContext: Record<string, LabAutoContext>
+  onQuickEntry?: (
+    kind: "note" | "journal",
+    date: string,
+    id: number | null,
+  ) => void
 }) {
+  const isClickable =
+    !!onQuickEntry && (fieldKey === "health_notes" || fieldKey === "journal")
+  const kind: "note" | "journal" =
+    fieldKey === "health_notes" ? "note" : "journal"
   return (
     <tr>
       <td className="sticky left-0 z-10 bg-background px-3 py-1.5 border-r text-muted-foreground">
         {label}
       </td>
-      {panels.map(p => (
-        <td
-          key={p.id}
-          className="px-1 py-1 align-top border-b border-border/50 min-w-[180px] max-w-[240px]"
-        >
-          <ContextCell
-            panelId={p.id}
-            fieldKey={fieldKey}
-            initial={context[String(p.id)]?.[fieldKey] ?? ""}
-          />
-        </td>
-      ))}
+      {panels.map(p => {
+        const ctx = autoContext[String(p.id)]
+        const raw = ctx ? (ctx as any)[fieldKey] : null
+        const items: LabAutoContextItem[] = Array.isArray(raw)
+          ? raw
+          : raw
+          ? [raw]
+          : []
+        return (
+          <td
+            key={p.id}
+            className="px-1.5 py-1 align-top border-b border-border/50 min-w-[180px] max-w-[260px]"
+          >
+            <div className="flex flex-wrap gap-1 items-center">
+              {items.length === 0 ? (
+                isClickable ? (
+                  <button
+                    type="button"
+                    onClick={() => onQuickEntry!(kind, p.test_date, null)}
+                    className="text-[11px] text-indigo-700 dark:text-indigo-300 hover:underline italic"
+                  >
+                    + aggiungi
+                  </button>
+                ) : (
+                  <span className="text-xs text-muted-foreground italic">—</span>
+                )
+              ) : (
+                <>
+                  {items.map((it, idx) => {
+                    const className = cn(
+                      "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] leading-tight",
+                      it.source === "workout"
+                        ? "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800"
+                        : "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800",
+                      isClickable &&
+                        "hover:bg-indigo-100 dark:hover:bg-indigo-900 cursor-pointer",
+                    )
+                    const tooltip = isClickable
+                      ? `${formatAutoTooltip(it)} · click per modificare`
+                      : formatAutoTooltip(it)
+                    const content = (
+                      <>
+                        <span className="font-medium">{it.label}</span>
+                        {it.detail && it.source !== "workout" && (
+                          <span className="text-muted-foreground">
+                            · {it.detail}
+                          </span>
+                        )}
+                      </>
+                    )
+                    return isClickable ? (
+                      <button
+                        key={`${fieldKey}-${p.id}-${idx}`}
+                        type="button"
+                        title={tooltip}
+                        onClick={() =>
+                          onQuickEntry!(kind, p.test_date, it.id ?? null)
+                        }
+                        className={cn(className, "text-left")}
+                      >
+                        {content}
+                      </button>
+                    ) : (
+                      <span
+                        key={`${fieldKey}-${p.id}-${idx}`}
+                        title={tooltip}
+                        className={className}
+                      >
+                        {content}
+                      </span>
+                    )
+                  })}
+                  {isClickable && (
+                    <button
+                      type="button"
+                      onClick={() => onQuickEntry!(kind, p.test_date, null)}
+                      title={`Nuova per ${p.test_date}`}
+                      className="inline-flex items-center justify-center h-4 w-4 rounded-full border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-[10px] font-bold"
+                    >
+                      +
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </td>
+        )
+      })}
     </tr>
-  )
-}
-
-function ContextCell({
-  panelId,
-  fieldKey,
-  initial,
-}: {
-  panelId: number
-  fieldKey: keyof LabPanelContextRow
-  initial: string
-}) {
-  const patch = useLabPatchPanel()
-  const [value, setValue] = useState(initial)
-  // Risincronizza se il server aggiorna (es. dopo auto-fill).
-  useEffect(() => setValue(initial), [initial])
-
-  async function commit() {
-    const trimmed = value.trim()
-    if (trimmed === initial.trim()) return
-    try {
-      await patch.mutateAsync({
-        panelId,
-        patch: { [fieldKey]: trimmed || null },
-      })
-    } catch (e) {
-      alert(`Errore: ${e instanceof Error ? e.message : String(e)}`)
-      setValue(initial)
-    }
-  }
-
-  return (
-    <textarea
-      value={value}
-      onChange={e => setValue(e.target.value)}
-      onBlur={commit}
-      placeholder="—"
-      rows={2}
-      className="w-full text-xs bg-transparent resize-y px-1.5 py-1 rounded border border-transparent hover:border-border focus:border-primary focus:outline-none"
-    />
   )
 }
