@@ -6,6 +6,7 @@ import { useDiarioActivePlan, useRegimens } from "@/lib/queries"
 import type { Regimen, RegimenKind } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
 import { RegimenTimeline } from "@/components/RegimenTimeline"
+import { formatPeriodDuration } from "@/lib/duration"
 
 const KIND_ORDER: RegimenKind[] = ["medication", "supplement", "diet", "training", "gear"]
 
@@ -245,7 +246,21 @@ function Section({ title, items, onEdit }: { title: string; items: Regimen[]; on
                       <td className="p-3 tabular-nums whitespace-nowrap">
                         {fromDiario
                           ? <em className="text-emerald-600">in corso</em>
-                          : <>{fmtDate(r.start_date)} → {r.end_date ? fmtDate(r.end_date) : <em className="text-emerald-600">in corso</em>}</>}
+                          : (() => {
+                              const duration = formatPeriodDuration(r.start_date, r.end_date)
+                              return (
+                                <>
+                                  <div>
+                                    {fmtDate(r.start_date)} → {r.end_date ? fmtDate(r.end_date) : <em className="text-emerald-600">in corso</em>}
+                                  </div>
+                                  {duration && (
+                                    <div className="text-xs text-muted-foreground whitespace-normal max-w-[24rem]" title={duration}>
+                                      {r.end_date ? duration : <>da {duration}</>}
+                                    </div>
+                                  )}
+                                </>
+                              )
+                            })()}
                       </td>
                       <td className="p-3 hidden lg:table-cell text-muted-foreground line-clamp-2 max-w-xs">
                         {r.notes ?? ""}
