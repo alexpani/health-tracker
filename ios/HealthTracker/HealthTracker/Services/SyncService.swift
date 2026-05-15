@@ -145,7 +145,12 @@ final class SyncService {
             Task { @MainActor in
                 self.logger.info("Protected data became available — kicking quick sync (after 2s warm-up)")
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
-                await self.performQuickSync()
+                // Bypass throttle: l'unlock e' un trigger autorevole.
+                // Tipicamente arriva dopo un silent push che ha fatto
+                // early-abort per locked=true: senza minInterval=0 il sync
+                // viene saltato perche' il throttle vede un sync recente
+                // (foreground) e droppa la fetch dei pending writes.
+                await self.performQuickSync(minInterval: 0)
             }
         }
     }

@@ -1,4 +1,5 @@
 import UIKit
+import UserNotifications
 import os
 
 /// Bridge UIKit per le API che SwiftUI non espone direttamente: APNs token
@@ -34,12 +35,24 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        // Richiediamo il token al sistema. L'utente NON vede un popup —
-        // questa e' la registrazione APNs, distinta dal popup di
-        // permission per notifiche visibili (che noi non chiediamo, sono
-        // silent push only).
-        DispatchQueue.main.async {
-            UIApplication.shared.registerForRemoteNotifications()
+        // Notifications authorization (silent + alert opzionale). Anche se
+        // usiamo solo silent push (`content-available: 1`), Apple ha tightened
+        // il delivery: device che non hanno mai concesso authorization possono
+        // ricevere silent push molto inaffidabilmente (specie su sandbox).
+        // Chiediamo `.alert` come "courtesy" anche se non emetteremo mai
+        // banner (il backend manda solo `content-available`); cosi' iOS
+        // considera l'app "trusted" e consegna i background push.
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { granted, error in
+            if let error {
+                Self.logger.error("UN authorization error: \(error.localizedDescription)")
+            } else {
+                Self.logger.info("UN authorization granted=\(granted)")
+            }
+            // Procedi col register comunque (silent push tecnicamente non
+            // richiede grant, ma e' piu' affidabile averlo).
+            DispatchQueue.main.async {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
         }
         Self.logger.info("APNs registration requested")
         return true

@@ -1,7 +1,14 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Setup logging: di default uvicorn imposta solo i propri logger. I logger
+# delle nostre app (es. app.services.apns) restano a livello WARNING. Forza
+# INFO sul root logger cosi' i log informativi (push inviati, retry, ecc)
+# finiscono nei container logs.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 from app.routers import blacklist, clinical, daily_stats, day, delete as delete_router, devices, diario, health_notes, ingest, journal, lab, query, regimens, rules, stretching, write
 

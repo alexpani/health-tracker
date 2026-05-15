@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import CategorySample, HealthSample, PendingDeletion, SyncLog, Workout, WorkoutRoute
+from app.services.apns import fire_and_forget_push_all
 from app.schemas import (
     AggregatedPoint,
     CategorySampleOut,
@@ -1182,6 +1183,10 @@ async def bulk_delete_samples(body: BulkDeleteIn, db: AsyncSession = Depends(get
     stmt = delete(HealthSample).where(HealthSample.id.in_(body.ids))
     result = await db.execute(stmt)
     await db.commit()
+    # Silent push: sveglia l'iPhone cosi' processa la coda delete
+    # immediatamente invece di aspettare il prossimo trigger.
+    if rows:
+        fire_and_forget_push_all("pending_deletion")
     return {"deleted": result.rowcount, "hk_deletion_enqueued": len(rows)}
 
 

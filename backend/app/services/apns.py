@@ -46,6 +46,22 @@ logger = logging.getLogger(__name__)
 # HTTP/2 persistente — istanziamo una volta e riutilizziamo.
 _clients: dict[str, Any] = {}
 
+# Strong reference set per le task fire-and-forget: senza, asyncio.create_task
+# puo' essere garbage-collected prima di completare. Pattern canonico Python
+# (vedi https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task).
+_BG_TASKS: set[asyncio.Task] = set()
+
+
+def _spawn_bg(coro) -> None:
+    """Lancia una coroutine in background tenendo una strong reference."""
+    try:
+        task = asyncio.create_task(coro)
+    except RuntimeError as exc:
+        logger.warning("APNs: no running event loop: %s", exc)
+        return
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+
 
 def _is_configured() -> bool:
     """True se abbiamo le credenziali APNs minime per provare l'invio."""
@@ -76,8 +92,10 @@ def _get_client(env: str):
 
     use_sandbox = env == "sandbox"
     try:
+        # aioapns vuole il CONTENUTO PEM del .p8, non il path.
+        key_content = settings.apns_key_path.read_text(encoding="utf-8")
         client = APNs(
-            key=str(settings.apns_key_path),
+            key=key_content,
             key_id=settings.apns_key_id,
             team_id=settings.apns_team_id,
             topic=settings.apns_bundle_id,
@@ -125,7 +143,7 @@ async def send_silent_push(
         return False
 
     try:
-        from aioapns import NotificationRequest
+        from aioapns import NotificationRequest, PushType
     except ImportError:
         return False
 
@@ -135,8 +153,11 @@ async def send_silent_push(
             "aps": {"content-available": 1},
             "reason": reason,
         },
-        push_type="background",
-        priority=5,  # silent push richiede priority bassa
+        push_type=PushType.BACKGROUND,
+        # priority: aioapns legge un int sull'header `apns-priority`. Per
+        # silent push Apple richiede 5 (low). Non passiamo l'enum perche'
+        # aioapns 4.x non lo richiede — un int int va bene.
+        priority=5,
     )
 
     try:
@@ -200,10 +221,7 @@ def fire_and_forget_push(device_id: str | None, reason: str) -> None:
         except Exception as exc:
             logger.error("fire_and_forget_push crash: %s", exc)
 
-    try:
-        asyncio.create_task(_run())
-    except RuntimeError:
-        logger.debug("fire_and_forget_push: no running loop for device=%s", device_id)
+    _spawn_bg(_run())
 
 
 def fire_and_forget_push_all(reason: str) -> None:
@@ -235,6 +253,8 @@ def fire_and_forget_push_all(reason: str) -> None:
             logger.debug("APNs push_all: no registered devices for reason=%s", reason)
             return
 
+        logger.info("APNs push_all: sending to %d device(s) for reason=%s", len(devices), reason)
+
         # Push paralleli: ogni task apre la sua sessione cosi' un fallimento
         # su un device non blocca gli altri.
         async def _push_one(device_id: str) -> None:
@@ -247,7 +267,4 @@ def fire_and_forget_push_all(reason: str) -> None:
             *(_push_one(d.device_id) for d in devices), return_exceptions=True
         )
 
-    try:
-        asyncio.create_task(_run())
-    except RuntimeError:
-        logger.debug("fire_and_forget_push_all: no running loop for reason=%s", reason)
+    _spawn_bg(_run())
