@@ -81,12 +81,15 @@ struct HealthTrackerApp: App {
         }
     }
 
-    /// Auto-sync: runs in background if one isn't already running and
-    /// at least 10 minutes have passed since the last sync.
+    /// Auto-sync: runs in background if one isn't already running and at
+    /// least 10 minutes have passed since the last *successful* sync. Gating
+    /// on success (not on attempt time) ensures that BG-locked wake-ups —
+    /// which produce no real work — don't starve the foreground sync that
+    /// fires when the user opens the app.
     private func autoSyncIfNeeded() {
         guard !syncService.isSyncing else { return }
         let minInterval: TimeInterval = 600 // 10 minutes
-        if let last = syncService.lastSyncDate, Date().timeIntervalSince(last) < minInterval {
+        if let last = syncService.lastSuccessfulSyncDate, Date().timeIntervalSince(last) < minInterval {
             return
         }
         Task.detached(priority: .utility) {

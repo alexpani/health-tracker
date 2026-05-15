@@ -4,18 +4,34 @@ import SwiftData
 import UIKit
 import os
 
-/// Returns true if the app is currently running in the background. Used to
-/// decide whether to advance HK anchors on empty fetches: in BG with a locked
-/// device HKAnchoredObjectQuery / HKSampleQuery silently return 0 samples for
-/// protected types (StepCount, HeartRate, AEE, BEE, etc.) WITHOUT throwing —
-/// if we naively persisted the new anchor, those samples would be skipped
-/// forever once the device unlocks. So in BG we only advance the bookmark
-/// when we actually got data; in foreground we always advance (0 samples
-/// truly means "nothing new").
+/// Returns true if protected data is currently inaccessible — i.e. the
+/// device is locked. This is the *real* signal that HKAnchoredObjectQuery /
+/// HKSampleQuery will silently return 0 samples for protected types
+/// (StepCount, HeartRate, AEE, BEE, ...) WITHOUT throwing. If we naively
+/// persisted the new anchor in that state, those samples would be skipped
+/// forever once the device unlocks. Note: an app can run in `.background`
+/// with the device unlocked — HK reads still succeed in that case, so the
+/// guard must key off the *lock* state, not the app state.
 @MainActor
-func isAppInBackground() -> Bool {
-    let state = UIApplication.shared.applicationState
-    return state == .background || state == .inactive
+func isProtectedDataInaccessible() -> Bool {
+    !UIApplication.shared.isProtectedDataAvailable
+}
+
+/// Riconosce l'errore HK "Protected health data is inaccessible"
+/// (`HKError.errorDatabaseInaccessible`, code 8). Si presenta:
+/// - sui sync triggerati subito dopo `protectedDataDidBecomeAvailable`
+///   perche' HK ha la sua chiave di derivazione che richiede un istante in
+///   piu' rispetto al flag a livello UIKit;
+/// - sui sync in BG che iniziano unlocked e finiscono mentre il device si
+///   blocca a meta';
+/// - sui sync subito dopo il primo boot (prima del first-unlock).
+func isProtectedDataError(_ error: Error) -> Bool {
+    let nsErr = error as NSError
+    if nsErr.domain == HKError.errorDomain
+        && nsErr.code == HKError.Code.errorDatabaseInaccessible.rawValue {
+        return true
+    }
+    return nsErr.localizedDescription.contains("Protected health data is inaccessible")
 }
 
 /// Persisted summary of a single completed sync
@@ -34,6 +50,13 @@ struct LastSyncSummary: Codable, Identifiable, Hashable {
 final class SyncService {
     var isSyncing = false
     var lastSyncDate: Date?
+    /// Timestamp dell'ultimo sync che ha realmente fatto qualcosa: o ha
+    /// pescato almeno un sample, o e' stato eseguito con `isProtectedData`
+    /// disponibile (device unlocked). I sync BG-locked che ritornano 0/0
+    /// per tutti i tipi NON aggiornano questo timestamp — cosi' il throttle
+    /// foreground/quick non viene "avvelenato" da no-op e l'utente che
+    /// apre l'app riesce a far partire un sync reale.
+    var lastSuccessfulSyncDate: Date?
     var lastSyncStartedAt: Date?
     var lastSyncDurationSeconds: Double?
     var lastSyncTotalSamples: Int = 0
@@ -52,6 +75,26 @@ final class SyncService {
     var syncLog: [String] = []
     var shouldStop: Bool = false          // set to true to cancel mid-sync
 
+    /// Settato a true se durante il sync HK ha rifiutato almeno una lettura
+    /// con `HKError.errorDatabaseInaccessible` (= "Protected health data is
+    /// inaccessible"). Succede quando la notifica
+    /// `protectedDataDidBecomeAvailable` arriva troppo presto (HK ha la sua
+    /// derivazione di chiave che richiede un istante in piu' rispetto al
+    /// flag `UIApplication.isProtectedDataAvailable`), o quando il device si
+    /// rilocka a meta' sync. Quando true a fine sync: NIENTE bump di
+    /// `lastSuccessfulSyncDate`, NIENTE heartbeat — cosi' il prossimo trigger
+    /// (osservatore/SLC/foreground) non viene throttled fuori.
+    private var hadProtectedDataErrorThisSync = false
+
+    /// Quanti row daily-stats sono stati upserted in questo sync. Tenuto
+    /// separato da `totalSamplesSynced` perche' il backend non crea SyncLog
+    /// entries per `/daily-stats/batch` (lo fa solo per
+    /// samples/categories/workouts). Lo usiamo come `sample_count` quando
+    /// postiamo l'heartbeat di sync vuoto, cosi' la dashboard vede una riga
+    /// "wake-up N campioni" invece di "wake-up 0 campioni" quando il sync
+    /// ha aggiornato solo i totali giornalieri.
+    private var dailyStatsUpsertedThisSync = 0
+
     private let healthKitManager = HealthKitManager()
     private let apiClient = APIClient()
     private var modelContainer: ModelContainer?
@@ -66,14 +109,45 @@ final class SyncService {
 
     private let lastSyncKey = "last_sync_summary_v1"
     private let recentSyncsKey = "recent_syncs_v1"
+    private let lastSuccessfulSyncKey = "last_successful_sync_v1"
     private let maxRecentSyncs = 5
 
     init() {
         loadLastSyncSummary()
+        if let t = UserDefaults.standard.object(forKey: lastSuccessfulSyncKey) as? Date {
+            lastSuccessfulSyncDate = t
+        }
     }
 
+    @MainActor
     func setModelContainer(_ container: ModelContainer) {
         self.modelContainer = container
+        registerProtectedDataWakeUp()
+    }
+
+    /// Registra un osservatore per `UIApplication.protectedDataDidBecomeAvailable`:
+    /// quando il device sblocca (o termina il post-boot first-unlock), HK
+    /// torna leggibile e possiamo far partire un sync. NB: la notifica arriva
+    /// PRIMA che HK sia effettivamente pronto (HK ha una sua chiave di
+    /// derivazione che richiede qualche centinaia di ms in piu' rispetto al
+    /// flag a livello UIKit). Aspettiamo 2s prima di triggerare il sync per
+    /// evitare di sbattere contro `HKError.errorDatabaseInaccessible`. Anche
+    /// se sbattiamo lo stesso, il flag `hadProtectedDataErrorThisSync` evita
+    /// di poisonare `lastSuccessfulSyncDate` e il prossimo trigger riprende.
+    @MainActor
+    private func registerProtectedDataWakeUp() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.logger.info("Protected data became available — kicking quick sync (after 2s warm-up)")
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await self.performQuickSync()
+            }
+        }
     }
 
     private func loadLastSyncSummary() {
@@ -106,7 +180,7 @@ final class SyncService {
             startedAt: startedAt,
             completedAt: Date(),
             durationSeconds: Date().timeIntervalSince(startedAt),
-            totalSamples: totalSamplesSynced,
+            totalSamples: totalSamplesSynced + dailyStatsUpsertedThisSync,
             log: syncLog,
             wasInterrupted: interrupted
         )
@@ -134,16 +208,19 @@ final class SyncService {
     /// triggers (HKObserverQuery, app launch, scene change).
     @MainActor
     func performQuickSync(minInterval: TimeInterval = 120) async {
-        let inBg = isAppInBackground()
-        logger.info("Quick sync triggered (minInterval=\(Int(minInterval))s, inBg=\(inBg))")
+        let locked = isProtectedDataInaccessible()
+        logger.info("Quick sync triggered (minInterval=\(Int(minInterval))s, locked=\(locked))")
         if isSyncing {
             logger.info("Quick sync skipped: already syncing")
             return
         }
-        if let last = lastSyncDate {
+        // Throttle against the last *successful* sync, not the last attempt.
+        // Otherwise BG-locked no-op attempts would advance the gate and starve
+        // the next real sync that could actually fetch data.
+        if let last = lastSuccessfulSyncDate {
             let elapsed = Date().timeIntervalSince(last)
             if elapsed < minInterval {
-                logger.info("Quick sync skipped: throttled (last \(Int(elapsed))s < \(Int(minInterval))s)")
+                logger.info("Quick sync skipped: throttled (last successful \(Int(elapsed))s < \(Int(minInterval))s)")
                 return
             }
         }
@@ -176,6 +253,15 @@ final class SyncService {
     @MainActor
     func performFullSync() async {
         guard !isSyncing else { return }
+        // Device locked → HK letture protette ritornano 0 senza errore. Saltare
+        // tutto il sync invece di iterare 50+ tipi che produrrebbero solo
+        // anchor mancati e una riga "0 campioni" sulla dashboard. Il listener
+        // `protectedDataDidBecomeAvailable` + i prossimi trigger (BG/SLC/
+        // foreground) ripartiranno appena il device sblocca.
+        if isProtectedDataInaccessible() {
+            logger.info("Sync skipped: device locked (protected data inaccessible)")
+            return
+        }
         let startedAt = Date()
         isSyncing = true
         shouldStop = false
@@ -186,6 +272,8 @@ final class SyncService {
         totalSamplesSynced = 0
         currentWindowDate = nil
         lastSyncStartedAt = startedAt
+        hadProtectedDataErrorThisSync = false
+        dailyStatsUpsertedThisSync = 0
 
         // Process pending writes and deletions FIRST (quick)
         await processPendingWrites()
@@ -331,24 +419,76 @@ final class SyncService {
         if shouldStop {
             syncLog.append("Sync interrotta dall'utente")
         } else {
-            lastSyncDate = Date()
-            if syncLog.isEmpty {
-                syncLog.append("Nessun nuovo dato da sincronizzare")
-            }
-            // Log empty sync on the backend so the dashboard's sync sessions
-            // table reflects this attempt (no batch POST happens otherwise).
-            if totalSamplesSynced == 0 {
-                try? await apiClient.postSyncHeartbeat(sampleCount: 0)
+            let now = Date()
+            lastSyncDate = now
+            if hadProtectedDataErrorThisSync {
+                // HK ha rifiutato letture per "Protected health data is
+                // inaccessible" — il sync e' parziale (probabilmente la
+                // notifica `protectedDataDidBecomeAvailable` e' arrivata
+                // troppo presto e HK non era ancora pronto per tutti i tipi
+                // protetti). NON aggiorniamo `lastSuccessfulSyncDate` cosi'
+                // il prossimo trigger non viene throttled e riprende cio'
+                // che e' rimasto fuori.
+                // PERO' se nel frattempo qualcosa e' andato a buon fine
+                // (daily stats, pending writes, anchored che gira prima del
+                // lock, ecc), postiamo comunque l'heartbeat con il count
+                // del lavoro completato cosi' la dashboard mostra la riga.
+                syncLog.append("Sync interrotto: HK non ancora accessibile")
+                logger.info("Sync ended with protected-data errors — not updating lastSuccessfulSyncDate")
+                // Heartbeat con SOLO i daily stats: i sample grezzi
+                // (totalSamplesSynced) sono gia' stati loggati dai batch
+                // endpoint del backend, quindi includerli qui sarebbe doppio
+                // conteggio nella session table.
+                if dailyStatsUpsertedThisSync > 0 {
+                    try? await apiClient.postSyncHeartbeat(sampleCount: dailyStatsUpsertedThisSync)
+                }
+            } else {
+                // "Successo" = ha pescato dati OPPURE e' stato eseguito con
+                // device unlocked (foreground o BG con dati accessibili).
+                lastSuccessfulSyncDate = now
+                UserDefaults.standard.set(now, forKey: lastSuccessfulSyncKey)
+                if syncLog.isEmpty {
+                    syncLog.append("Nessun nuovo dato da sincronizzare")
+                }
+                // Log on the backend so the dashboard's sync sessions table
+                // riflette l'attivita' del sync. Tre casi:
+                // - daily stats > 0 → heartbeat con quel count. Il backend
+                //   non crea SyncLog entries per `/daily-stats/batch`, quindi
+                //   senza heartbeat i daily stats sparirebbero dalla session
+                //   anche quando ci sono sample grezzi affiancati;
+                // - daily stats == 0 e sample grezzi == 0 → heartbeat con 0
+                //   (wake-up vuoto, registrato per visibilita');
+                // - daily stats == 0 e sample grezzi > 0 → no heartbeat: i
+                //   batch grezzi hanno gia' creato le proprie SyncLog rows.
+                if dailyStatsUpsertedThisSync > 0 {
+                    try? await apiClient.postSyncHeartbeat(
+                        sampleCount: dailyStatsUpsertedThisSync
+                    )
+                } else if totalSamplesSynced == 0 {
+                    try? await apiClient.postSyncHeartbeat(sampleCount: 0)
+                }
             }
         }
 
-        // Preserve summary of this sync for the UI + persist across launches
+        // Preserve summary of this sync for the UI + persist across launches.
+        // Per l'UI sommiamo daily stats + sample grezzi cosi' l'utente vede
+        // un conteggio aggregato di "campioni" sincronizzati. Internamente i
+        // due restano separati per la logica heartbeat (sopra).
         let wasInterrupted = shouldStop
         lastSyncDurationSeconds = Date().timeIntervalSince(startedAt)
-        lastSyncTotalSamples = totalSamplesSynced
+        lastSyncTotalSamples = totalSamplesSynced + dailyStatsUpsertedThisSync
         lastSyncLog = syncLog
         lastSyncWasInterrupted = wasInterrupted
         saveLastSyncSummary(startedAt: startedAt, interrupted: wasInterrupted)
+
+        // Retry: il sync e' fallito per HK protected-data (di solito perche'
+        // la notifica `protectedDataDidBecomeAvailable` arriva troppo presto
+        // e HK non ha ancora caricato le chiavi). Il flag
+        // `hadProtectedDataErrorThisSync` ha gia' impedito il bump di
+        // `lastSuccessfulSyncDate`, ma senza un nuovo trigger l'utente resta
+        // a guardare un sync fallito finche' un altro evento (osservatore,
+        // SLC, BG task, foreground) non capita. Schedula un retry tra 8s.
+        let needsProtectedDataRetry = hadProtectedDataErrorThisSync && !shouldStop
 
         currentType = ""
         currentWindowDate = nil
@@ -361,6 +501,13 @@ final class SyncService {
         // for the same identifier, so this is safe even when handleSync()
         // already scheduled the next launch at the very start of the run.
         BackgroundTaskManager.shared.scheduleNextSync()
+
+        if needsProtectedDataRetry {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                await self?.performQuickSync()
+            }
+        }
     }
 
     /// Polls the backend for pending writes and writes them to Apple Health.
@@ -462,23 +609,27 @@ final class SyncService {
                     }
                 }
 
-                // Advance the bookmark, but in BACKGROUND with an empty fetch
-                // skip the advance: a locked device returns 0 samples without
-                // throwing for protected types, and naively advancing
-                // lastSyncDate would skip those samples forever once unlocked.
-                let inBg = isAppInBackground()
-                if !samples.isEmpty || !inBg {
+                // Advance the bookmark, but if the device is locked with an
+                // empty fetch skip the advance: HK returns 0 samples without
+                // throwing for protected types in that state, and naively
+                // advancing lastSyncDate would skip those samples forever
+                // once unlocked. (Belt-and-braces: performFullSync already
+                // early-aborts when protected data is inaccessible, but the
+                // device can lock mid-sync.)
+                let locked = isProtectedDataInaccessible()
+                if !samples.isEmpty || !locked {
                     await updateSyncDate(for: typeId.rawValue, date: windowEnd)
                     currentWindowDate = windowEnd
                     if totalDuration > 0 {
                         typeProgress = min(1.0, windowEnd.timeIntervalSince(effectiveStart) / totalDuration)
                     }
                 } else {
-                    // BG empty → exit the loop without advancing; will retry
-                    // on the next sync (foreground or unlocked BG).
+                    // Locked + empty → exit the loop without advancing; will
+                    // retry on the next sync (foreground or unlocked).
                     return
                 }
             } catch {
+                if isProtectedDataError(error) { hadProtectedDataErrorThisSync = true }
                 let msg = "\(currentType): window failed - \(error.localizedDescription)"
                 syncLog.append(msg)
                 logger.error("\(msg)")
@@ -531,11 +682,11 @@ final class SyncService {
                         return
                     }
                 }
-                // BG + empty fetch → don't advance bookmark (protected data
-                // could be silently masked). See syncQuantityType for the
+                // Locked + empty fetch → don't advance bookmark (protected
+                // data is silently masked). See syncQuantityType for the
                 // full rationale.
-                let inBg = isAppInBackground()
-                if !samples.isEmpty || !inBg {
+                let locked = isProtectedDataInaccessible()
+                if !samples.isEmpty || !locked {
                     await updateSyncDate(for: typeId.rawValue, date: windowEnd)
                     currentWindowDate = windowEnd
                     if totalDuration > 0 {
@@ -545,6 +696,7 @@ final class SyncService {
                     return
                 }
             } catch {
+                if isProtectedDataError(error) { hadProtectedDataErrorThisSync = true }
                 let msg = "\(currentType): window failed - \(error.localizedDescription)"
                 syncLog.append(msg)
                 logger.error("\(msg)")
@@ -588,15 +740,15 @@ final class SyncService {
                 deletedCount = try await apiClient.deleteWorkouts(uuids: deletedUUIDs)
             }
 
-            // Persist the new anchor on success — but in BACKGROUND skip the
-            // persist if HK returned zero samples AND zero deletions, because
-            // a locked device returns 0/0 silently for protected types
-            // (StepCount, HeartRate, AEE, BEE, ...). If we advanced the anchor
-            // we'd skip the real samples forever once the device unlocks. In
-            // foreground 0/0 truly means "nothing new", so advance normally.
-            let inBg = isAppInBackground()
+            // Persist the new anchor on success — but if the device is locked
+            // skip the persist when HK returned zero samples AND zero
+            // deletions, because protected types are silently masked then. If
+            // we advanced the anchor we'd skip the real samples forever once
+            // the device unlocks. With data accessible 0/0 truly means
+            // "nothing new", so advance normally.
+            let locked = isProtectedDataInaccessible()
             let didAnything = !added.isEmpty || !deletedUUIDs.isEmpty
-            if let newAnchor, (didAnything || !inBg) {
+            if let newAnchor, (didAnything || !locked) {
                 if let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
                     UserDefaults.standard.set(data, forKey: anchorKey)
                 }
@@ -616,6 +768,7 @@ final class SyncService {
                 await uploadRoute(forWorkoutUUID: w.uuid)
             }
         } catch {
+            if isProtectedDataError(error) { hadProtectedDataErrorThisSync = true }
             let msg = "Workouts: anchored sync failed - \(error.localizedDescription)"
             syncLog.append(msg)
             logger.error("\(msg)")
@@ -738,7 +891,7 @@ final class SyncService {
         // di rewind per ciascuno (in serie erano ~3-5s).
         let endOfToday = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: now)) ?? now
 
-        await withTaskGroup(of: (String, Int).self) { group in
+        await withTaskGroup(of: (String, Int, Bool).self) { group in
             for (typeId, unit) in Self.dailyStatsTypes {
                 if shouldStop { break }
                 let anchorKey = "lastDailyStatsAt_\(typeId.rawValue)"
@@ -763,16 +916,17 @@ final class SyncService {
                             upserted = try await apiClient.postDailyStats(type: typeId.rawValue, points: payload)
                         }
                         UserDefaults.standard.set(now, forKey: anchorKey)
-                        return (typeName, upserted)
+                        return (typeName, upserted, false)
                     } catch {
-                        return (typeName, -1)
+                        return (typeName, -1, isProtectedDataError(error))
                     }
                 }
             }
 
-            for await (typeName, upserted) in group {
+            for await (typeName, upserted, protectedErr) in group {
                 done += 1
                 typeProgress = Double(done) / totalTypes
+                if protectedErr { hadProtectedDataErrorThisSync = true }
                 if upserted > 0 {
                     grandTotal += upserted
                     let msg = "Daily \(typeName): \(upserted) days"
@@ -789,6 +943,7 @@ final class SyncService {
         if grandTotal > 0 {
             logger.info("Daily statistics: \(grandTotal) total days upserted")
         }
+        dailyStatsUpsertedThisSync = grandTotal
     }
 
     /// Quantity types synced via HKAnchoredObjectQuery instead of the plain
@@ -864,15 +1019,15 @@ final class SyncService {
                 deletedCount = try await apiClient.deleteSamples(uuids: deletedUUIDs)
             }
 
-            // Persist the new anchor on success — but in BACKGROUND skip the
-            // persist if HK returned zero samples AND zero deletions, because
-            // a locked device returns 0/0 silently for protected types
-            // (StepCount, HeartRate, AEE, BEE, ...). If we advanced the anchor
-            // we'd skip the real samples forever once the device unlocks. In
-            // foreground 0/0 truly means "nothing new", so advance normally.
-            let inBg = isAppInBackground()
+            // Persist the new anchor on success — but if the device is locked
+            // skip the persist when HK returned zero samples AND zero
+            // deletions, because protected types are silently masked then. If
+            // we advanced the anchor we'd skip the real samples forever once
+            // the device unlocks. With data accessible 0/0 truly means
+            // "nothing new", so advance normally.
+            let locked = isProtectedDataInaccessible()
             let didAnything = !added.isEmpty || !deletedUUIDs.isEmpty
-            if let newAnchor, (didAnything || !inBg) {
+            if let newAnchor, (didAnything || !locked) {
                 if let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
                     UserDefaults.standard.set(data, forKey: anchorKey)
                 }
@@ -884,6 +1039,7 @@ final class SyncService {
                 logger.info("\(msg)")
             }
         } catch {
+            if isProtectedDataError(error) { hadProtectedDataErrorThisSync = true }
             let msg = "\(typeId.rawValue): anchored fetch failed - \(error.localizedDescription)"
             syncLog.append(msg)
             logger.error("\(msg)")
