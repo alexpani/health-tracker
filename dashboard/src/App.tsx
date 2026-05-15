@@ -16,7 +16,8 @@ import Fitness from "@/pages/Fitness"
 import Insert from "@/pages/Insert"
 import Lab from "@/pages/Lab"
 import LabReview from "@/pages/LabReview"
-import Clinical from "@/pages/Clinical"
+// Clinical feature nascosta (vedi commenti su /clinical route + Sidebar.tsx)
+// import Clinical from "@/pages/Clinical"
 import Day from "@/pages/Day"
 import Regimens from "@/pages/Regimens"
 import HealthNotes from "@/pages/HealthNotes"
@@ -43,7 +44,7 @@ export default function App() {
         <Route path="/insert" element={<Insert />} />
         <Route path="/lab" element={<Lab />} />
         <Route path="/lab/panels/:id/review" element={<LabReview />} />
-        <Route path="/clinical" element={<Clinical />} />
+        {/* /clinical: nascosta (vedi Sidebar.tsx) finche' iPhone non autorizza HK Clinical. */}
         <Route path="/day" element={<Day />} />
         <Route path="/day/:date" element={<Day />} />
         <Route path="/regimens" element={<Regimens />} />

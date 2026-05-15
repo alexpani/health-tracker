@@ -39,3 +39,4 @@ ios/HealthTracker/build/
 
 # Node deps
 node_modules/
+dashboard/tsconfig.tsbuildinfo

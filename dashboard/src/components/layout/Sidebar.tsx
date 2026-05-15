@@ -35,7 +35,11 @@ const navItems = [
   { to: "/regimens", label: "Regimi", icon: Pill },
   { to: "/health-notes", label: "Note salute", icon: StickyNote },
   { to: "/lab", label: "Laboratorio", icon: FlaskConical },
-  { to: "/clinical", label: "Cartelle cliniche", icon: Stethoscope },
+  // Cartelle cliniche (HealthKit Clinical Records / FHIR): nascosta finche'
+  // l'autorizzazione lato iPhone non sara' operativa. Codice (page, queries,
+  // backend models/routers, iOS sync) resta in piedi — basta ripristinare
+  // questa riga + la route in App.tsx per riattivare.
+  // { to: "/clinical", label: "Cartelle cliniche", icon: Stethoscope },
   { to: "/activity", label: "Attivita", icon: ActivityIcon },
   { to: "/vitals", label: "Vitali", icon: Heart },
   { to: "/records", label: "Record", icon: Trophy },

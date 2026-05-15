@@ -383,7 +383,7 @@ docker compose up -d --build   # → http://192.168.68.190
 - Tab **Andamenti** (PR #4): `components/LabTrends.tsx`. Sidebar sinistra con preset temporali (12m/3y/5y/tutto) + chip analiti per categoria (multi-select, max 5 contemporanei). Per ogni analita una Recharts `LineChart` con banda di riferimento (`ReferenceArea` fra `ref_low`/`ref_high`), dot rosso più grande sui valori `out_of_range=true`. Colori per-serie fissi (rosso/blu/verde/ambra/viola).
 - Card **"Peso al prelievo"** (PR #6) in `/lab/panels/:id/review`: fetch HKBodyMass più recente con `start_date <= test_date` entro 3 giorni. Solo visualizzazione, nessuna scrittura nel panel.
 - Widget **"Analisi fuori range recenti"** (PR #6) in Home: `components/LabRecentOorCard.tsx`. Fetch `/api/v1/lab/recent-out-of-range?limit=10`. Si auto-nasconde se non ci sono valori fuori range. Ogni riga è un link alla review del panel.
-- `/clinical` — **Cartelle cliniche** (`components/Clinical.tsx`): HealthKit Clinical Records (FHIR) sincronizzati da Apple Salute. Sidebar a sinistra: chip per categoria (Allergie, Condizioni, Vaccinazioni, Lab clinici, Farmaci, Procedure, Parametri vitali, Assicurazioni) con count, chip per sorgente. Lista raggruppata per mese, ogni riga mostra data + chip categoria + display name + sorgente. Click su riga → modal con FHIR JSON renderizzato (pretty-print). In Italia la disponibilita' di provider FHIR su Salute e' bassa; l'utente puo' inserire record manualmente da Apple Salute. Niente write — solo read. Filtri persistiti in `sessionStorage` chiave `clinical_filters_v1`.
+- ~~`/clinical` — **Cartelle cliniche** (HealthKit Clinical Records / FHIR)~~ — **disabilitata**: nav item commentato in `Sidebar.tsx`, route commentata in `App.tsx`, sync iOS gated con `if false &&` in `syncClinicalRecords`. Codice, modello backend, migration, pagina React, hooks query restano in piedi — bastano 3 uncomment per riattivare quando l'autorizzazione lato iPhone sara' operativa.
 - `/fitness` — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - `/explore` — universal browser: pick any sample type with full filter bar + chart + raw table
 - `/insert` — form to queue body/nutrition writes for Apple Health
@@ -508,8 +508,11 @@ ssh root@192.168.68.166 "cd /opt/health-tracker/backend && docker compose up -d 
 # Migrations
 ssh root@192.168.68.166 "cd /opt/health-tracker/backend && docker compose exec -T api alembic revision --autogenerate -m 'msg' && docker compose exec -T api alembic upgrade head"
 
-# Dashboard
-scp -r dashboard/src root@192.168.68.190:/opt/ealth-dashboard/dashboard/
+# Dashboard — build host-side perche' la LXC ha 1GB RAM e vite/tsc OOM-killano
+cd dashboard && ./scripts/deploy.sh           # auto: build + scp dist + docker rebuild
+# Equivalente esplicito:
+cd dashboard && VITE_API_URL=http://192.168.68.166:8000 npm run build
+scp -r dashboard/dist dashboard/Dockerfile dashboard/nginx.conf dashboard/docker-compose.yml dashboard/.dockerignore root@192.168.68.190:/opt/ealth-dashboard/dashboard/
 ssh root@192.168.68.190 "cd /opt/ealth-dashboard/dashboard && docker compose up -d --build"
 ```
 

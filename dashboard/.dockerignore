@@ -1,6 +1,15 @@
+# NB: `dist/` NON e' qui apposta — il Dockerfile lo copia (vedi commenti
+# nel Dockerfile sul perche' il build e' host-side).
 node_modules
-dist
 .env
 .env.local
 .DS_Store
 *.log
+src
+public
+package*.json
+tsconfig*.json
+vite.config.*
+postcss.config.*
+tailwind.config.*
+index.html

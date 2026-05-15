@@ -311,11 +311,11 @@ final class SyncService {
             await syncDailyStats()
         }
 
-        // Clinical Records (FHIR). Re-fetch full per tipo (i record sono
-        // pochi, raramente >100), UPSERT idempotente lato backend. Nessun
-        // anchor: i provider FHIR riscrivono spesso le risorse retroattivamente,
-        // il full re-fetch e' piu' robusto e poco costoso.
-        if !shouldStop {
+        // Clinical Records (FHIR) — DISABILITATO finche' l'autorizzazione lato
+        // iPhone non sara' operativa: i fetch ritornano "Authorization not
+        // determined" e spammano i log inutilmente. Per riattivare:
+        // rimuovere `false &&` dalla guard sotto.
+        if false && !shouldStop {
             currentType = "Clinical records"
             typeProgress = 0
             currentWindowDate = nil
