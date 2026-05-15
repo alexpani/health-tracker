@@ -73,9 +73,15 @@ export function getDateRange(presetIdx: number, regimens?: Regimen[]): DateRange
   if (preset.days === null) {
     // Intero storico: deriva dal regimen piu' antico (con padding 30gg).
     // Fallback: ultimi 5 anni se non ci sono date.
+    // Defensive: ignora date < 2000 e > 2100 — sono typo (es. "0018-12-19"
+    // che sarebbe "2018-12-19" con i 2 mancanti). Senza questo filtro un
+    // singolo record con anno 18 d.C. estende il range a ~2000 anni e
+    // schiaccia tutte le barre reali in fondo.
+    const MIN_YEAR_ISO = '2000-01-01'
+    const MAX_YEAR_ISO = '2100-01-01'
     const earliest = regimens
       ?.map(r => r.start_date)
-      .filter((d): d is string => !!d)
+      .filter((d): d is string => !!d && d >= MIN_YEAR_ISO && d <= MAX_YEAR_ISO)
       .sort()[0]
     if (earliest) {
       start = stringToDate(earliest)
