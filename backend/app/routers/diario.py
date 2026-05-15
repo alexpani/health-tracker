@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import DiarioHkSync, PendingDeletion, PendingWrite
+from app.services.apns import fire_and_forget_push_all
 
 DIARIO_BASE_URL = os.environ.get("DIARIO_BASE_URL", "http://192.168.68.173:3000")
 TIMEOUT = 10.0
@@ -157,6 +158,11 @@ async def reconcile_diario_to_hk(
                 track.pending_write_id = pw.id
 
     await db.commit()
+
+    # Silent push solo se abbiamo accodato qualcosa: la reconcile gira
+    # spesso a vuoto (auto-trigger ogni 2 min), niente push fantasma.
+    if queued_writes > 0 or queued_deletes > 0:
+        fire_and_forget_push_all("diario_reconcile")
 
     return {
         "queued_writes": queued_writes,

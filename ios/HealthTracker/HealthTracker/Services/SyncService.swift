@@ -306,6 +306,17 @@ final class SyncService {
             await syncDailyStats()
         }
 
+        // Clinical Records (FHIR). Re-fetch full per tipo (i record sono
+        // pochi, raramente >100), UPSERT idempotente lato backend. Nessun
+        // anchor: i provider FHIR riscrivono spesso le risorse retroattivamente,
+        // il full re-fetch e' piu' robusto e poco costoso.
+        if !shouldStop {
+            currentType = "Clinical records"
+            typeProgress = 0
+            currentWindowDate = nil
+            await syncClinicalRecords()
+        }
+
         // PASS 0: body-metric + Watch cumulative types via anchored queries.
         // Parallelizziamo: HKAnchoredObjectQuery per tipo e' indipendente,
         // HKHealthStore e' thread-safe. Con 16 tipi che spesso non hanno
@@ -989,6 +1000,80 @@ final class SyncService {
 
     static var anchoredQuantityIds: Set<String> {
         Set(anchoredQuantityTypes.map { $0.0.rawValue })
+    }
+
+    /// HealthKit Clinical Records (FHIR) → POST /api/v1/clinical/batch.
+    /// Re-fetch full per tipo, UPSERT idempotente sul backend. Esegue gli
+    /// 8 tipi in parallelo via TaskGroup (i record per tipo sono pochi,
+    /// la latency rete domina). Pattern di error handling allineato agli
+    /// altri sync: protected-data errors settano il flag globale; altri
+    /// errori vengono loggati ma non propagati.
+    @MainActor
+    private func syncClinicalRecords() async {
+        let identifiers = HealthKitManager.clinicalTypes
+        let totalTypes = Double(identifiers.count)
+        var done = 0
+        var grandInserted = 0
+        var grandUpdated = 0
+
+        await withTaskGroup(of: (String, Int, Int, Bool, Error?).self) { group in
+            for id in identifiers {
+                group.addTask { [healthKitManager, apiClient] in
+                    do {
+                        let payloads = try await healthKitManager.fetchClinicalRecords(identifier: id)
+                        if payloads.isEmpty {
+                            return (id.rawValue, 0, 0, false, nil)
+                        }
+                        let result = try await apiClient.postClinicalRecords(payloads)
+                        return (id.rawValue, result.inserted, result.updated, false, nil)
+                    } catch {
+                        let isProtected = isProtectedDataError(error)
+                        return (id.rawValue, 0, 0, isProtected, error)
+                    }
+                }
+            }
+
+            for await (typeName, inserted, updated, protectedErr, error) in group {
+                done += 1
+                typeProgress = Double(done) / totalTypes
+                if protectedErr {
+                    hadProtectedDataErrorThisSync = true
+                    let msg = "Clinical \(typeName): protected data inaccessible"
+                    syncLog.append(msg)
+                    logger.info("\(msg)")
+                    continue
+                }
+                if let err = error {
+                    // Tutti gli altri errori: log + skip (un singolo tipo
+                    // fallito non rompe il sync, sara' riprovato al prossimo
+                    // round).
+                    let msg = "Clinical \(typeName): failed - \(err.localizedDescription)"
+                    syncLog.append(msg)
+                    logger.error("\(msg)")
+                    continue
+                }
+                grandInserted += inserted
+                grandUpdated += updated
+                if inserted > 0 || updated > 0 {
+                    let short = typeName.replacingOccurrences(of: "HKClinicalTypeIdentifier", with: "")
+                    let msg = "Clinical \(short): \(inserted) new, \(updated) updated"
+                    syncLog.append(msg)
+                    logger.info("\(msg)")
+                }
+            }
+        }
+
+        let total = grandInserted + grandUpdated
+        if total > 0 {
+            logger.info("Clinical records: \(total) total upserted (\(grandInserted) new, \(grandUpdated) updated)")
+            // I clinical records non vanno nel SyncLog batch del backend
+            // (endpoint /clinical/batch non logga), quindi li includiamo
+            // nel conteggio `dailyStatsUpsertedThisSync` (riusiamo la stessa
+            // variabile invece di aggiungerne una nuova: e' l'unico altro
+            // tipo di lavoro che richiede di "amplificare" il count
+            // visualizzato in dashboard via heartbeat).
+            dailyStatsUpsertedThisSync += total
+        }
     }
 
     @MainActor

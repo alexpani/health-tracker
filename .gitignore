@@ -31,3 +31,8 @@ pgdata/
 
 # Lab documents (PDF referti — mai committarli)
 backend/data/lab_documents/
+
+# APNs Auth Key (.p8) — mai committarla
+backend/data/apns/
+*.p8
+ios/HealthTracker/build/

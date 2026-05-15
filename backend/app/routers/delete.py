@@ -13,6 +13,7 @@ from app.schemas import (
     FailIn,
     PendingDeletionOut,
 )
+from app.services.apns import fire_and_forget_push_all
 
 router = APIRouter(prefix="/api/v1/delete", tags=["delete"])
 
@@ -83,6 +84,11 @@ async def plan_deletion(body: DeletionPlanIn, db: AsyncSession = Depends(get_db)
             status="pending",
         ))
     await db.commit()
+
+    # Trigger silent push: l'iPhone processera' la coda al prossimo wake-up
+    # forzato dall'APNs invece di aspettare il prossimo trigger naturale.
+    if deduped:
+        fire_and_forget_push_all("pending_deletion")
 
     return DeletionPlanOut(total=len(deduped), by_type=by_type)
 

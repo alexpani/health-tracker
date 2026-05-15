@@ -23,3 +23,13 @@ targets:
       properties:
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.background-delivery: true
+        # Clinical Health Records (FHIR) — richiede paid Developer Program.
+        com.apple.developer.healthkit.access: [health-records]
+        # APNs silent push: 'production' funziona sia per build TestFlight/
+        # App Store sia per build dev (Xcode automaticamente usa il sandbox
+        # APNs endpoint per le dev builds quando aps-environment=development,
+        # ma 'production' nel manifesto e' compatibile in dev se l'iOS
+        # device e' configurato come tale dal provisioning profile).
+        # In caso di problemi in development, mettere `development` qui e
+        # rigenerare con xcodegen.
+        aps-environment: development

@@ -125,6 +125,24 @@ actor HealthKitManager {
         .irregularHeartRhythmEvent,
     ]
 
+    /// HealthKit Clinical Records (FHIR). Sbloccato dal paid Apple Developer
+    /// Program tramite entitlement `com.apple.developer.healthkit.access`
+    /// con valore `health-records`. Sono READ-ONLY: l'app non puo' scrivere
+    /// nelle cartelle cliniche, ne' modificarle. In Italia la disponibilita'
+    /// e' bassa (i provider FHIR su Salute sono prevalentemente US/CA), ma
+    /// l'utente puo' anche inserire record manualmente da Salute (allergie,
+    /// vaccinazioni, farmaci).
+    static let clinicalTypes: [HKClinicalTypeIdentifier] = [
+        .allergyRecord,
+        .conditionRecord,
+        .immunizationRecord,
+        .labResultRecord,
+        .medicationRecord,
+        .procedureRecord,
+        .vitalSignRecord,
+        .coverageRecord,
+    ]
+
     private var allReadTypes: Set<HKObjectType> {
         var types = Set<HKObjectType>()
 
@@ -144,6 +162,17 @@ actor HealthKitManager {
         // GPS routes for outdoor workouts (HKWorkoutRoute series). Required to
         // read CLLocation points via HKWorkoutRouteQuery for the dashboard map.
         types.insert(HKSeriesType.workoutRoute())
+
+        // Clinical Records (FHIR): read-only. Aggiunti all'authorization
+        // request cosi' il popup di Salute include la sezione "Cartelle
+        // cliniche". Senza paid Developer Program + entitlement
+        // `healthkit.access`, queste chiamate vengono ignorate (fail
+        // silenzioso) e i fetch ritornano array vuoti.
+        for identifier in Self.clinicalTypes {
+            if let type = HKClinicalType.clinicalType(forIdentifier: identifier) {
+                types.insert(type)
+            }
+        }
 
         return types
     }
@@ -318,6 +347,107 @@ actor HealthKitManager {
         guard let sample = samples.first else { return false }
         try await healthStore.delete(sample)
         return true
+    }
+
+    /// Fetch dei `HKClinicalRecord` per un identifier specifico. Ritorna
+    /// payload pronti da serializzare lato API. Niente anchor: i record
+    /// clinici sono pochi (raramente >100/tipo) ed eventualmente
+    /// aggiornati retroattivamente dal provider — re-fetch full ogni sync
+    /// e UPSERT lato backend e' piu' semplice di gestire un anchor.
+    func fetchClinicalRecords(
+        identifier: HKClinicalTypeIdentifier
+    ) async throws -> [ClinicalRecordPayload] {
+        guard let type = HKClinicalType.clinicalType(forIdentifier: identifier) else {
+            return []
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: type,
+                predicate: nil,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                let records = (samples as? [HKClinicalRecord]) ?? []
+                let payloads: [ClinicalRecordPayload] = records.compactMap { rec in
+                    guard let fhir = rec.fhirResource else {
+                        // Senza fhirResource non abbiamo nulla da inviare:
+                        // skip silenzioso (raro — capita solo per record
+                        // mal-formati lato provider).
+                        return nil
+                    }
+                    var fhirObject: [String: Any]? = nil
+                    if let obj = try? JSONSerialization.jsonObject(with: fhir.data) as? [String: Any] {
+                        fhirObject = obj
+                    }
+                    let displayName = Self.extractDisplayName(fromFhir: fhirObject)
+                    return ClinicalRecordPayload(
+                        hkUUID: rec.uuid.uuidString,
+                        category: identifier.rawValue,
+                        resourceType: Self.fhirResourceTypeString(fhir.resourceType),
+                        sourceName: Self.normalizedSourceName(rec.sourceRevision.source.name),
+                        sourceURL: fhir.sourceURL?.absoluteString,
+                        displayName: displayName,
+                        startDate: rec.startDate,
+                        fhirJSON: fhirObject ?? [:]
+                    )
+                }
+                continuation.resume(returning: payloads)
+            }
+            self.healthStore.execute(query)
+        }
+    }
+
+    /// Best-effort: estrae un nome leggibile dal FHIR JSON. La maggior parte
+    /// delle risorse FHIR ha un `code.text` o un array `code.coding` con
+    /// `display`. Per Immunization c'e' `vaccineCode`, per MedicationRequest
+    /// c'e' `medicationCodeableConcept`, ecc. Diamo priorita' al campo piu'
+    /// comune (`code.text`) e cascade verso le strutture piu' specifiche.
+    private static func extractDisplayName(fromFhir json: [String: Any]?) -> String? {
+        guard let json else { return nil }
+
+        // 1. code.text
+        if let code = json["code"] as? [String: Any] {
+            if let text = code["text"] as? String, !text.isEmpty { return text }
+            if let coding = code["coding"] as? [[String: Any]],
+               let first = coding.first,
+               let display = first["display"] as? String,
+               !display.isEmpty {
+                return display
+            }
+        }
+        // 2. vaccineCode (Immunization)
+        if let vc = json["vaccineCode"] as? [String: Any] {
+            if let text = vc["text"] as? String, !text.isEmpty { return text }
+            if let coding = vc["coding"] as? [[String: Any]],
+               let first = coding.first,
+               let display = first["display"] as? String,
+               !display.isEmpty {
+                return display
+            }
+        }
+        // 3. medicationCodeableConcept (MedicationRequest)
+        if let mc = json["medicationCodeableConcept"] as? [String: Any] {
+            if let text = mc["text"] as? String, !text.isEmpty { return text }
+            if let coding = mc["coding"] as? [[String: Any]],
+               let first = coding.first,
+               let display = first["display"] as? String,
+               !display.isEmpty {
+                return display
+            }
+        }
+        return nil
+    }
+
+    private static func fhirResourceTypeString(_ rt: HKFHIRResourceType) -> String? {
+        // HKFHIRResourceType e' un wrapper RawRepresentable con .rawValue di
+        // tipo String (es. "AllergyIntolerance"). Vale sia per la versione
+        // DSTU2 che R4. Cast per usabilita'.
+        return rt.rawValue
     }
 
     /// Maps a unit string (e.g. "kg", "kcal", "%") to HKUnit.

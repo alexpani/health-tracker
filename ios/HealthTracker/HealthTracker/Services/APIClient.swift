@@ -134,7 +134,29 @@ struct RoutePointPayload {
     }
 }
 
+/// HealthKit Clinical Record (FHIR) payload per POST /api/v1/clinical/batch.
+/// `fhirJSON` e' il payload FHIR completo deserializzato come dictionary
+/// (lo serializziamo di nuovo in JSON al POST). `displayName` e' estratto a
+/// fetch time da `code.text`/`code.coding[0].display`/`vaccineCode.text`/
+/// `medicationCodeableConcept.text` cosi' la dashboard non deve re-parsare.
+struct ClinicalRecordPayload {
+    let hkUUID: String
+    let category: String       // HKClinicalTypeIdentifier rawValue
+    let resourceType: String?  // FHIR resourceType (es. "AllergyIntolerance")
+    let sourceName: String?
+    let sourceURL: String?
+    let displayName: String?
+    let startDate: Date
+    let fhirJSON: [String: Any]
+}
+
 actor APIClient {
+    /// Singleton riutilizzabile per chiamate fuori dal contesto di
+    /// `SyncService` (es. registrazione APNs token dall'AppDelegate, check
+    /// connessione dalle View). Le instanze separate continuano a funzionare
+    /// — `URLSession` non condivide stato fra istanze, niente race.
+    static let shared = APIClient()
+
     private let session: URLSession
     private let dateFormatter: ISO8601DateFormatter
 
@@ -389,6 +411,65 @@ actor APIClient {
         struct Resp: Decodable { let logged: Bool }
         let body: [String: Any] = ["device_id": deviceID, "sample_count": sampleCount]
         let _: Resp = try await post(path: "/api/v1/sync/heartbeat", body: body)
+    }
+
+    /// Ingest batch di HealthKit Clinical Records (FHIR). Idempotente lato
+    /// server (UPSERT su `hk_uuid`). Ritorna count inseriti/aggiornati.
+    func postClinicalRecords(_ records: [ClinicalRecordPayload]) async throws -> (inserted: Int, updated: Int) {
+        struct Resp: Decodable {
+            let inserted: Int
+            let updated: Int
+            let total: Int
+        }
+        let body: [String: Any] = [
+            "device_id": deviceID,
+            "records": records.map { r in
+                var dict: [String: Any] = [
+                    "hk_uuid": r.hkUUID,
+                    "category": r.category,
+                    "start_date": dateFormatter.string(from: r.startDate),
+                    "fhir_json": r.fhirJSON,
+                ]
+                if let v = r.resourceType { dict["resource_type"] = v }
+                if let v = r.sourceName { dict["source_name"] = v }
+                if let v = r.sourceURL { dict["source_url"] = v }
+                if let v = r.displayName { dict["display_name"] = v }
+                return dict
+            },
+        ]
+        let resp: Resp = try await post(path: "/api/v1/clinical/batch", body: body)
+        return (inserted: resp.inserted, updated: resp.updated)
+    }
+
+    /// Registra (o aggiorna) il device APNs sul backend. Idempotente lato
+    /// server: la stessa `device_id` viene upserted. Chiamato
+    /// dall'AppDelegate ogni volta che iOS ci consegna un APNs token
+    /// (capita al primo launch dopo install, dopo reset network settings,
+    /// dopo TestFlight update). Errori loggati ma non sollevati: se il
+    /// backend e' irraggiungibile, riproveremo al prossimo launch.
+    /// `apnsEnv` viene determinato a build-time: development → sandbox,
+    /// release → production.
+    func registerDevice(apnsToken: String) async {
+        #if DEBUG
+        let env = "sandbox"
+        #else
+        let env = "production"
+        #endif
+        let bundleId = Bundle.main.bundleIdentifier ?? "com.alexpani.healthtracker.app"
+        let body: [String: Any] = [
+            "device_id": deviceID,
+            "apns_token": apnsToken,
+            "bundle_id": bundleId,
+            "apns_env": env,
+        ]
+        struct Resp: Decodable { let device_id: String }
+        do {
+            let _: Resp = try await post(path: "/api/v1/devices/register", body: body)
+        } catch {
+            // Niente retry esplicito qui — al prossimo launch l'AppDelegate
+            // ri-chiamera' registerForRemoteNotifications() e ritenteremo.
+            // Logging via os_log nel chiamante (AppDelegate).
+        }
     }
 
     func checkConnection() async -> Bool {

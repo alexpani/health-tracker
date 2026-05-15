@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models import DiarioHkSync, PendingWrite
 from app.routers.diario import auto_reconcile_if_due
 from app.schemas import ConfirmIn, FailIn, PendingWriteOut, WriteIn
+from app.services.apns import fire_and_forget_push_all
 
 router = APIRouter(prefix="/api/v1/write", tags=["write"])
 
@@ -55,6 +56,10 @@ async def create_write(body: WriteIn, db: AsyncSession = Depends(get_db)):
     db.add(row)
     await db.commit()
     await db.refresh(row)
+    # Trigger silent push: sveglia l'iPhone cosi' processa la coda subito
+    # invece di aspettare il prossimo HKObserver/SLC/BG task. Fire-and-forget,
+    # no-op se APNs non e' configurato o se nessun device e' registrato.
+    fire_and_forget_push_all("pending_write")
     return row
 
 

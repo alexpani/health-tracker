@@ -9,10 +9,29 @@ struct HealthTrackerApp: App {
     @Environment(\.scenePhase) private var scenePhase
     private let healthKitManager = HealthKitManager()
 
+    // Bridge UIKit per APNs silent push (token registration + push handler).
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     let modelContainer: ModelContainer
 
     init() {
         Self.logger.info("App init: starting")
+
+        // Wire-up APNs handlers PRIMA di tutto il resto: l'iOS puo' lanciare
+        // l'app via silent push gia' al cold launch — `pushHandler` deve
+        // essere settato prima che `didReceiveRemoteNotification` arrivi.
+        // `tokenHandler` invia al backend il token APNs ricevuto dal sistema
+        // tramite POST /api/v1/devices/register (idempotente).
+        let svcRef = syncService
+        AppDelegate.pushHandler = { [svcRef] in
+            // minInterval: 0 → bypassa il throttle. Il backend ci ha
+            // svegliato perche' ha lavoro per noi: non vogliamo dire "no
+            // skip, ho gia' fatto un sync 30s fa".
+            await svcRef.performQuickSync(minInterval: 0)
+        }
+        AppDelegate.tokenHandler = { token in
+            await APIClient.shared.registerDevice(apnsToken: token)
+        }
         do {
             modelContainer = try ModelContainer(for: SyncState.self)
         } catch {

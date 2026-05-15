@@ -27,9 +27,19 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-7}
       LAB_DOCUMENTS_DIR: /app/data/lab_documents
+      # --- APNs silent push ---
+      # Lasciare i 3 valori vuoti disabilita il push (le call diventano
+      # no-op silenziose). Per abilitare: APNs Auth Key da Apple Developer,
+      # `apns_key_path` punta al .p8 montato read-only nel volume sotto.
+      APNS_KEY_ID: ${APNS_KEY_ID:-}
+      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-com.alexpani.healthtracker.app}
+      APNS_KEY_PATH: /app/data/apns/AuthKey.p8
+      APNS_DEFAULT_ENV: ${APNS_DEFAULT_ENV:-sandbox}
     volumes:
       - ./alembic/versions:/app/alembic/versions
       - ./data/lab_documents:/app/data/lab_documents
+      - ./data/apns:/app/data/apns:ro
       - ./scripts:/app/scripts:ro
     depends_on:
       db:

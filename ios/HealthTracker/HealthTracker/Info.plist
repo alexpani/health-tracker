@@ -33,6 +33,8 @@
 	<string>Health Tracker needs access to your health data to sync it with your server.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Health Tracker writes to Apple Health the data entered from your web dashboard (body measurements and nutrition).</string>
+	<key>NSHealthClinicalHealthRecordsShareUsageDescription</key>
+	<string>Health Tracker legge le tue cartelle cliniche (allergie, vaccinazioni, lab, farmaci, procedure, vital signs) per archiviarle nel tuo server self-hosted e consultarle dalla dashboard.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Health Tracker uses significant location changes only as a wake-up signal so it can sync new health data in the background. No location data is stored or sent anywhere.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
@@ -47,6 +49,7 @@
 		<string>fetch</string>
 		<string>processing</string>
 		<string>location</string>
+		<string>remote-notification</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
