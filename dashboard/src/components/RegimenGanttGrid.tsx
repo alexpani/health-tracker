@@ -161,9 +161,17 @@ export function RegimenGanttGrid({
                     const barPos = calculateBarPosition(regimen, rangeStart, rangeEnd)
                     const isHovered = hoverRegimenId === regimen.id
                     const widthPct = 100 - barPos.left - barPos.right
-                    if (widthPct < 0) return null // fuori dal range visibile
+                    // Tolerance FP: per regimi con `start_date == end_date`
+                    // (eventi puntuali, durata 0), `left + right` puo'
+                    // essere ~100.0000001 in floating point e widthPct
+                    // leggermente negativo. NON sono fuori range —
+                    // `filterRegimensInRange` li ha gia' filtrati a monte,
+                    // quindi qui ci arrivano solo se intersecano. Skip solo
+                    // se davvero fuori (> 1% di slack).
+                    if (widthPct < -1) return null
+                    const safeWidthPct = Math.max(0, widthPct)
 
-                    const tooNarrow = widthPct < MIN_BAR_WIDTH_PCT
+                    const tooNarrow = safeWidthPct < MIN_BAR_WIDTH_PCT
                     const anchorRight = barPos.right < 0.01
 
                     const barStyle: React.CSSProperties = {}
