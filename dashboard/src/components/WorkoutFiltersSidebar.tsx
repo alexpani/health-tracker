@@ -155,7 +155,23 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
                 <button
                   key={y.year}
                   type="button"
-                  onClick={() => set("years", toggleList(value.years, y.year))}
+                  onClick={() => {
+                    const nextYears = toggleList(value.years, y.year)
+                    // Sincronizza Periodo: span dal 1 gen del min anno al 31 dic
+                    // del max anno (locale, poi ISO). Nessun anno = clear range.
+                    let start: string | undefined = value.start
+                    let end: string | undefined = value.end
+                    if (nextYears.length === 0) {
+                      start = undefined
+                      end = undefined
+                    } else {
+                      const min = Math.min(...nextYears)
+                      const max = Math.max(...nextYears)
+                      start = new Date(min, 0, 1, 0, 0, 0).toISOString()
+                      end = new Date(max, 11, 31, 23, 59, 59, 999).toISOString()
+                    }
+                    onChange({ ...value, years: nextYears, start, end })
+                  }}
                   className={`text-xs px-2 py-1 rounded-md border ${
                     sel ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-accent"
                   }`}
