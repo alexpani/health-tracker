@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { useMemo, useState } from "react"
+import { ChevronDown, ChevronRight } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart"
@@ -59,6 +60,7 @@ export function TypeBrowser({ title, subtitle, types, extrasByType }: Props) {
   const [range, setRange] = useState<TimeRange>("30d")
   const [aggregation, setAggregation] = useState<Aggregation>(suggestAggregation("30d"))
   const [advanced, setAdvanced] = useState<AdvancedFilters>({})
+  const [samplesOpen, setSamplesOpen] = useState(false)
 
   const dates = useMemo(() => timeRangeToDates(range), [range])
   // Advanced filter period overrides the preset range when set
@@ -113,7 +115,7 @@ export function TypeBrowser({ title, subtitle, types, extrasByType }: Props) {
     value_min: advanced.value_min,
     value_max: advanced.value_max,
     limit: 100,
-  })
+  }, samplesOpen)
 
   const meta = getMeta(activeType)
 
@@ -200,15 +202,27 @@ export function TypeBrowser({ title, subtitle, types, extrasByType }: Props) {
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle>Ultimi 100 campioni</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {rawQuery.isLoading && <div className="h-32 animate-pulse bg-muted rounded" />}
-                {rawQuery.data && (
-                  <SampleTable type={t} samples={rawQuery.data.data as Sample[]} />
+              <button
+                type="button"
+                onClick={() => setSamplesOpen(o => !o)}
+                className="flex w-full items-center gap-2 p-6 text-left hover:bg-muted/40 transition-colors rounded-lg"
+                aria-expanded={samplesOpen}
+              >
+                {samplesOpen ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 )}
-              </CardContent>
+                <CardTitle>Ultimi 100 campioni</CardTitle>
+              </button>
+              {samplesOpen && (
+                <CardContent>
+                  {rawQuery.isLoading && <div className="h-32 animate-pulse bg-muted rounded" />}
+                  {rawQuery.data && (
+                    <SampleTable type={t} samples={rawQuery.data.data as Sample[]} />
+                  )}
+                </CardContent>
+              )}
             </Card>
 
             {extrasByType?.[t]}
