@@ -19,6 +19,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from zoneinfo import ZoneInfo
 
 from app.database import get_db
 from app.models import (
@@ -98,11 +99,18 @@ SLEEP_STAGE_NAMES = {
 }
 
 
+# Single-user self-hosted: bounds del giorno in fuso locale italiano.
+# Senza tz-aware bounds, datetime naive verrebbero interpretati come UTC e
+# i sample fra mezzanotte locale e mezzanotte UTC (2h in CEST) finirebbero
+# nel giorno sbagliato — incoerente con la pagina /sleep che bucketizza in
+# local time lato dashboard.
+LOCAL_TZ = ZoneInfo("Europe/Rome")
+
+
 def _local_day_bounds(d: date_cls) -> tuple[datetime, datetime]:
-    """[SOD, EOD) for the day. Naive datetimes — Postgres stores TIMESTAMPTZ
-    so it'll cast against UTC; the client picked the date in local TZ
-    already (URL is YYYY-MM-DD)."""
-    sod = datetime.combine(d, time.min)
+    """[SOD, EOD) in fuso Europe/Rome, tz-aware (Postgres lo confronta
+    correttamente contro le colonne TIMESTAMPTZ)."""
+    sod = datetime.combine(d, time.min, tzinfo=LOCAL_TZ)
     eod = sod + timedelta(days=1)
     return sod, eod
 
