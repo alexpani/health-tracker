@@ -1,17 +1,28 @@
 import type { Sample, Workout } from "@/lib/types"
 
-/** Risultato del Readiness Score: "domani posso allenarmi forte?".
+/** Risultato del Readiness Score: stima dello stato di recupero di
+ *  domani mattina dato cio' che sappiamo oggi.
  *
  *  Combina:
- *  - **Recupero oggi** (peso 0.4): stato autonomico attuale via HRV/RHR/sleep
- *    rispetto al baseline. Calcolato a monte da `computeRecoveryScore`.
- *  - **Carico settimanale (ACWR)** (peso 0.4): rapporto Acute:Chronic Workload.
- *    7g acuto / media (28g/4) cronica. Zona "sweet" 0.8–1.3.
+ *  - **Stato attuale** (peso 0.35): recupero misurato stamattina via
+ *    HRV/RHR/RR/SpO2 della notte appena passata + qualita' del sonno
+ *    (gia' calcolato da `computeRecoveryScore`). Rappresenta la "base
+ *    di partenza" per la notte di stanotte.
+ *  - **Carico settimanale (ACWR)** (peso 0.3): rapporto Acute:Chronic
+ *    Workload. 7g acuto / media (28g/4) cronica. Zona "sweet" 0.8-1.3.
  *    Sopra 1.5 = zona di infortunio (Gabbett 2016, Hulin 2014).
- *  - **Trend HRV** (peso 0.2): pendenza lineare degli ultimi 7g.
- *    HRV in calo monotono = warning, indipendentemente dal valore di oggi.
+ *  - **Sonno previsto stanotte** (peso 0.2): mediana degli score di
+ *    sonno delle ultime 7 notti, usata come stima conservativa dello
+ *    score di stanotte (assume pattern stabile). Confrontata col
+ *    baseline 30g.
+ *  - **Trend HRV** (peso 0.15): pendenza lineare degli ultimi 7g.
+ *    HRV in calo monotono = warning, indipendentemente dal valore.
  *
  *  Se un segnale manca, i pesi vengono rinormalizzati (badge "parziale").
+ *
+ *  NB: la previsione "domani" e' onesta solo nella misura in cui la
+ *  notte di stanotte assomiglia alla mediana recente. Non sostituisce
+ *  il ri-controllo dello score al risveglio.
  */
 
 export interface ReadinessReason {
@@ -29,10 +40,24 @@ export interface ReadinessResult {
   acuteKcal: number      // ultimi 7g
   chronicKcalWeekly: number  // media settimanale ultimi 28g
   hrvSlopePerDay: number | null
+  /** Stima dello sleep score di stanotte (mediana ultime 7 notti, se disponibili). */
+  predictedSleepScore: number | null
+  sleepBaselineMean: number | null
   partial: boolean
 }
 
 function mean(xs: number[]): number { return xs.reduce((a, b) => a + b, 0) / xs.length }
+function stdev(xs: number[]): number {
+  if (xs.length < 2) return 0
+  const m = mean(xs)
+  return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / (xs.length - 1))
+}
+function median(xs: number[]): number {
+  const sorted = [...xs].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+function normFromZ(z: number): number { return Math.max(0, Math.min(1, 0.5 + z / 4)) }
 
 /** Pendenza lineare (least squares) di un array di valori indicizzati 0..n-1. */
 function slope(ys: number[]): number {
@@ -87,6 +112,7 @@ export function computeReadiness(
   todayRecoveryScore: number | null,
   workouts: Workout[],
   hrvSamples: Sample[],
+  recentSleepScores: number[],
 ): ReadinessResult {
   const todayDate = new Date(`${today}T12:00:00`)
 
@@ -120,8 +146,8 @@ export function computeReadiness(
   if (chronicWeekly >= 100) {
     acwr = acuteKcal / chronicWeekly
     const sub = acwrToScore(acwr)
-    weighted += sub * 0.4
-    totalWeight += 0.4
+    weighted += sub * 0.3
+    totalWeight += 0.3
     if (acwr > 1.5) reasons.push({
       kind: "bad",
       text: `Carico settimanale alto (ACWR ${acwr.toFixed(2)}, zona di rischio infortuni)`,
@@ -142,15 +168,49 @@ export function computeReadiness(
     reasons.push({ kind: "ok", text: "Nessun carico recente registrato" })
   }
 
-  // Today recovery
+  // Stato attuale (recupero misurato stamattina)
   if (todayRecoveryScore != null) {
     const sub = todayRecoveryScore / 100
-    weighted += sub * 0.4
-    totalWeight += 0.4
-    if (todayRecoveryScore >= 75) reasons.push({ kind: "ok", text: `Recupero di oggi alto (${todayRecoveryScore}/100)` })
-    else if (todayRecoveryScore >= 60) reasons.push({ kind: "ok", text: `Recupero di oggi nella norma (${todayRecoveryScore}/100)` })
-    else if (todayRecoveryScore >= 45) reasons.push({ kind: "warn", text: `Recupero di oggi sotto la norma (${todayRecoveryScore}/100)` })
-    else reasons.push({ kind: "bad", text: `Recupero di oggi scarso (${todayRecoveryScore}/100)` })
+    weighted += sub * 0.35
+    totalWeight += 0.35
+    if (todayRecoveryScore >= 75) reasons.push({ kind: "ok", text: `Stato attuale alto (${todayRecoveryScore}/100)` })
+    else if (todayRecoveryScore >= 60) reasons.push({ kind: "ok", text: `Stato attuale nella norma (${todayRecoveryScore}/100)` })
+    else if (todayRecoveryScore >= 45) reasons.push({ kind: "warn", text: `Stato attuale sotto la norma (${todayRecoveryScore}/100)` })
+    else reasons.push({ kind: "bad", text: `Stato attuale scarso (${todayRecoveryScore}/100)` })
+  }
+
+  // Sonno previsto stanotte: mediana ultime 7 notti vs baseline 30g (mean+std)
+  let predictedSleep: number | null = null
+  let sleepBaselineMean: number | null = null
+  if (recentSleepScores.length >= 4) {
+    const last7 = recentSleepScores.slice(0, 7)
+    predictedSleep = Math.round(median(last7))
+    const baseline = recentSleepScores.slice(0, 30)
+    if (baseline.length >= 7) {
+      const b = mean(baseline)
+      const s = stdev(baseline) || 1
+      sleepBaselineMean = b
+      const sub = normFromZ((predictedSleep - b) / s)
+      weighted += sub * 0.2
+      totalWeight += 0.2
+      const delta = predictedSleep - b
+      if (delta >= 5) reasons.push({
+        kind: "ok",
+        text: `Sonno previsto stanotte ${predictedSleep}/100 (sopra la mediana di ${delta.toFixed(0)} punti)`,
+      })
+      else if (delta >= -5) reasons.push({
+        kind: "ok",
+        text: `Sonno previsto stanotte ${predictedSleep}/100 (in linea col baseline ${b.toFixed(0)})`,
+      })
+      else if (delta >= -10) reasons.push({
+        kind: "warn",
+        text: `Sonno previsto stanotte ${predictedSleep}/100 (sotto il baseline ${b.toFixed(0)})`,
+      })
+      else reasons.push({
+        kind: "bad",
+        text: `Sonno previsto stanotte ${predictedSleep}/100 (molto sotto il baseline ${b.toFixed(0)})`,
+      })
+    }
   }
 
   // HRV trend ultimi 7 giorni
@@ -170,8 +230,8 @@ export function computeReadiness(
   if (last7.length >= 4) {
     hrvSlopePerDay = slope(last7)
     const sub = hrvSlopeToScore(hrvSlopePerDay)
-    weighted += sub * 0.2
-    totalWeight += 0.2
+    weighted += sub * 0.15
+    totalWeight += 0.15
     if (hrvSlopePerDay <= -1) reasons.push({
       kind: "bad",
       text: `HRV in calo netto (${hrvSlopePerDay.toFixed(1)} ms/giorno negli ultimi 7g)`,
@@ -198,6 +258,9 @@ export function computeReadiness(
   return {
     score, label, color, reasons,
     acwr, acuteKcal, chronicKcalWeekly: chronicWeekly,
-    hrvSlopePerDay, partial,
+    hrvSlopePerDay,
+    predictedSleepScore: predictedSleep,
+    sleepBaselineMean,
+    partial,
   }
 }

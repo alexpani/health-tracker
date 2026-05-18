@@ -74,7 +74,9 @@ export function ReadinessCard() {
     }
     const recovery = computeRecoveryScore(todayISO, hrvSamples, rhrSamples, rrSamples, spo2Samples, todaySleepScore, sleepBaseline)
 
-    return computeReadiness(todayISO, recovery?.score ?? null, workoutsQ.data, hrvSamples)
+    // sleepBaseline e' gia' ordinato most-recent-first (loop k=1..30) e
+    // contiene solo notti con score valido: perfetto per la mediana 7g.
+    return computeReadiness(todayISO, recovery?.score ?? null, workoutsQ.data, hrvSamples, sleepBaseline)
   }, [hrvQ.data, rhrQ.data, rrQ.data, spo2Q.data, sleepQ.data, workoutsQ.data, todayISO])
 
   const loading = hrvQ.isLoading || rhrQ.isLoading || rrQ.isLoading || spo2Q.isLoading || sleepQ.isLoading || workoutsQ.isLoading
@@ -82,9 +84,9 @@ export function ReadinessCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Pronto per domani?</CardTitle>
+        <CardTitle>Stima recupero domani</CardTitle>
         <CardDescription>
-          Combina recupero attuale, carico settimanale (ACWR) e trend HRV per stimare se sei pronto a un allenamento intenso
+          Combina stato attuale, carico settimanale (ACWR), trend HRV e una stima statistica del sonno di stanotte (mediana ultime 7 notti) per anticipare lo stato di domani mattina
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -118,23 +120,30 @@ export function ReadinessCard() {
               ))}
             </ul>
 
-            <div className="pt-2 border-t grid grid-cols-3 gap-3 text-xs">
+            <div className="pt-2 border-t grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
               <div>
                 <div className="text-muted-foreground">Carico 7g</div>
                 <div className="font-medium tabular-nums">{Math.round(result.acuteKcal)} kcal</div>
               </div>
               <div>
-                <div className="text-muted-foreground">Media settimanale 28g</div>
+                <div className="text-muted-foreground">Media sett. 28g</div>
                 <div className="font-medium tabular-nums">{Math.round(result.chronicKcalWeekly)} kcal</div>
               </div>
               <div>
                 <div className="text-muted-foreground">ACWR</div>
                 <div className="font-medium tabular-nums">{result.acwr != null ? result.acwr.toFixed(2) : "—"}</div>
               </div>
+              <div>
+                <div className="text-muted-foreground">Sonno stimato</div>
+                <div className="font-medium tabular-nums">
+                  {result.predictedSleepScore != null ? `${result.predictedSleepScore}/100` : "—"}
+                </div>
+              </div>
             </div>
 
             <p className="text-[10px] text-muted-foreground">
-              ACWR sweet spot 0.8–1.3 (Gabbett 2016, Hulin 2014). Carico misurato in kcal totali dei workout.
+              ACWR sweet spot 0.8–1.3 (Gabbett 2016, Hulin 2014). Sonno stimato = mediana ultime 7 notti.
+              La previsione non sostituisce il controllo dello score al risveglio.
             </p>
           </div>
         )}
