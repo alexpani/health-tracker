@@ -179,8 +179,10 @@ export default function Day() {
               <VitalsCard data={data} />
               <NutritionCard data={data} />
               <SleepCard data={data} />
-              <WorkoutsCard data={data} />
-              <StretchingCard date={date} />
+              <div className="flex flex-col gap-3">
+                <WorkoutsCard data={data} />
+                <StretchingCard date={date} />
+              </div>
               <LabCard data={data} />
               <RegimensCard
                 data={data}
