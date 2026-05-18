@@ -7,8 +7,8 @@ import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart"
 import { SyncButton } from "@/components/SyncButton"
 import {
   useCategories,
+  useDailyStats,
   useLatest,
-  useSamples,
   useStretchingSessions,
   useSyncSessions,
   useSyncStatus,
@@ -31,33 +31,43 @@ export default function Home() {
     const startOf36h = new Date(now.getTime() - 36 * 3600_000)
     const yesterday = new Date(now)
     yesterday.setDate(now.getDate() - 1)
+    const weekAgo = new Date(today)
+    weekAgo.setDate(today.getDate() - 6) // 7 giorni inclusi oggi
+    const ymd = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
     return {
       todayIso: today.toISOString(),
       startOfWeekIso: startOfWeek.toISOString(),
       startOf36hIso: startOf36h.toISOString(),
       nowIso: now.toISOString(),
-      yesterdayYmd: `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`,
-      todayYmd: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
+      yesterdayYmd: ymd(yesterday),
+      todayYmd: ymd(now),
+      weekAgoYmd: ymd(weekAgo),
     }
   }, [])
 
-  const steps = useSamples({
-    type: "HKQuantityTypeIdentifierStepCount",
-    start: dateRefs.todayIso,
-    aggregation: "daily",
-  })
-  const activeCal = useSamples({
-    type: "HKQuantityTypeIdentifierActiveEnergyBurned",
-    start: dateRefs.todayIso,
-    aggregation: "daily",
-  })
+  // Passi e calorie attive: stessa fonte di /activity (daily_stats =
+  // HKStatisticsCollectionQuery), che applica il dedup proprietario di
+  // Apple fra Watch e iPhone. Sommare i raw `health_samples` come faceva
+  // prima la Home produceva totali piu' alti perche' contava entrambe le
+  // sorgenti.
+  const steps = useDailyStats(
+    "HKQuantityTypeIdentifierStepCount",
+    dateRefs.todayYmd,
+    dateRefs.todayYmd,
+  )
+  const activeCal = useDailyStats(
+    "HKQuantityTypeIdentifierActiveEnergyBurned",
+    dateRefs.todayYmd,
+    dateRefs.todayYmd,
+  )
   const latestWeight = useLatest("HKQuantityTypeIdentifierBodyMass")
 
-  const stepsWeek = useSamples({
-    type: "HKQuantityTypeIdentifierStepCount",
-    start: dateRefs.startOfWeekIso,
-    aggregation: "daily",
-  })
+  const stepsWeek = useDailyStats(
+    "HKQuantityTypeIdentifierStepCount",
+    dateRefs.weekAgoYmd,
+    dateRefs.todayYmd,
+  )
 
   const workouts = useWorkouts({})
   const status = useSyncStatus()
@@ -78,12 +88,22 @@ export default function Home() {
   const strDay = useStretchingSessions(dateRefs.yesterdayYmd, dateRefs.todayYmd)
   const recentStretch = useMemo(() => pickRecentStretch(strDay.data ?? []), [strDay.data])
 
-  const stepsTodayTotal = steps.data?.data?.[0] && "avg" in steps.data.data[0]
-    ? (steps.data.data[0] as any).avg * (steps.data.data[0] as any).count
-    : 0
-  const calTodayTotal = activeCal.data?.data?.[0] && "avg" in activeCal.data.data[0]
-    ? (activeCal.data.data[0] as any).avg * (activeCal.data.data[0] as any).count
-    : 0
+  const stepsTodayTotal = steps.data?.[0]?.value ?? 0
+  const calTodayTotal = activeCal.data?.[0]?.value ?? 0
+
+  // daily_stats → AggregatedPoint per il chart settimanale (la barra
+  // mostra il totale giornaliero, quindi sum=value e count=1 bastano).
+  const stepsWeekChart = useMemo(() => {
+    const points = stepsWeek.data ?? []
+    return points.map(p => ({
+      period_start: p.date,
+      avg: p.value,
+      sum: p.value,
+      min: p.value,
+      max: p.value,
+      count: 1,
+    }))
+  }, [stepsWeek.data])
 
   return (
     <div className="space-y-6">
@@ -178,10 +198,10 @@ export default function Home() {
             <CardTitle className="text-base">Passi ultimi 7 giorni</CardTitle>
           </CardHeader>
           <CardContent>
-            {stepsWeek.data && (
+            {stepsWeekChart.length > 0 && (
               <TimeSeriesChart
                 type="HKQuantityTypeIdentifierStepCount"
-                data={stepsWeek.data.data}
+                data={stepsWeekChart}
                 aggregation="daily"
                 chartType="bar"
                 height={180}
