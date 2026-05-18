@@ -1,47 +1,45 @@
 import type { Sample } from "@/lib/types"
 
-/** Score di recupero giornaliero (0-100) basato sui biomarker NOTTURNI.
+/** Stato di recupero "evidence-based": tre flag indipendenti che derivano
+ *  da soglie supportate dalla letteratura sportiva, invece di una media
+ *  pesata di z-score (che e' un'euristica come quella di Bevel/Whoop/Oura).
  *
- *  Allineato all'approccio Bevel: ogni segnale viene preso solo nella
- *  finestra di sonno (22:00 ieri → 10:00 oggi, ora locale) per evitare
- *  contaminazione da letture diurne (es. Breathe HRV durante il giorno
- *  gonfia falsamente la metrica).
+ *  Segnali:
+ *  1. HRV rolling 7g vs baseline 60g — z-score con saturazione ±1σ:
+ *     Plews 2013 ("Heart rate variability in elite triathletes"),
+ *     Buchheit 2014. Rolling 7g elimina il rumore quotidiano dell'HRV
+ *     notturna (±20%); baseline 60g e' la finestra raccomandata.
+ *  2. FC a riposo vs baseline 60g — soglie operative:
+ *     Achten & Jeukendrup 2003. +5 bpm dal baseline e' il marker di
+ *     stress/malattia incipiente.
+ *  3. Streak HRV decrescente consecutiva — Plews 2013, Stanley 2013:
+ *     3+ giorni consecutivi con HRV sotto il baseline = warning,
+ *     indipendentemente dal valore assoluto.
  *
- *  Cinque componenti, pesati e confrontati col baseline rolling 30g:
- *  - HRV SDNN notturna (peso 0.35) — marker autonomico principale
- *  - FC a riposo (peso 0.25) — Apple Watch ne scrive 1/giorno a mezzanotte
- *  - Frequenza respiratoria notturna (peso 0.15) — basso = meglio
- *  - Saturazione O2 notturna (peso 0.10) — alto = meglio
- *  - Sleep score (peso 0.15) — qualita' del sonno via computeSleepScore
- *
- *  Se un segnale manca, i pesi degli altri sono rinormalizzati (badge
- *  "parziale"). Se mancano tutti torna null.
+ *  Verdetto = peggior flag (RED -> "Riposo", AMBER -> "Cauto",
+ *  tutti GREEN -> "Pronto"). Niente score 0-100, niente media pesata.
  */
 
-export interface RecoveryComponent {
-  key: "hrv" | "rhr" | "rr" | "spo2" | "sleep"
+export type FlagStatus = "green" | "amber" | "red"
+
+export interface RecoveryFlag {
+  key: "hrv_rolling" | "rhr_delta" | "hrv_streak"
   label: string
   value: string
   baseline: string
-  zOrPct: string
-  contrib: number   // 0..1
+  detail: string
+  status: FlagStatus
+  /** Punti recenti per sparkline (most-recent-last). */
+  spark?: number[]
 }
 
-export interface RecoveryScoreResult {
-  score: number
-  label: string
+export interface RecoveryStatus {
+  verdict: "Pronto" | "Cauto" | "Riposo"
   color: string
-  components: RecoveryComponent[]
+  flags: RecoveryFlag[]
+  /** True se uno o piu' flag non sono valutabili per dati insufficienti. */
   partial: boolean
 }
-
-const WEIGHTS = {
-  hrv: 0.35,
-  rhr: 0.25,
-  rr: 0.15,
-  spo2: 0.10,
-  sleep: 0.15,
-} as const
 
 function mean(xs: number[]): number { return xs.reduce((a, b) => a + b, 0) / xs.length }
 function stdev(xs: number[]): number {
@@ -49,7 +47,6 @@ function stdev(xs: number[]): number {
   const m = mean(xs)
   return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / (xs.length - 1))
 }
-function normFromZ(z: number): number { return Math.max(0, Math.min(1, 0.5 + z / 4)) }
 
 function localISODate(d: Date): string {
   const y = d.getFullYear()
@@ -58,24 +55,16 @@ function localISODate(d: Date): string {
   return `${y}-${m}-${dd}`
 }
 
-/** Per ogni "giorno di risveglio" D, ritorna i sample nella finestra
- *  notturna [D-1 22:00, D 10:00) ora locale. Media i valori dentro la
- *  finestra. Restituisce mappa `YYYY-MM-DD` -> avg. */
-function nightlyAverage(samples: Sample[]): Map<string, number> {
+/** Riduce i sample alla "finestra notturna" del giorno di risveglio D:
+ *  [D-1 22:00, D 10:00 ora locale). Ritorna map giorno → media valori. */
+export function nightlyAverage(samples: Sample[]): Map<string, number> {
   const buckets = new Map<string, number[]>()
   for (const s of samples) {
     const d = new Date(s.start_date)
     const h = d.getHours()
-    // Se il sample e' fra le 22:00 e le 23:59, appartiene alla notte di domani
-    // Se e' fra le 00:00 e le 09:59, appartiene alla notte di oggi
-    // Altrimenti (10:00-21:59): sample diurno, ignorato
     let nightDay: Date | null = null
-    if (h >= 22) {
-      nightDay = new Date(d)
-      nightDay.setDate(nightDay.getDate() + 1)
-    } else if (h < 10) {
-      nightDay = new Date(d)
-    }
+    if (h >= 22) { nightDay = new Date(d); nightDay.setDate(nightDay.getDate() + 1) }
+    else if (h < 10) { nightDay = new Date(d) }
     if (!nightDay) continue
     const key = localISODate(nightDay)
     const arr = buckets.get(key)
@@ -86,124 +75,125 @@ function nightlyAverage(samples: Sample[]): Map<string, number> {
   return out
 }
 
-interface ComponentInput {
-  key: RecoveryComponent["key"]
-  label: string
-  weight: number
-  /** true se valori bassi sono "meglio" (es. RHR, RR). */
-  lowerIsBetter: boolean
-  /** Unita' per il formatting. */
-  unit: string
-  /** Cifre decimali da mostrare. */
-  digits: number
-  /** Moltiplicatore per il display (es. SpO2 backend serve 0-1, mostro 0-100). */
-  displayMultiplier?: number
-  daily: Map<string, number>
+/** Helper: estrae i valori giornalieri ordinati (most-recent-first) per N
+ *  giorni fino a `today`, escludendo quelli senza dato. */
+function valuesUpTo(daily: Map<string, number>, today: string, days: number): number[] {
+  const out: number[] = []
+  const start = new Date(`${today}T12:00:00`)
+  for (let k = 0; k < days; k++) {
+    const d = new Date(start); d.setDate(d.getDate() - k)
+    const v = daily.get(localISODate(d))
+    if (v != null) out.push(v)
+  }
+  return out
 }
 
-function computeComponent(
-  inp: ComponentInput,
-  today: string,
-  baselineDays: string[],
-): { contrib: number; weight: number; comp: RecoveryComponent } | null {
-  const todayVal = inp.daily.get(today)
-  const base = baselineDays.map(d => inp.daily.get(d)).filter((v): v is number => v != null)
-  if (todayVal == null || base.length < 7) return null
-  const b = mean(base)
-  const s = stdev(base) || 1
-  const rawZ = (todayVal - b) / s
-  const z = inp.lowerIsBetter ? -rawZ : rawZ
-  const sub = normFromZ(z)
-  const deltaPct = ((todayVal - b) / b) * 100
-  const mult = inp.displayMultiplier ?? 1
+/** Flag 1: HRV rolling 7g vs baseline 60g (Plews 2013).
+ *  GREEN se rolling >= baseline_mean - 0.5σ, AMBER fra -0.5 e -1σ,
+ *  RED se rolling < -1σ. */
+function flagHrvRolling(hrvDaily: Map<string, number>, today: string): RecoveryFlag | null {
+  const rolling = valuesUpTo(hrvDaily, today, 7)
+  const baseline = valuesUpTo(hrvDaily, today, 60)
+  if (rolling.length < 4 || baseline.length < 14) return null
+  const r = mean(rolling)
+  const b = mean(baseline)
+  const s = stdev(baseline) || 1
+  const z = (r - b) / s
+  let status: FlagStatus
+  let detail: string
+  if (z >= -0.5) { status = "green"; detail = `rolling 7g in linea col baseline 60g (z ${z.toFixed(2)})` }
+  else if (z >= -1) { status = "amber"; detail = `rolling 7g sotto il baseline (z ${z.toFixed(2)})` }
+  else { status = "red"; detail = `rolling 7g molto sotto il baseline (z ${z.toFixed(2)})` }
   return {
-    contrib: sub,
-    weight: inp.weight,
-    comp: {
-      key: inp.key,
-      label: inp.label,
-      value: `${(todayVal * mult).toFixed(inp.digits)} ${inp.unit}`.trim(),
-      baseline: `${(b * mult).toFixed(inp.digits)} ${inp.unit}`.trim(),
-      zOrPct: `${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(0)}%`,
-      contrib: sub,
-    },
+    key: "hrv_rolling",
+    label: "HRV rolling 7g vs baseline 60g",
+    value: `${r.toFixed(1)} ms`,
+    baseline: `${b.toFixed(1)} ± ${s.toFixed(1)} ms`,
+    detail,
+    status,
+    spark: rolling.slice().reverse(),
   }
 }
 
-export function computeRecoveryScore(
+/** Flag 2: FC a riposo vs baseline 60g (Achten & Jeukendrup 2003).
+ *  GREEN delta ≤ +3 bpm, AMBER fra +3 e +5, RED > +5 bpm. */
+function flagRhrDelta(rhrDaily: Map<string, number>, today: string): RecoveryFlag | null {
+  // RHR e' 1 sample al giorno: prendiamo il piu' recente disponibile entro 3gg
+  // per evitare il falso "manca" quando l'Apple Watch e' in ritardo a sincare.
+  const recent = valuesUpTo(rhrDaily, today, 3)
+  const baseline = valuesUpTo(rhrDaily, today, 60)
+  if (recent.length === 0 || baseline.length < 14) return null
+  const todayVal = recent[0]
+  const b = mean(baseline)
+  const delta = todayVal - b
+  let status: FlagStatus
+  let detail: string
+  if (delta <= 3) { status = "green"; detail = `RHR in linea col baseline (${delta >= 0 ? "+" : ""}${delta.toFixed(1)} bpm)` }
+  else if (delta <= 5) { status = "amber"; detail = `RHR sopra il baseline di +${delta.toFixed(1)} bpm` }
+  else { status = "red"; detail = `RHR molto sopra il baseline (+${delta.toFixed(1)} bpm, soglia stress 5 bpm)` }
+  return {
+    key: "rhr_delta",
+    label: "FC a riposo vs baseline 60g",
+    value: `${todayVal.toFixed(1)} bpm`,
+    baseline: `${b.toFixed(1)} bpm`,
+    detail,
+    status,
+    spark: valuesUpTo(rhrDaily, today, 14).slice().reverse(),
+  }
+}
+
+/** Flag 3: streak HRV consecutiva sotto baseline (Plews 2013, Stanley 2013).
+ *  GREEN se streak ≤ 2, AMBER fra 3 e 4, RED ≥ 5. */
+function flagHrvStreak(hrvDaily: Map<string, number>, today: string): RecoveryFlag | null {
+  const baseline = valuesUpTo(hrvDaily, today, 60)
+  if (baseline.length < 14) return null
+  const b = mean(baseline)
+  // Conta giorni consecutivi a partire da oggi con HRV < baseline_mean
+  let streak = 0
+  const start = new Date(`${today}T12:00:00`)
+  for (let k = 0; k < 14; k++) {
+    const d = new Date(start); d.setDate(d.getDate() - k)
+    const v = hrvDaily.get(localISODate(d))
+    if (v == null) break  // gap = interruzione streak
+    if (v < b) streak++
+    else break
+  }
+  let status: FlagStatus
+  let detail: string
+  if (streak <= 2) { status = "green"; detail = `${streak} giorni consecutivi sotto baseline (soglia 3)` }
+  else if (streak <= 4) { status = "amber"; detail = `${streak} giorni consecutivi sotto baseline (warning)` }
+  else { status = "red"; detail = `${streak} giorni consecutivi sotto baseline (overtraining/illness)` }
+  return {
+    key: "hrv_streak",
+    label: "Streak HRV sotto baseline",
+    value: `${streak} giorn${streak === 1 ? "o" : "i"}`,
+    baseline: `media 60g ${b.toFixed(1)} ms`,
+    detail,
+    status,
+  }
+}
+
+export function computeRecoveryStatus(
   today: string,
   hrvSamples: Sample[],
   rhrSamples: Sample[],
-  rrSamples: Sample[],
-  spo2Samples: Sample[],
-  sleepScoreToday: number | null,
-  sleepBaseline: number[] = [],
-): RecoveryScoreResult | null {
-  const todayDate = new Date(`${today}T12:00:00`)
-  const baselineDays: string[] = []
-  for (let k = 1; k <= 30; k++) {
-    const d = new Date(todayDate)
-    d.setDate(d.getDate() - k)
-    baselineDays.push(localISODate(d))
+): RecoveryStatus | null {
+  const hrvDaily = nightlyAverage(hrvSamples)
+  const rhrDaily = nightlyAverage(rhrSamples)
+
+  const flags: RecoveryFlag[] = []
+  for (const f of [flagHrvRolling(hrvDaily, today), flagRhrDelta(rhrDaily, today), flagHrvStreak(hrvDaily, today)]) {
+    if (f) flags.push(f)
   }
+  if (flags.length === 0) return null
 
-  const components: RecoveryComponent[] = []
-  let totalWeight = 0
-  let weighted = 0
+  const hasRed = flags.some(f => f.status === "red")
+  const hasAmber = flags.some(f => f.status === "amber")
+  let verdict: RecoveryStatus["verdict"]
+  let color: string
+  if (hasRed)        { verdict = "Riposo"; color = "text-rose-600" }
+  else if (hasAmber) { verdict = "Cauto";  color = "text-amber-600" }
+  else               { verdict = "Pronto"; color = "text-emerald-600" }
 
-  const inputs: ComponentInput[] = [
-    { key: "hrv", label: "HRV (SDNN) notturna", weight: WEIGHTS.hrv,  lowerIsBetter: false, unit: "ms",     digits: 1, daily: nightlyAverage(hrvSamples) },
-    { key: "rhr", label: "FC a riposo",         weight: WEIGHTS.rhr,  lowerIsBetter: true,  unit: "bpm",    digits: 1, daily: nightlyAverage(rhrSamples) },
-    { key: "rr",  label: "Frequenza respiratoria notturna", weight: WEIGHTS.rr,   lowerIsBetter: true, unit: "/min", digits: 1, daily: nightlyAverage(rrSamples) },
-    { key: "spo2",label: "Saturazione O2 notturna", weight: WEIGHTS.spo2, lowerIsBetter: false, unit: "%",   digits: 1, displayMultiplier: 100, daily: nightlyAverage(spo2Samples) },
-  ]
-
-  for (const inp of inputs) {
-    const r = computeComponent(inp, today, baselineDays)
-    if (!r) continue
-    weighted += r.contrib * r.weight
-    totalWeight += r.weight
-    components.push(r.comp)
-  }
-
-  // Sleep e' gia' 0-100; z-score relativo se ho baseline >= 7 notti,
-  // altrimenti fallback assoluto (40 = pessimo, 100 = perfetto).
-  if (sleepScoreToday != null) {
-    let sub: number, baselineStr: string, deltaStr: string
-    if (sleepBaseline.length >= 7) {
-      const b = mean(sleepBaseline)
-      const s = stdev(sleepBaseline) || 1
-      sub = normFromZ((sleepScoreToday - b) / s)
-      baselineStr = `${b.toFixed(0)}/100`
-      const delta = sleepScoreToday - b
-      deltaStr = `${delta >= 0 ? "+" : ""}${delta.toFixed(0)}`
-    } else {
-      sub = Math.max(0, Math.min(1, (sleepScoreToday - 40) / 60))
-      baselineStr = "n/d"
-      deltaStr = ""
-    }
-    weighted += sub * WEIGHTS.sleep
-    totalWeight += WEIGHTS.sleep
-    components.push({
-      key: "sleep",
-      label: "Sonno",
-      value: `${sleepScoreToday}/100`,
-      baseline: baselineStr,
-      zOrPct: deltaStr,
-      contrib: sub,
-    })
-  }
-
-  if (totalWeight === 0) return null
-
-  const score = Math.round((weighted / totalWeight) * 100)
-  const partial = totalWeight < 0.99
-
-  let label: string, color: string
-  if (score >= 75)      { label = "Pronto";  color = "text-emerald-600" }
-  else if (score >= 60) { label = "Buono";   color = "text-blue-600" }
-  else if (score >= 45) { label = "Cauto";   color = "text-amber-600" }
-  else                  { label = "Scarso";  color = "text-rose-600" }
-
-  return { score, label, color, components, partial }
+  return { verdict, color, flags, partial: flags.length < 3 }
 }

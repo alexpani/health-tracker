@@ -1,17 +1,8 @@
 import { useMemo } from "react"
-import { AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { useCategories, useSamples, useWorkouts } from "@/lib/queries"
-import { computeReadiness } from "@/lib/readinessScore"
-import { computeRecoveryScore } from "@/lib/recoveryScore"
-import { computeSleepScore } from "@/lib/sleepScore"
-import type { CategorySample, Sample } from "@/lib/types"
-
-const HRV = "HKQuantityTypeIdentifierHeartRateVariabilitySDNN"
-const RHR = "HKQuantityTypeIdentifierRestingHeartRate"
-const RR = "HKQuantityTypeIdentifierRespiratoryRate"
-const SPO2 = "HKQuantityTypeIdentifierOxygenSaturation"
-const SLEEP = "HKCategoryTypeIdentifierSleepAnalysis"
+import { useWorkouts } from "@/lib/queries"
+import { computeWorkloadStatus } from "@/lib/readinessScore"
+import type { FlagStatus } from "@/lib/recoveryScore"
 
 function localISODate(d: Date): string {
   const y = d.getFullYear()
@@ -20,107 +11,61 @@ function localISODate(d: Date): string {
   return `${y}-${m}-${dd}`
 }
 
+const STATUS_DOT: Record<FlagStatus, string> = {
+  green: "bg-emerald-500",
+  amber: "bg-amber-500",
+  red: "bg-rose-500",
+}
+const STATUS_TEXT: Record<FlagStatus, string> = {
+  green: "text-emerald-600",
+  amber: "text-amber-600",
+  red: "text-rose-600",
+}
+
 export function ReadinessCard() {
-  // Stabilizzazione: date cambiano solo a mezzanotte
-  const { todayISO, startISO, endISO, sleepStartISO, workoutStartISO } = useMemo(() => {
+  const { todayISO, startISO, endISO } = useMemo(() => {
     const t = new Date()
     const today = new Date(t.getFullYear(), t.getMonth(), t.getDate())
-    const start = new Date(today); start.setDate(start.getDate() - 31)
+    const start = new Date(today); start.setDate(start.getDate() - 35)
     const end = new Date(today); end.setDate(end.getDate() + 1)
-    const sleepStart = new Date(today); sleepStart.setDate(sleepStart.getDate() - 31); sleepStart.setHours(16, 0, 0, 0)
-    const workoutStart = new Date(today); workoutStart.setDate(workoutStart.getDate() - 35)
     return {
       todayISO: localISODate(today),
       startISO: start.toISOString(),
       endISO: end.toISOString(),
-      sleepStartISO: sleepStart.toISOString(),
-      workoutStartISO: workoutStart.toISOString(),
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [new Date().toDateString()])
 
-  const hrvQ = useSamples({ type: HRV, start: startISO, end: endISO, aggregation: "none", limit: 5000 })
-  const rhrQ = useSamples({ type: RHR, start: startISO, end: endISO, aggregation: "none", limit: 1000 })
-  const rrQ  = useSamples({ type: RR,  start: startISO, end: endISO, aggregation: "none", limit: 5000 })
-  const spo2Q = useSamples({ type: SPO2, start: startISO, end: endISO, aggregation: "none", limit: 5000 })
-  const sleepQ = useCategories(SLEEP, sleepStartISO, endISO)
-  const workoutsQ = useWorkouts({ start: workoutStartISO, end: endISO })
+  const workoutsQ = useWorkouts({ start: startISO, end: endISO })
 
   const result = useMemo(() => {
-    if (!hrvQ.data || !rhrQ.data || !rrQ.data || !spo2Q.data || !workoutsQ.data) return null
-    const hrvSamples = hrvQ.data.data as Sample[]
-    const rhrSamples = rhrQ.data.data as Sample[]
-    const rrSamples = rrQ.data.data as Sample[]
-    const spo2Samples = spo2Q.data.data as Sample[]
-
-    // Recovery score di oggi (riusa la stessa logica della card sopra)
-    const sleepByNight = new Map<string, CategorySample[]>()
-    for (const s of (sleepQ.data ?? []) as CategorySample[]) {
-      const end = new Date(s.end_date)
-      const night = new Date(end)
-      if (end.getHours() >= 16) night.setDate(night.getDate() + 1)
-      const key = localISODate(night)
-      const arr = sleepByNight.get(key)
-      if (arr) arr.push(s); else sleepByNight.set(key, [s])
-    }
-    const todayDate = new Date(`${todayISO}T12:00:00`)
-    const todaySleep = sleepByNight.get(todayISO) ?? []
-    const todaySleepScore = computeSleepScore(todaySleep)?.score ?? null
-    const sleepBaseline: number[] = []
-    for (let k = 1; k <= 30; k++) {
-      const d = new Date(todayDate); d.setDate(d.getDate() - k)
-      const s = computeSleepScore(sleepByNight.get(localISODate(d)) ?? [])
-      if (s) sleepBaseline.push(s.score)
-    }
-    const recovery = computeRecoveryScore(todayISO, hrvSamples, rhrSamples, rrSamples, spo2Samples, todaySleepScore, sleepBaseline)
-
-    // sleepBaseline e' gia' ordinato most-recent-first (loop k=1..30) e
-    // contiene solo notti con score valido: perfetto per la mediana 7g.
-    return computeReadiness(todayISO, recovery?.score ?? null, workoutsQ.data, hrvSamples, sleepBaseline)
-  }, [hrvQ.data, rhrQ.data, rrQ.data, spo2Q.data, sleepQ.data, workoutsQ.data, todayISO])
-
-  const loading = hrvQ.isLoading || rhrQ.isLoading || rrQ.isLoading || spo2Q.isLoading || sleepQ.isLoading || workoutsQ.isLoading
+    if (!workoutsQ.data) return null
+    return computeWorkloadStatus(todayISO, workoutsQ.data)
+  }, [workoutsQ.data, todayISO])
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Stima recupero domani</CardTitle>
+        <CardTitle>Carico settimanale</CardTitle>
         <CardDescription>
-          Combina stato attuale, carico settimanale (ACWR), trend HRV e una stima statistica del sonno di stanotte (mediana ultime 7 notti) per anticipare lo stato di domani mattina
+          Rapporto Acute:Chronic Workload (ACWR) — sweet spot 0.8-1.3 (Gabbett 2016, Hulin 2014)
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {loading ? (
-          <div className="h-24 animate-pulse bg-muted rounded" />
+        {workoutsQ.isLoading ? (
+          <div className="h-20 animate-pulse bg-muted rounded" />
         ) : !result ? (
           <p className="text-sm text-muted-foreground">Dati insufficienti.</p>
         ) : (
           <div className="space-y-4">
-            <div className="flex items-baseline justify-between">
-              <div>
-                <div className={`text-5xl font-bold tabular-nums ${result.color}`}>{result.score}</div>
-                <div className={`text-sm font-medium ${result.color}`}>{result.label}</div>
-              </div>
-              <div className="text-right text-xs text-muted-foreground">
-                <div>su 100</div>
-                {result.partial && (
-                  <div className="text-amber-600 mt-1">parziale</div>
-                )}
-              </div>
+            <div className="flex items-center gap-3">
+              <span className={`inline-block w-3 h-3 rounded-full flex-shrink-0 ${STATUS_DOT[result.status]}`} />
+              <div className={`text-2xl font-bold ${STATUS_TEXT[result.status]}`}>{result.verdict}</div>
             </div>
 
-            <ul className="space-y-1.5 pt-2 border-t">
-              {result.reasons.map((r, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm">
-                  {r.kind === "ok" && <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />}
-                  {r.kind === "warn" && <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />}
-                  {r.kind === "bad" && <AlertCircle className="h-4 w-4 text-rose-600 flex-shrink-0 mt-0.5" />}
-                  <span>{r.text}</span>
-                </li>
-              ))}
-            </ul>
+            <p className={`text-sm ${STATUS_TEXT[result.status]}`}>{result.detail}</p>
 
-            <div className="pt-2 border-t grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div className="pt-2 border-t grid grid-cols-3 gap-3 text-xs">
               <div>
                 <div className="text-muted-foreground">Carico 7g</div>
                 <div className="font-medium tabular-nums">{Math.round(result.acuteKcal)} kcal</div>
@@ -133,18 +78,7 @@ export function ReadinessCard() {
                 <div className="text-muted-foreground">ACWR</div>
                 <div className="font-medium tabular-nums">{result.acwr != null ? result.acwr.toFixed(2) : "—"}</div>
               </div>
-              <div>
-                <div className="text-muted-foreground">Sonno stimato</div>
-                <div className="font-medium tabular-nums">
-                  {result.predictedSleepScore != null ? `${result.predictedSleepScore}/100` : "—"}
-                </div>
-              </div>
             </div>
-
-            <p className="text-[10px] text-muted-foreground">
-              ACWR sweet spot 0.8–1.3 (Gabbett 2016, Hulin 2014). Sonno stimato = mediana ultime 7 notti.
-              La previsione non sostituisce il controllo dello score al risveglio.
-            </p>
           </div>
         )}
       </CardContent>

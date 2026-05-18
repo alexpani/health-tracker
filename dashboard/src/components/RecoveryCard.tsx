@@ -1,15 +1,11 @@
 import { useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { useCategories, useSamples } from "@/lib/queries"
-import { computeRecoveryScore, type RecoveryComponent } from "@/lib/recoveryScore"
-import { computeSleepScore } from "@/lib/sleepScore"
-import type { CategorySample, Sample } from "@/lib/types"
+import { useSamples } from "@/lib/queries"
+import { computeRecoveryStatus, type RecoveryFlag } from "@/lib/recoveryScore"
+import type { Sample } from "@/lib/types"
 
 const HRV = "HKQuantityTypeIdentifierHeartRateVariabilitySDNN"
 const RHR = "HKQuantityTypeIdentifierRestingHeartRate"
-const RR = "HKQuantityTypeIdentifierRespiratoryRate"
-const SPO2 = "HKQuantityTypeIdentifierOxygenSaturation"
-const SLEEP = "HKCategoryTypeIdentifierSleepAnalysis"
 
 function localISODate(d: Date): string {
   const y = d.getFullYear()
@@ -18,82 +14,52 @@ function localISODate(d: Date): string {
   return `${y}-${m}-${dd}`
 }
 
+const STATUS_DOT: Record<RecoveryFlag["status"], string> = {
+  green: "bg-emerald-500",
+  amber: "bg-amber-500",
+  red: "bg-rose-500",
+}
+const STATUS_TEXT: Record<RecoveryFlag["status"], string> = {
+  green: "text-emerald-600",
+  amber: "text-amber-600",
+  red: "text-rose-600",
+}
+
 export function RecoveryCard() {
-  // --- Date range: ultimi 30 giorni + oggi ---
-  // Stabilizzato per giorno locale (non per millisecondo) cosi' TanStack
-  // Query non re-fetcha ad ogni render col timestamp che cambia.
-  const { todayISO, startISO, endISO, sleepStartISO } = useMemo(() => {
+  // Servono ~75 giorni per coprire baseline 60g + qualche buffer.
+  const { todayISO, startISO, endISO } = useMemo(() => {
     const t = new Date()
     const today = new Date(t.getFullYear(), t.getMonth(), t.getDate())
-    const start = new Date(today)
-    start.setDate(start.getDate() - 31)
-    const end = new Date(today)
-    end.setDate(end.getDate() + 1)
-    const sleepStart = new Date(today)
-    sleepStart.setDate(sleepStart.getDate() - 31)
-    sleepStart.setHours(16, 0, 0, 0)
+    const start = new Date(today); start.setDate(start.getDate() - 75)
+    const end = new Date(today); end.setDate(end.getDate() + 1)
     return {
       todayISO: localISODate(today),
       startISO: start.toISOString(),
       endISO: end.toISOString(),
-      sleepStartISO: sleepStart.toISOString(),
     }
-    // Re-calcolato solo se cambia il giorno (key = data odierna ISO).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [new Date().toDateString()])
 
-  const hrvQ = useSamples({ type: HRV, start: startISO, end: endISO, aggregation: "none", limit: 5000 })
-  const rhrQ = useSamples({ type: RHR, start: startISO, end: endISO, aggregation: "none", limit: 1000 })
-  const rrQ  = useSamples({ type: RR,  start: startISO, end: endISO, aggregation: "none", limit: 5000 })
-  const spo2Q = useSamples({ type: SPO2, start: startISO, end: endISO, aggregation: "none", limit: 5000 })
-  const sleepQ = useCategories(SLEEP, sleepStartISO, endISO)
+  const hrvQ = useSamples({ type: HRV, start: startISO, end: endISO, aggregation: "none", limit: 10000 })
+  const rhrQ = useSamples({ type: RHR, start: startISO, end: endISO, aggregation: "none", limit: 2000 })
 
   const result = useMemo(() => {
-    if (!hrvQ.data || !rhrQ.data || !rrQ.data || !spo2Q.data) return null
-    const hrvSamples = hrvQ.data.data as Sample[]
-    const rhrSamples = rhrQ.data.data as Sample[]
-    const rrSamples = rrQ.data.data as Sample[]
-    const spo2Samples = spo2Q.data.data as Sample[]
+    if (!hrvQ.data || !rhrQ.data) return null
+    return computeRecoveryStatus(
+      todayISO,
+      hrvQ.data.data as Sample[],
+      rhrQ.data.data as Sample[],
+    )
+  }, [hrvQ.data, rhrQ.data, todayISO])
 
-    // Suddividi i sleep sample per "notte di risveglio": convenzione
-    // [D-1 16:00, D 16:00) = notte del giorno D. Un sample che finisce
-    // alle 03:00 appartiene al giorno stesso; uno che finisce alle 22:00
-    // (raro: sonnellino o turno) appartiene al giorno successivo.
-    const sleepByNight: Map<string, CategorySample[]> = new Map()
-    for (const s of (sleepQ.data ?? []) as CategorySample[]) {
-      const end = new Date(s.end_date)
-      const night = new Date(end)
-      if (end.getHours() >= 16) night.setDate(night.getDate() + 1)
-      const key = localISODate(night)
-      const arr = sleepByNight.get(key)
-      if (arr) arr.push(s); else sleepByNight.set(key, [s])
-    }
-
-    // Score di oggi e baseline
-    const todayDate = new Date(`${todayISO}T12:00:00`)
-    const todaySamples = sleepByNight.get(todayISO) ?? []
-    const todayScore = computeSleepScore(todaySamples)?.score ?? null
-
-    const baseline: number[] = []
-    for (let k = 1; k <= 30; k++) {
-      const d = new Date(todayDate)
-      d.setDate(d.getDate() - k)
-      const samples = sleepByNight.get(localISODate(d)) ?? []
-      const s = computeSleepScore(samples)
-      if (s) baseline.push(s.score)
-    }
-
-    return computeRecoveryScore(todayISO, hrvSamples, rhrSamples, rrSamples, spo2Samples, todayScore, baseline)
-  }, [hrvQ.data, rhrQ.data, rrQ.data, spo2Q.data, sleepQ.data, todayISO])
-
-  const loading = hrvQ.isLoading || rhrQ.isLoading || rrQ.isLoading || spo2Q.isLoading || sleepQ.isLoading
+  const loading = hrvQ.isLoading || rhrQ.isLoading
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Recupero stimato</CardTitle>
+        <CardTitle>Stato di recupero</CardTitle>
         <CardDescription>
-          Combina 5 biomarker notturni (HRV, FC a riposo, respirazione, SpO2, sonno) rispetto al baseline personale degli ultimi 30 giorni
+          Tre flag indipendenti su soglie validate dalla letteratura sportiva, non un punteggio aggregato
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -101,29 +67,26 @@ export function RecoveryCard() {
           <div className="h-24 animate-pulse bg-muted rounded" />
         ) : !result ? (
           <p className="text-sm text-muted-foreground">
-            Dati insufficienti per oggi: servono HRV o FC a riposo della notte appena passata + almeno 7 giorni di baseline.
+            Dati insufficienti: servono almeno ~2 settimane di HRV e FC a riposo per costruire il baseline.
           </p>
         ) : (
           <div className="space-y-4">
             <div className="flex items-baseline justify-between">
-              <div>
-                <div className={`text-5xl font-bold tabular-nums ${result.color}`}>{result.score}</div>
-                <div className={`text-sm font-medium ${result.color}`}>{result.label}</div>
-              </div>
-              <div className="text-right text-xs text-muted-foreground">
-                <div>su 100</div>
-                {result.partial && <div className="text-amber-600 mt-1">parziale ({result.components.length}/5 segnali)</div>}
-              </div>
+              <div className={`text-4xl font-bold ${result.color}`}>{result.verdict}</div>
+              {result.partial && (
+                <span className="text-xs text-amber-600">parziale ({result.flags.length}/3 flag)</span>
+              )}
             </div>
 
-            <div className="space-y-2 pt-2 border-t">
-              {result.components.map(c => (
-                <ComponentRow key={c.key} c={c} />
+            <div className="space-y-3 pt-2 border-t">
+              {result.flags.map(f => (
+                <FlagRow key={f.key} f={f} />
               ))}
             </div>
 
             <p className="text-[10px] text-muted-foreground">
-              Score relativo, non assoluto: confronta i tuoi valori di oggi col tuo baseline 30g. Saturazione a ±2σ.
+              HRV rolling 7g vs baseline 60g (Plews 2013); RHR vs baseline 60g, soglia +5 bpm (Achten 2003);
+              streak HRV consecutiva sotto baseline (Plews 2013, Stanley 2013). Verdetto = peggior flag.
             </p>
           </div>
         )}
@@ -132,31 +95,40 @@ export function RecoveryCard() {
   )
 }
 
-function ComponentRow({ c }: { c: RecoveryComponent }) {
-  const pct = Math.round(c.contrib * 100)
-  let barColor = "bg-rose-500"
-  if (c.contrib >= 0.7) barColor = "bg-emerald-500"
-  else if (c.contrib >= 0.5) barColor = "bg-blue-500"
-  else if (c.contrib >= 0.3) barColor = "bg-amber-500"
+function FlagRow({ f }: { f: RecoveryFlag }) {
   return (
-    <div className="text-xs">
-      <div className="flex justify-between items-baseline gap-2">
-        <span className="font-medium">{c.label}</span>
-        <span className="tabular-nums text-muted-foreground">
-          oggi <span className="text-foreground font-medium">{c.value}</span>
-          <span className="mx-1.5">·</span>
-          base <span className="text-foreground">{c.baseline}</span>
-          {c.zOrPct && (
-            <>
-              <span className="mx-1.5">·</span>
-              <span className={c.contrib >= 0.5 ? "text-emerald-600" : "text-rose-600"}>{c.zOrPct}</span>
-            </>
-          )}
-        </span>
-      </div>
-      <div className="h-1 bg-muted rounded-full overflow-hidden mt-1">
-        <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
+    <div className="text-sm">
+      <div className="flex items-start gap-2">
+        <span className={`inline-block w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 ${STATUS_DOT[f.status]}`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex justify-between items-baseline gap-2 flex-wrap">
+            <span className="font-medium">{f.label}</span>
+            <span className="tabular-nums text-foreground font-semibold">{f.value}</span>
+          </div>
+          <div className={`text-xs ${STATUS_TEXT[f.status]} mt-0.5`}>{f.detail}</div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            Baseline: {f.baseline}
+          </div>
+          {f.spark && f.spark.length >= 3 && <Sparkline values={f.spark} status={f.status} />}
+        </div>
       </div>
     </div>
+  )
+}
+
+function Sparkline({ values, status }: { values: number[]; status: RecoveryFlag["status"] }) {
+  const w = 120, h = 24
+  const min = Math.min(...values), max = Math.max(...values)
+  const range = max - min || 1
+  const points = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * w
+    const y = h - ((v - min) / range) * h
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(" ")
+  const stroke = status === "green" ? "#10b981" : status === "amber" ? "#f59e0b" : "#f43f5e"
+  return (
+    <svg width={w} height={h} className="mt-1.5 block">
+      <polyline points={points} fill="none" stroke={stroke} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   )
 }
