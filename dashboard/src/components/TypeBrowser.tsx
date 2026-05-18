@@ -51,12 +51,16 @@ interface Props {
   title: string
   subtitle?: string
   types: string[]
+  /** Tipo iniziale (default: primo dell'elenco). */
+  defaultType?: string
+  /** Contenuto extra renderizzato SOPRA il grafico, dopo i filtri. */
+  aboveByType?: Record<string, ReactNode>
   /** Contenuto extra renderizzato in coda al tab del tipo indicato. */
   extrasByType?: Record<string, ReactNode>
 }
 
-export function TypeBrowser({ title, subtitle, types, extrasByType }: Props) {
-  const [activeType, setActiveType] = useState(types[0])
+export function TypeBrowser({ title, subtitle, types, defaultType, aboveByType, extrasByType }: Props) {
+  const [activeType, setActiveType] = useState(defaultType && types.includes(defaultType) ? defaultType : types[0])
   const [range, setRange] = useState<TimeRange>("30d")
   const [aggregation, setAggregation] = useState<Aggregation>(suggestAggregation("30d"))
   const [advanced, setAdvanced] = useState<AdvancedFilters>({})
@@ -154,6 +158,8 @@ export function TypeBrowser({ title, subtitle, types, extrasByType }: Props) {
               <AggregationSelector value={aggregation} onChange={setAggregation} />
             </div>
             <FilterBar type={t} value={advanced} onChange={setAdvanced} />
+
+            {aboveByType?.[t]}
 
             <Card>
               <CardHeader>

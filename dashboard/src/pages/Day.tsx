@@ -17,6 +17,7 @@ import {
   BookOpen,
   Pencil,
   StretchHorizontal,
+  Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -30,6 +31,7 @@ import { CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/healthNo
 import { DayCalendarSidebar } from "@/components/DayCalendarSidebar"
 import { Hypnogram } from "@/components/charts/Hypnogram"
 import { SleepScoreCard } from "@/components/charts/SleepScoreCard"
+import { RecoveryWidget } from "@/components/RecoveryWidget"
 
 function todayLocal(): string {
   const d = new Date()
@@ -176,6 +178,11 @@ export default function Day() {
             />
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {date === today && (
+                <DayCard icon={Sparkles} title="Recupero">
+                  <RecoveryWidget />
+                </DayCard>
+              )}
               <ActivityCard data={data} />
               <BodyCard data={data} />
               <VitalsCard data={data} />

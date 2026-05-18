@@ -10,14 +10,17 @@ export default function Vitals() {
       title="Vitali"
       subtitle="Battito, pressione, saturazione e respirazione"
       types={CATEGORIES.vitals.types}
-      extrasByType={{
-        HKQuantityTypeIdentifierRestingHeartRate: <RestingHRTrainingOverlay />,
+      defaultType="HKQuantityTypeIdentifierHeartRateVariabilitySDNN"
+      aboveByType={{
         HKQuantityTypeIdentifierHeartRateVariabilitySDNN: (
           <div className="space-y-6">
             <RecoveryCard />
             <ReadinessCard />
           </div>
         ),
+      }}
+      extrasByType={{
+        HKQuantityTypeIdentifierRestingHeartRate: <RestingHRTrainingOverlay />,
       }}
     />
   )
