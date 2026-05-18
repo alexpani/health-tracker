@@ -16,6 +16,62 @@ function fmtDur(m: number): string {
   return h > 0 ? `${h}h ${mm.toString().padStart(2, "0")}m` : `${mm} min`
 }
 
+/** Riassunto fasi della notte selezionata: stesse righe del tooltip, ma
+ *  permanenti nella card dell'ipnogramma. */
+function SelectedNightBreakdown({
+  ymd,
+  chartData,
+}: {
+  ymd: string
+  chartData: Record<string, any>[]
+}) {
+  const row = chartData.find(d => {
+    const dt = new Date(String(d.day))
+    const k = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`
+    return k === ymd
+  })
+  if (!row) {
+    return (
+      <p className="text-xs text-muted-foreground">Nessun totale per questa notte.</p>
+    )
+  }
+  // Riusiamo la stessa logica del tooltip: fasi 2-5, totale = somma visibile.
+  const stages = [SLEEP_STAGES[2], SLEEP_STAGES[3], SLEEP_STAGES[4], SLEEP_STAGES[5]]
+  const present = stages
+    .map(s => ({ label: s.label, color: s.color, v: Number(row[s.label]) || 0 }))
+    .filter(x => x.v > 0)
+  const inBed = present.reduce((a, b) => a + b.v, 0)
+  const asleepLabels = [SLEEP_STAGES[3].label, SLEEP_STAGES[4].label, SLEEP_STAGES[5].label]
+  const asleep = present.filter(p => asleepLabels.includes(p.label)).reduce((a, b) => a + b.v, 0)
+  const pct = (v: number) => (inBed > 0 ? Math.round((v / inBed) * 100) : 0)
+
+  return (
+    <div className="text-sm space-y-1">
+      {present.map(p => (
+        <div key={p.label} className="flex items-center justify-between gap-3">
+          <span className="flex items-center gap-2">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: p.color }} />
+            {p.label}
+          </span>
+          <span className="tabular-nums">
+            {fmtDur(p.v)} <span className="text-muted-foreground">({pct(p.v)}%)</span>
+          </span>
+        </div>
+      ))}
+      <div className="mt-2 pt-2 border-t space-y-1">
+        <div className="flex items-center justify-between font-medium">
+          <span>Dormito</span>
+          <span className="tabular-nums">{fmtDur(asleep)}</span>
+        </div>
+        <div className="flex items-center justify-between text-muted-foreground">
+          <span>A letto</span>
+          <span className="tabular-nums">{fmtDur(inBed)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** Tooltip custom: mostra le singole fasi + totale "Dormito" (Core+Deep+REM,
  *  esclude Sveglio) e "A letto" (somma di tutte le fasi visibili). */
 function SleepTooltip({ active, payload, label }: any) {
@@ -166,8 +222,9 @@ export default function Sleep() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <Hypnogram date={selectedYmd} height={80} showEmpty />
+            <SelectedNightBreakdown ymd={selectedYmd} chartData={chartData} />
           </CardContent>
         </Card>
       )}
