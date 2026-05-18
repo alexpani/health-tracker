@@ -2,6 +2,7 @@ import { useMemo, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { TimeSeriesChart } from "@/components/charts/TimeSeriesChart"
+import { BloodPressureChart } from "@/components/charts/BloodPressureChart"
 import { SampleTable } from "@/components/SampleTable"
 import { FilterBar } from "@/components/FilterBar"
 import {
@@ -32,6 +33,16 @@ const DAILY_STATS_TYPES: ReadonlySet<string> = new Set([
 
 function isDailyStatsType(type: string): boolean {
   return DAILY_STATS_TYPES.has(type)
+}
+
+/** Pressione sistolica e diastolica si correlano per definizione: la
+ *  vista dedicata sovrappone le due serie sullo stesso asse mmHg. */
+const BP_TYPES: ReadonlySet<string> = new Set([
+  "HKQuantityTypeIdentifierBloodPressureSystolic",
+  "HKQuantityTypeIdentifierBloodPressureDiastolic",
+])
+function isBP(type: string): boolean {
+  return BP_TYPES.has(type)
 }
 
 interface Props {
@@ -149,26 +160,38 @@ export function TypeBrowser({ title, subtitle, types }: Props) {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {(useDailyStatsBranch ? dailyStatsQuery.isLoading : aggQuery.isLoading) && (
-                  <div className="h-72 animate-pulse bg-muted rounded" />
-                )}
-                {useDailyStatsBranch && dailyStatsQuery.data && (
-                  <TimeSeriesChart
-                    type={t}
-                    data={dailyStatsAsAggregated}
-                    aggregation="daily"
-                    chartType={chartType}
-                    height={320}
-                  />
-                )}
-                {!useDailyStatsBranch && aggQuery.data && (
-                  <TimeSeriesChart
-                    type={t}
-                    data={aggQuery.data.data}
+                {isBP(activeType) ? (
+                  <BloodPressureChart
+                    start={effectiveStart}
+                    end={effectiveEnd}
                     aggregation={aggregation}
-                    chartType={chartType}
+                    advanced={advanced}
                     height={320}
                   />
+                ) : (
+                  <>
+                    {(useDailyStatsBranch ? dailyStatsQuery.isLoading : aggQuery.isLoading) && (
+                      <div className="h-72 animate-pulse bg-muted rounded" />
+                    )}
+                    {useDailyStatsBranch && dailyStatsQuery.data && (
+                      <TimeSeriesChart
+                        type={t}
+                        data={dailyStatsAsAggregated}
+                        aggregation="daily"
+                        chartType={chartType}
+                        height={320}
+                      />
+                    )}
+                    {!useDailyStatsBranch && aggQuery.data && (
+                      <TimeSeriesChart
+                        type={t}
+                        data={aggQuery.data.data}
+                        aggregation={aggregation}
+                        chartType={chartType}
+                        height={320}
+                      />
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>
