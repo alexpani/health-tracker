@@ -282,7 +282,10 @@ async def _fetch_sleep(db: AsyncSession, d: date_cls) -> dict | None:
         return int(round(by_stage.get(stage, 0.0) / 60.0))
 
     in_bed = _min("in_bed")
-    asleep = _min("asleep_unspecified") + _min("core") + _min("deep") + _min("rem")
+    # Stage 1 (asleep_unspecified) e' un wrapper che copre l'intera notte e
+    # viene sovrascritto dai sample dettagliati Core/Deep/REM: sommarlo
+    # produce double-count rispetto alla pagina /sleep (che lo esclude).
+    asleep = _min("core") + _min("deep") + _min("rem")
     return {
         "in_bed_min": in_bed if in_bed > 0 else None,
         "asleep_min": asleep if asleep > 0 else None,

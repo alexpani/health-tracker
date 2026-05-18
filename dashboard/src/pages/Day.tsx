@@ -314,14 +314,26 @@ function ActivityCard({ data }: { data: DaySnapshot }) {
 function BodyCard({ data }: { data: DaySnapshot }) {
   const b = data.body
   const v = (x: { value: number } | null, frac = 1) => x ? fmt(x.value, frac) : "—"
+  // Misure "lente" (vita): mostrate solo se il sample piu' recente e' entro
+  // 30 giorni dal giorno selezionato — un dato di 2 anni fa non e'
+  // rappresentativo del giorno.
+  const recentEnough = (sample: { start_date: string } | null, days = 30) => {
+    if (!sample) return false
+    const [y, m, d] = data.date.split("-").map(Number)
+    const ref = new Date(y, m - 1, d).getTime()
+    const ts = new Date(sample.start_date).getTime()
+    return ref - ts <= days * 86_400_000
+  }
+  const waistOk = recentEnough(b.waist_m)
   return (
     <DayCard icon={Scale} title="Corpo">
       <StatRow label="Peso" value={v(b.weight_kg, 2)} sub="kg" />
       <StatRow label="BMI" value={v(b.bmi, 1)} />
       <StatRow label="Grasso" value={b.body_fat_pct ? fmt(b.body_fat_pct.value * 100, 1) : "—"} sub="%" />
       <StatRow label="Massa magra" value={v(b.lean_mass_kg, 2)} sub="kg" />
-      <StatRow label="Vita" value={b.waist_m ? fmt(b.waist_m.value * 100, 1) : "—"} sub="cm" />
-      <StatRow label="Altezza" value={b.height_m ? fmt(b.height_m.value * 100, 0) : "—"} sub="cm" />
+      {waistOk && b.waist_m && (
+        <StatRow label="Vita" value={fmt(b.waist_m.value * 100, 1)} sub="cm" />
+      )}
       <p className="text-[10px] text-muted-foreground mt-1">Ultimi valori al termine del giorno.</p>
     </DayCard>
   )
@@ -619,7 +631,12 @@ function RegimensCard({
     training: [],
     gear: [],
   }
-  for (const r of data.regimens_active) grouped[r.kind].push(r)
+  // Gear (es. scarpe da corsa) non e' un "regime attivo" del giorno: ha
+  // senso solo nella timeline di /regimens.
+  for (const r of data.regimens_active) {
+    if (r.kind === "gear") continue
+    grouped[r.kind].push(r)
+  }
 
   return (
     <DayCard
