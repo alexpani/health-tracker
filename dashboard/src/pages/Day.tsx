@@ -16,11 +16,12 @@ import {
   Plus,
   BookOpen,
   Pencil,
+  StretchHorizontal,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { useDaySnapshot } from "@/lib/queries"
+import { useDaySnapshot, useStretchingSessions } from "@/lib/queries"
 import type { DaySnapshot, HealthNote, RegimenKind, Regimen } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
 import { HealthNoteForm } from "@/components/HealthNoteForm"
@@ -179,6 +180,7 @@ export default function Day() {
               <NutritionCard data={data} />
               <SleepCard data={data} />
               <WorkoutsCard data={data} />
+              <StretchingCard date={date} />
               <LabCard data={data} />
               <RegimensCard
                 data={data}
@@ -440,6 +442,45 @@ function WorkoutsCard({ data }: { data: DaySnapshot }) {
             </li>
           ))}
         </ul>
+      )}
+    </DayCard>
+  )
+}
+
+function StretchingCard({ date }: { date: string }) {
+  const q = useStretchingSessions(date, date)
+  const sessions = q.data ?? []
+  const totalMin = Math.round(sessions.reduce((s, x) => s + (x.duration_sec || 0), 0) / 60)
+  return (
+    <DayCard icon={StretchHorizontal} title="Stretching">
+      {sessions.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Nessuna sessione.</p>
+      ) : (
+        <>
+          <ul className="space-y-1">
+            {sessions.map(s => {
+              const done = Math.max(0, s.items_total - s.items_skipped)
+              return (
+                <li key={s.id}>
+                  <Link to="/stretching" className="block hover:bg-accent rounded p-1 -mx-1">
+                    <div className="flex justify-between items-baseline text-sm">
+                      <span className="font-medium truncate">{s.routine_name}</span>
+                      <span className="text-xs text-muted-foreground ml-2 shrink-0">{fmtTime(s.started_at)}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {fmtDuration(s.duration_sec)} · {done}/{s.items_total} esercizi
+                    </div>
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+          {sessions.length > 1 && (
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Totale: {sessions.length} sessioni · {totalMin} min
+            </p>
+          )}
+        </>
       )}
     </DayCard>
   )
