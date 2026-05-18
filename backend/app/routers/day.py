@@ -183,12 +183,16 @@ async def _fetch_vitals(db: AsyncSession, d: date_cls) -> dict:
 
     for t, avg, vmin, vmax, n in rows:
         key = VITAL_AVG_TYPES[t]
+        # Le default key sono inizializzate con suffisso _avg; allineiamo
+        # qui per evitare di scrivere su un campo diverso da quello che la
+        # dashboard legge (resting_hr_avg, spo2_avg, ...).
+        full_key = key if key.endswith("_avg") else key + "_avg"
         if t == "HKQuantityTypeIdentifierHeartRate":
             out["hr_avg"] = round(float(avg), 1) if avg is not None else None
             out["hr_min"] = round(float(vmin), 1) if vmin is not None else None
             out["hr_max"] = round(float(vmax), 1) if vmax is not None else None
         else:
-            out[key] = round(float(avg), 2) if avg is not None else None
+            out[full_key] = round(float(avg), 2) if avg is not None else None
     return out
 
 
