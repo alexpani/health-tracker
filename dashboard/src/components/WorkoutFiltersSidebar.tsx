@@ -96,13 +96,21 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
         <Input
           type="datetime-local"
           value={value.start ? value.start.slice(0, 16) : ""}
-          onChange={e => set("start", e.target.value ? new Date(e.target.value).toISOString() : undefined)}
+          onChange={e => onChange({
+            ...value,
+            start: e.target.value ? new Date(e.target.value).toISOString() : undefined,
+            years: undefined,
+          })}
           placeholder="Da"
         />
         <Input
           type="datetime-local"
           value={value.end ? value.end.slice(0, 16) : ""}
-          onChange={e => set("end", e.target.value ? new Date(e.target.value).toISOString() : undefined)}
+          onChange={e => onChange({
+            ...value,
+            end: e.target.value ? new Date(e.target.value).toISOString() : undefined,
+            years: undefined,
+          })}
           placeholder="A"
         />
         <div className="flex flex-wrap gap-1">
@@ -128,6 +136,7 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
                   ...value,
                   start: start.toISOString(),
                   end: end.toISOString(),
+                  years: undefined,
                 })
               }}
             >
@@ -137,7 +146,7 @@ export function WorkoutFiltersSidebar({ value, onChange, onClose }: Props) {
           <button
             type="button"
             className="text-xs px-2 py-1 rounded border bg-secondary hover:bg-accent"
-            onClick={() => onChange({ ...value, start: undefined, end: undefined })}
+            onClick={() => onChange({ ...value, start: undefined, end: undefined, years: undefined })}
           >
             ✕
           </button>
