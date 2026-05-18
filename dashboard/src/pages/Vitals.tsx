@@ -1,3 +1,4 @@
+import { RecoveryCard } from "@/components/RecoveryCard"
 import { RestingHRTrainingOverlay } from "@/components/RestingHRTrainingOverlay"
 import { TypeBrowser } from "@/components/TypeBrowser"
 import { CATEGORIES } from "@/lib/healthkit"
@@ -10,6 +11,7 @@ export default function Vitals() {
       types={CATEGORIES.vitals.types}
       extrasByType={{
         HKQuantityTypeIdentifierRestingHeartRate: <RestingHRTrainingOverlay />,
+        HKQuantityTypeIdentifierHeartRateVariabilitySDNN: <RecoveryCard />,
       }}
     />
   )
