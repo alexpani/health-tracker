@@ -29,6 +29,7 @@ import { JournalForm } from "@/components/JournalForm"
 import { CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/healthNotes"
 import { DayCalendarSidebar } from "@/components/DayCalendarSidebar"
 import { Hypnogram } from "@/components/charts/Hypnogram"
+import { SleepScoreCard } from "@/components/charts/SleepScoreCard"
 
 function todayLocal(): string {
   const d = new Date()
@@ -416,6 +417,7 @@ function SleepCard({ data }: { data: DaySnapshot }) {
           {s.core_min != null && <StatRow label="Principale" value={fmtDuration(s.core_min * 60)} />}
           {s.awake_min != null && <StatRow label="Veglia" value={fmtDuration(s.awake_min * 60)} />}
           <StatRow label="Orario" value={`${fmtTime(s.start)} → ${fmtTime(s.end)}`} />
+          <SleepScoreCard date={data.date} compact />
           <Hypnogram date={data.date} />
         </>
       )}

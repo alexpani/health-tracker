@@ -7,6 +7,7 @@ import { useCategories } from "@/lib/queries"
 import { SLEEP_STAGES } from "@/lib/healthkit"
 import { formatDate } from "@/lib/utils"
 import { Hypnogram } from "@/components/charts/Hypnogram"
+import { SleepScoreCard } from "@/components/charts/SleepScoreCard"
 import { Link } from "react-router-dom"
 import type { TimeRange } from "@/lib/types"
 
@@ -225,6 +226,7 @@ export default function Sleep() {
           <CardContent className="space-y-4">
             <Hypnogram date={selectedYmd} height={80} showEmpty />
             <SelectedNightBreakdown ymd={selectedYmd} chartData={chartData} />
+            <SleepScoreCard date={selectedYmd} />
           </CardContent>
         </Card>
       )}
