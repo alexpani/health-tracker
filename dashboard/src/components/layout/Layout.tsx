@@ -4,6 +4,8 @@ import { BookOpen, Menu, X } from "lucide-react"
 import Sidebar from "./Sidebar"
 import { Button } from "@/components/ui/button"
 import { QuickJournalProvider, useQuickJournal } from "@/components/QuickJournalProvider"
+import { SyncButton } from "@/components/SyncButton"
+import { LastSyncIndicator } from "@/components/LastSyncIndicator"
 
 function QuickJournalButton() {
   const { openOnToday } = useQuickJournal()
@@ -51,7 +53,9 @@ export default function Layout() {
           <Sidebar orientation="horizontal" />
         </div>
 
-        {/* Quick journal: sempre visibile in topbar */}
+        {/* Indicatore stato sync + pulsante sincronizza + quick journal */}
+        <LastSyncIndicator />
+        <SyncButton />
         <QuickJournalButton />
       </header>
 

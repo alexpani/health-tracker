@@ -8,7 +8,6 @@ import {
   Dumbbell,
   FlaskConical,
   Heart,
-  Home,
   Moon,
   Pill,
   PlusCircle,
@@ -24,7 +23,6 @@ import {
 import { cn } from "@/lib/utils"
 
 const navItems = [
-  { to: "/", label: "Home", icon: Home, end: true },
   { to: "/day", label: "Calendario", icon: CalendarDays },
   { to: "/journal", label: "Diario", icon: BookOpen },
   { to: "/health-notes", label: "Note salute", icon: StickyNote },

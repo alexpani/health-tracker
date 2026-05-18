@@ -20,6 +20,7 @@ import {
 import { getMeta } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { IngestRule } from "@/lib/types"
+import { SyncOverview } from "@/components/SyncOverview"
 
 function RulesOverview() {
   const { data: summary } = useRulesSummary()
@@ -280,11 +281,16 @@ export default function Settings() {
 
       <RulesOverview />
 
-      <Tabs defaultValue="rules">
+      <Tabs defaultValue="sync">
         <TabsList>
+          <TabsTrigger value="sync">Sincronizzazione</TabsTrigger>
           <TabsTrigger value="rules">Regole ingest</TabsTrigger>
           <TabsTrigger value="blacklist">Blacklist UUID</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="sync">
+          <SyncOverview />
+        </TabsContent>
 
         <TabsContent value="rules" className="space-y-4">
           <Card>
