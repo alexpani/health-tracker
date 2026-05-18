@@ -181,15 +181,6 @@ export default function Sleep() {
     })
     .map(([, v]) => v)
 
-  const totalHoursAvg =
-    chartData.length === 0
-      ? 0
-      : chartData.reduce((sum, d) => {
-          const asleepMin =
-            (d[SLEEP_STAGES[3].label] || 0) + (d[SLEEP_STAGES[4].label] || 0) + (d[SLEEP_STAGES[5].label] || 0)
-          return sum + asleepMin
-        }, 0) / chartData.length / 60
-
   return (
     <div className="space-y-6">
       <div>
@@ -200,53 +191,6 @@ export default function Sleep() {
       <div className="flex gap-2">
         <TimeRangeSelector value={range} onChange={setRange} />
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-6">
-            <p className="text-xs text-muted-foreground">Notti registrate</p>
-            <p className="text-2xl font-semibold">{chartData.length}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <p className="text-xs text-muted-foreground">Media ore dormite</p>
-            <p className="text-2xl font-semibold">{totalHoursAvg.toFixed(1)}h</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <p className="text-xs text-muted-foreground">Campioni totali</p>
-            <p className="text-2xl font-semibold">{data?.length ?? 0}</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {selectedYmd && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-base">
-              Andamento notte · {formatDate(selectedYmd)}
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              <Link
-                to={`/day/${selectedYmd}`}
-                className="text-xs text-muted-foreground hover:underline"
-              >
-                vedi giorno
-              </Link>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedYmd(null)}>
-                Chiudi
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Hypnogram date={selectedYmd} height={80} showEmpty />
-            <SelectedNightBreakdown ymd={selectedYmd} chartData={chartData} />
-            <SleepScoreCard date={selectedYmd} />
-          </CardContent>
-        </Card>
-      )}
 
       <Card>
         <CardHeader>
@@ -293,6 +237,32 @@ export default function Sleep() {
           )}
         </CardContent>
       </Card>
+
+      {selectedYmd && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-base">
+              Andamento notte · {formatDate(selectedYmd)}
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <Link
+                to={`/day/${selectedYmd}`}
+                className="text-xs text-muted-foreground hover:underline"
+              >
+                vedi giorno
+              </Link>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedYmd(null)}>
+                Chiudi
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Hypnogram date={selectedYmd} height={80} showEmpty />
+            <SelectedNightBreakdown ymd={selectedYmd} chartData={chartData} />
+            <SleepScoreCard date={selectedYmd} />
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
