@@ -319,7 +319,6 @@ function ActivityCard({ data }: { data: DaySnapshot }) {
 
 function BodyCard({ data }: { data: DaySnapshot }) {
   const b = data.body
-  const v = (x: { value: number } | null, frac = 1) => x ? fmt(x.value, frac) : "—"
   // Misure "lente" (vita): mostrate solo se il sample piu' recente e' entro
   // 30 giorni dal giorno selezionato — un dato di 2 anni fa non e'
   // rappresentativo del giorno.
@@ -331,32 +330,45 @@ function BodyCard({ data }: { data: DaySnapshot }) {
     return ref - ts <= days * 86_400_000
   }
   const waistOk = recentEnough(b.waist_m)
+  const anything =
+    b.weight_kg != null || b.bmi != null || b.body_fat_pct != null ||
+    b.lean_mass_kg != null || (waistOk && b.waist_m != null)
   return (
     <DayCard icon={Scale} title="Corpo">
-      <StatRow label="Peso" value={v(b.weight_kg, 2)} sub="kg" />
-      <StatRow label="BMI" value={v(b.bmi, 1)} />
-      <StatRow label="Grasso" value={b.body_fat_pct ? fmt(b.body_fat_pct.value * 100, 1) : "—"} sub="%" />
-      <StatRow label="Massa magra" value={v(b.lean_mass_kg, 2)} sub="kg" />
+      {!anything && <p className="text-xs text-muted-foreground">Nessun dato.</p>}
+      {b.weight_kg && <StatRow label="Peso" value={fmt(b.weight_kg.value, 2)} sub="kg" />}
+      {b.bmi && <StatRow label="BMI" value={fmt(b.bmi.value, 1)} />}
+      {b.body_fat_pct && <StatRow label="Grasso" value={fmt(b.body_fat_pct.value * 100, 1)} sub="%" />}
+      {b.lean_mass_kg && <StatRow label="Massa magra" value={fmt(b.lean_mass_kg.value, 2)} sub="kg" />}
       {waistOk && b.waist_m && (
         <StatRow label="Vita" value={fmt(b.waist_m.value * 100, 1)} sub="cm" />
       )}
-      <p className="text-[10px] text-muted-foreground mt-1">Ultimi valori al termine del giorno.</p>
+      {anything && (
+        <p className="text-[10px] text-muted-foreground mt-1">Ultimi valori al termine del giorno.</p>
+      )}
     </DayCard>
   )
 }
 
 function VitalsCard({ data }: { data: DaySnapshot }) {
   const v = data.vitals
+  const hasHrRange = v.hr_min != null && v.hr_max != null
+  const hasBp = v.bp_systolic_avg != null && v.bp_diastolic_avg != null
+  const anything =
+    v.hr_avg != null || hasHrRange || v.resting_hr_avg != null ||
+    v.hrv_ms_avg != null || v.spo2_avg != null || hasBp ||
+    v.respiratory_rate_avg != null || v.temp_c_avg != null
   return (
     <DayCard icon={Heart} title="Vitali">
-      <StatRow label="HR media" value={fmt(v.hr_avg, 0)} sub="bpm" />
-      <StatRow label="HR min/max" value={`${fmt(v.hr_min, 0)} / ${fmt(v.hr_max, 0)}`} sub="bpm" />
-      <StatRow label="HR riposo" value={fmt(v.resting_hr_avg, 0)} sub="bpm" />
-      <StatRow label="HRV" value={fmt(v.hrv_ms_avg, 0)} sub="ms" />
-      <StatRow label="SpO₂" value={v.spo2_avg != null ? fmt(v.spo2_avg * 100, 1) : "—"} sub="%" />
-      <StatRow label="Pressione" value={v.bp_systolic_avg && v.bp_diastolic_avg ? `${fmt(v.bp_systolic_avg, 0)}/${fmt(v.bp_diastolic_avg, 0)}` : "—"} sub="mmHg" />
-      <StatRow label="Respiro" value={fmt(v.respiratory_rate_avg, 1)} sub="/min" />
-      <StatRow label="Temperatura" value={fmt(v.temp_c_avg, 1)} sub="°C" />
+      {!anything && <p className="text-xs text-muted-foreground">Nessun dato.</p>}
+      {v.hr_avg != null && <StatRow label="HR media" value={fmt(v.hr_avg, 0)} sub="bpm" />}
+      {hasHrRange && <StatRow label="HR min/max" value={`${fmt(v.hr_min, 0)} / ${fmt(v.hr_max, 0)}`} sub="bpm" />}
+      {v.resting_hr_avg != null && <StatRow label="HR riposo" value={fmt(v.resting_hr_avg, 0)} sub="bpm" />}
+      {v.hrv_ms_avg != null && <StatRow label="HRV" value={fmt(v.hrv_ms_avg, 0)} sub="ms" />}
+      {v.spo2_avg != null && <StatRow label="SpO₂" value={fmt(v.spo2_avg * 100, 1)} sub="%" />}
+      {hasBp && <StatRow label="Pressione" value={`${fmt(v.bp_systolic_avg, 0)}/${fmt(v.bp_diastolic_avg, 0)}`} sub="mmHg" />}
+      {v.respiratory_rate_avg != null && <StatRow label="Respiro" value={fmt(v.respiratory_rate_avg, 1)} sub="/min" />}
+      {v.temp_c_avg != null && <StatRow label="Temperatura" value={fmt(v.temp_c_avg, 1)} sub="°C" />}
     </DayCard>
   )
 }
