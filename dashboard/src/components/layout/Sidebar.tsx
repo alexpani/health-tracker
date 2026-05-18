@@ -22,7 +22,12 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const navItems = [
+const navItems: Array<{
+  to: string
+  label: string
+  icon: typeof CalendarDays
+  end?: boolean
+}> = [
   { to: "/day", label: "Calendario", icon: CalendarDays },
   { to: "/journal", label: "Diario", icon: BookOpen },
   { to: "/health-notes", label: "Note salute", icon: StickyNote },
