@@ -8,6 +8,10 @@ interface Props {
    *  bedtime anticipati e sveglie tardive). */
   date: string
   height?: number
+  /** Se true mostra un placeholder testuale quando non ci sono sample
+   *  invece di renderizzare null. Utile quando il componente vive nella
+   *  propria card e l'utente si aspetta un feedback. */
+  showEmpty?: boolean
 }
 
 const STAGE_LABEL: Record<number, string> = {
@@ -22,7 +26,7 @@ const STAGE_LABEL: Record<number, string> = {
 /** Ipnogramma: timeline orizzontale colorata per fase del sonno.
  *  Filtra fuori i wrapper (stage 0 in_bed e 1 asleep_unspecified) che
  *  double-conterebbero rispetto a Core/Deep/REM/Veglia. */
-export function Hypnogram({ date, height = 60 }: Props) {
+export function Hypnogram({ date, height = 60, showEmpty = false }: Props) {
   const window = useMemo(() => {
     const [y, m, d] = date.split("-").map(Number)
     const end = new Date(y, m - 1, d, 16, 0, 0)
@@ -43,7 +47,14 @@ export function Hypnogram({ date, height = 60 }: Props) {
     [samples],
   )
 
-  if (filtered.length === 0) return null
+  if (filtered.length === 0) {
+    if (!showEmpty) return null
+    return (
+      <p className="text-xs text-muted-foreground">
+        Nessun dato dettagliato di sonno per questa notte.
+      </p>
+    )
+  }
 
   // Finestra effettiva: min start / max end dei sample, con un piccolo
   // padding per non incollare i bordi.

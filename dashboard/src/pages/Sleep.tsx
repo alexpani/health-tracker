@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react"
-import { useNavigate } from "react-router-dom"
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { TimeRangeSelector, timeRangeToDates } from "@/components/controls/TimeRangeSelector"
 import { useCategories } from "@/lib/queries"
 import { SLEEP_STAGES } from "@/lib/healthkit"
 import { formatDate } from "@/lib/utils"
+import { Hypnogram } from "@/components/charts/Hypnogram"
+import { Link } from "react-router-dom"
 import type { TimeRange } from "@/lib/types"
 
 function fmtDur(m: number): string {
@@ -65,8 +67,8 @@ function SleepTooltip({ active, payload, label }: any) {
 }
 
 export default function Sleep() {
-  const navigate = useNavigate()
   const [range, setRange] = useState<TimeRange>("30d")
+  const [selectedYmd, setSelectedYmd] = useState<string | null>(null)
   const dates = useMemo(() => timeRangeToDates(range), [range])
   const { data, isLoading } = useCategories("HKCategoryTypeIdentifierSleepAnalysis", dates.start, dates.end)
 
@@ -146,6 +148,30 @@ export default function Sleep() {
         </Card>
       </div>
 
+      {selectedYmd && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-base">
+              Andamento notte · {formatDate(selectedYmd)}
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <Link
+                to={`/day/${selectedYmd}`}
+                className="text-xs text-muted-foreground hover:underline"
+              >
+                vedi giorno
+              </Link>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedYmd(null)}>
+                Chiudi
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Hypnogram date={selectedYmd} height={80} showEmpty />
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Fasi del sonno per notte (minuti)</CardTitle>
@@ -166,7 +192,7 @@ export default function Sleep() {
                   // mezzanotte → ricostruisco YYYY-MM-DD in fuso locale.
                   const d = new Date(iso)
                   const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-                  navigate(`/day/${ymd}`)
+                  setSelectedYmd(prev => (prev === ymd ? null : ymd))
                 }}
                 style={{ cursor: "pointer" }}
               >
