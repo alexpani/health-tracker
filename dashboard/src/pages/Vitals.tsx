@@ -1,3 +1,4 @@
+import { ReadinessCard } from "@/components/ReadinessCard"
 import { RecoveryCard } from "@/components/RecoveryCard"
 import { RestingHRTrainingOverlay } from "@/components/RestingHRTrainingOverlay"
 import { TypeBrowser } from "@/components/TypeBrowser"
@@ -11,7 +12,12 @@ export default function Vitals() {
       types={CATEGORIES.vitals.types}
       extrasByType={{
         HKQuantityTypeIdentifierRestingHeartRate: <RestingHRTrainingOverlay />,
-        HKQuantityTypeIdentifierHeartRateVariabilitySDNN: <RecoveryCard />,
+        HKQuantityTypeIdentifierHeartRateVariabilitySDNN: (
+          <div className="space-y-6">
+            <RecoveryCard />
+            <ReadinessCard />
+          </div>
+        ),
       }}
     />
   )
