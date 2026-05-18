@@ -256,10 +256,13 @@ async def _fetch_nutrition(db: AsyncSession, d: date_cls) -> dict:
 
 
 async def _fetch_sleep(db: AsyncSession, d: date_cls) -> dict | None:
-    """Sleep e' un caso particolare: i sample della notte fra (d-1) e d
-    hanno end_date al mattino di d. Prendiamo i sample il cui end_date
-    cade nel giorno richiesto."""
-    sod, eod = _local_day_bounds(d)
+    """Convenzione "bedtime date": la notte di D copre il sonno che si
+    svolge fra la sera di D e il mattino di D+1. Cerchiamo i sample il
+    cui end_date cade fra mezzanotte e mezzogiorno di D+1 (escludiamo
+    naps pomeridiani del D+1, che restano sul wake-up day come prima)."""
+    next_day = d + timedelta(days=1)
+    window_start = datetime.combine(next_day, time.min, tzinfo=LOCAL_TZ)
+    window_end = datetime.combine(next_day, time(12, 0), tzinfo=LOCAL_TZ)
     rows = (
         await db.execute(
             select(
@@ -268,8 +271,8 @@ async def _fetch_sleep(db: AsyncSession, d: date_cls) -> dict | None:
                 CategorySample.end_date,
             )
             .where(CategorySample.type == SLEEP_TYPE)
-            .where(CategorySample.end_date >= sod)
-            .where(CategorySample.end_date < eod)
+            .where(CategorySample.end_date >= window_start)
+            .where(CategorySample.end_date < window_end)
             .order_by(CategorySample.start_date.asc())
         )
     ).all()

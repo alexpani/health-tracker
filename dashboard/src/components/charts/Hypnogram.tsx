@@ -3,9 +3,10 @@ import { useCategories } from "@/lib/queries"
 import { SLEEP_STAGES } from "@/lib/healthkit"
 
 interface Props {
-  /** YYYY-MM-DD del giorno di risveglio. La finestra coperta va dalle
-   *  16:00 del giorno prima alle 16:00 di questo giorno (gestisce
-   *  bedtime anticipati e sveglie tardive). */
+  /** YYYY-MM-DD del "bedtime day": la notte che inizia la sera di questo
+   *  giorno e termina nel mattino del giorno successivo. Finestra: dalle
+   *  16:00 di questo giorno alle 16:00 del giorno dopo (copre bedtime
+   *  anticipati, traversate la mezzanotte e sveglie tardive). */
   date: string
   height?: number
   /** Se true mostra un placeholder testuale quando non ci sono sample
@@ -29,9 +30,9 @@ const STAGE_LABEL: Record<number, string> = {
 export function Hypnogram({ date, height = 60, showEmpty = false }: Props) {
   const window = useMemo(() => {
     const [y, m, d] = date.split("-").map(Number)
-    const end = new Date(y, m - 1, d, 16, 0, 0)
-    const start = new Date(end)
-    start.setDate(end.getDate() - 1)
+    const start = new Date(y, m - 1, d, 16, 0, 0)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 1)
     return { startIso: start.toISOString(), endIso: end.toISOString() }
   }, [date])
 
