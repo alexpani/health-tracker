@@ -1,6 +1,5 @@
-import { Route, Routes } from "react-router-dom"
+import { Navigate, Route, Routes } from "react-router-dom"
 import Layout from "@/components/layout/Layout"
-import Home from "@/pages/Home"
 import Activity from "@/pages/Activity"
 import Vitals from "@/pages/Vitals"
 import Body from "@/pages/Body"
@@ -24,11 +23,17 @@ import HealthNotes from "@/pages/HealthNotes"
 import Journal from "@/pages/Journal"
 import Settings from "@/pages/Settings"
 
+function TodayRedirect() {
+  const today = new Date()
+  const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`
+  return <Navigate to={`/day/${ymd}`} replace />
+}
+
 export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route index element={<Home />} />
+        <Route index element={<TodayRedirect />} />
         <Route path="/activity" element={<Activity />} />
         <Route path="/vitals" element={<Vitals />} />
         <Route path="/body" element={<Body />} />
