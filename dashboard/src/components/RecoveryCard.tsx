@@ -9,16 +9,6 @@ const HRV = "HKQuantityTypeIdentifierHeartRateVariabilitySDNN"
 const RHR = "HKQuantityTypeIdentifierRestingHeartRate"
 const SLEEP = "HKCategoryTypeIdentifierSleepAnalysis"
 
-/** Finestra "notte di YYYY-MM-DD" = [16:00 del giorno prima, 16:00 di questo
- *  giorno]: stessa convenzione usata da SleepScoreCard / Hypnogram. */
-function nightWindow(date: Date): { start: Date; end: Date } {
-  const end = new Date(date)
-  end.setHours(16, 0, 0, 0)
-  const start = new Date(end)
-  start.setDate(end.getDate() - 1)
-  return { start, end }
-}
-
 function localISODate(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, "0")
@@ -28,27 +18,31 @@ function localISODate(d: Date): string {
 
 export function RecoveryCard() {
   // --- Date range: ultimi 30 giorni + oggi ---
-  const today = new Date()
-  const todayISO = localISODate(today)
-  const start30 = new Date(today)
-  start30.setDate(start30.getDate() - 31)
-  const startISO = start30.toISOString()
-  const endISO = new Date(today.getTime() + 24 * 3600 * 1000).toISOString()
+  // Stabilizzato per giorno locale (non per millisecondo) cosi' TanStack
+  // Query non re-fetcha ad ogni render col timestamp che cambia.
+  const { todayISO, startISO, endISO, sleepStartISO } = useMemo(() => {
+    const t = new Date()
+    const today = new Date(t.getFullYear(), t.getMonth(), t.getDate())
+    const start = new Date(today)
+    start.setDate(start.getDate() - 31)
+    const end = new Date(today)
+    end.setDate(end.getDate() + 1)
+    const sleepStart = new Date(today)
+    sleepStart.setDate(sleepStart.getDate() - 31)
+    sleepStart.setHours(16, 0, 0, 0)
+    return {
+      todayISO: localISODate(today),
+      startISO: start.toISOString(),
+      endISO: end.toISOString(),
+      sleepStartISO: sleepStart.toISOString(),
+    }
+    // Re-calcolato solo se cambia il giorno (key = data odierna ISO).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [new Date().toDateString()])
 
-  // HRV + RHR ultimi ~31 giorni
   const hrvQ = useSamples({ type: HRV, start: startISO, end: endISO, aggregation: "none", limit: 5000 })
   const rhrQ = useSamples({ type: RHR, start: startISO, end: endISO, aggregation: "none", limit: 1000 })
-
-  // Sonno: finestra ampia che copre 31 notti (basta tirare 30+ giorni con
-  // bound a 16:00 e poi raggrupperemo per notte).
-  const sleepStart = new Date(today)
-  sleepStart.setDate(sleepStart.getDate() - 31)
-  sleepStart.setHours(16, 0, 0, 0)
-  const sleepQ = useCategories(
-    SLEEP,
-    sleepStart.toISOString(),
-    new Date(today.getTime() + 24 * 3600 * 1000).toISOString(),
-  )
+  const sleepQ = useCategories(SLEEP, sleepStartISO, endISO)
 
   const result = useMemo(() => {
     if (!hrvQ.data || !rhrQ.data) return null
@@ -70,14 +64,13 @@ export function RecoveryCard() {
     }
 
     // Score di oggi e baseline
-    const todayWin = nightWindow(today)
-    const todayKey = localISODate(todayWin.end)
-    const todaySamples = sleepByNight.get(todayKey) ?? []
+    const todayDate = new Date(`${todayISO}T12:00:00`)
+    const todaySamples = sleepByNight.get(todayISO) ?? []
     const todayScore = computeSleepScore(todaySamples)?.score ?? null
 
     const baseline: number[] = []
     for (let k = 1; k <= 30; k++) {
-      const d = new Date(today)
+      const d = new Date(todayDate)
       d.setDate(d.getDate() - k)
       const samples = sleepByNight.get(localISODate(d)) ?? []
       const s = computeSleepScore(samples)
