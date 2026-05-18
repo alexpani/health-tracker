@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { useMemo, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -49,9 +50,11 @@ interface Props {
   title: string
   subtitle?: string
   types: string[]
+  /** Contenuto extra renderizzato in coda al tab del tipo indicato. */
+  extrasByType?: Record<string, ReactNode>
 }
 
-export function TypeBrowser({ title, subtitle, types }: Props) {
+export function TypeBrowser({ title, subtitle, types, extrasByType }: Props) {
   const [activeType, setActiveType] = useState(types[0])
   const [range, setRange] = useState<TimeRange>("30d")
   const [aggregation, setAggregation] = useState<Aggregation>(suggestAggregation("30d"))
@@ -207,6 +210,8 @@ export function TypeBrowser({ title, subtitle, types }: Props) {
                 )}
               </CardContent>
             </Card>
+
+            {extrasByType?.[t]}
           </TabsContent>
         ))}
       </Tabs>
