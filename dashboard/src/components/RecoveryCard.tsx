@@ -7,6 +7,8 @@ import type { CategorySample, Sample } from "@/lib/types"
 
 const HRV = "HKQuantityTypeIdentifierHeartRateVariabilitySDNN"
 const RHR = "HKQuantityTypeIdentifierRestingHeartRate"
+const RR = "HKQuantityTypeIdentifierRespiratoryRate"
+const SPO2 = "HKQuantityTypeIdentifierOxygenSaturation"
 const SLEEP = "HKCategoryTypeIdentifierSleepAnalysis"
 
 function localISODate(d: Date): string {
@@ -42,12 +44,16 @@ export function RecoveryCard() {
 
   const hrvQ = useSamples({ type: HRV, start: startISO, end: endISO, aggregation: "none", limit: 5000 })
   const rhrQ = useSamples({ type: RHR, start: startISO, end: endISO, aggregation: "none", limit: 1000 })
+  const rrQ  = useSamples({ type: RR,  start: startISO, end: endISO, aggregation: "none", limit: 5000 })
+  const spo2Q = useSamples({ type: SPO2, start: startISO, end: endISO, aggregation: "none", limit: 5000 })
   const sleepQ = useCategories(SLEEP, sleepStartISO, endISO)
 
   const result = useMemo(() => {
-    if (!hrvQ.data || !rhrQ.data) return null
+    if (!hrvQ.data || !rhrQ.data || !rrQ.data || !spo2Q.data) return null
     const hrvSamples = hrvQ.data.data as Sample[]
     const rhrSamples = rhrQ.data.data as Sample[]
+    const rrSamples = rrQ.data.data as Sample[]
+    const spo2Samples = spo2Q.data.data as Sample[]
 
     // Suddividi i sleep sample per "notte di risveglio": convenzione
     // [D-1 16:00, D 16:00) = notte del giorno D. Un sample che finisce
@@ -77,17 +83,17 @@ export function RecoveryCard() {
       if (s) baseline.push(s.score)
     }
 
-    return computeRecoveryScore(todayISO, hrvSamples, rhrSamples, todayScore, baseline)
-  }, [hrvQ.data, rhrQ.data, sleepQ.data, todayISO])
+    return computeRecoveryScore(todayISO, hrvSamples, rhrSamples, rrSamples, spo2Samples, todayScore, baseline)
+  }, [hrvQ.data, rhrQ.data, rrQ.data, spo2Q.data, sleepQ.data, todayISO])
 
-  const loading = hrvQ.isLoading || rhrQ.isLoading || sleepQ.isLoading
+  const loading = hrvQ.isLoading || rhrQ.isLoading || rrQ.isLoading || spo2Q.isLoading || sleepQ.isLoading
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Recupero stimato</CardTitle>
         <CardDescription>
-          Combina HRV notturna, FC a riposo e qualita' del sonno rispetto al baseline personale degli ultimi 30 giorni
+          Combina 5 biomarker notturni (HRV, FC a riposo, respirazione, SpO2, sonno) rispetto al baseline personale degli ultimi 30 giorni
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -106,7 +112,7 @@ export function RecoveryCard() {
               </div>
               <div className="text-right text-xs text-muted-foreground">
                 <div>su 100</div>
-                {result.partial && <div className="text-amber-600 mt-1">parziale ({result.components.length}/3 segnali)</div>}
+                {result.partial && <div className="text-amber-600 mt-1">parziale ({result.components.length}/5 segnali)</div>}
               </div>
             </div>
 

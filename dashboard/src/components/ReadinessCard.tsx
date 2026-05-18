@@ -9,6 +9,8 @@ import type { CategorySample, Sample } from "@/lib/types"
 
 const HRV = "HKQuantityTypeIdentifierHeartRateVariabilitySDNN"
 const RHR = "HKQuantityTypeIdentifierRestingHeartRate"
+const RR = "HKQuantityTypeIdentifierRespiratoryRate"
+const SPO2 = "HKQuantityTypeIdentifierOxygenSaturation"
 const SLEEP = "HKCategoryTypeIdentifierSleepAnalysis"
 
 function localISODate(d: Date): string {
@@ -39,13 +41,17 @@ export function ReadinessCard() {
 
   const hrvQ = useSamples({ type: HRV, start: startISO, end: endISO, aggregation: "none", limit: 5000 })
   const rhrQ = useSamples({ type: RHR, start: startISO, end: endISO, aggregation: "none", limit: 1000 })
+  const rrQ  = useSamples({ type: RR,  start: startISO, end: endISO, aggregation: "none", limit: 5000 })
+  const spo2Q = useSamples({ type: SPO2, start: startISO, end: endISO, aggregation: "none", limit: 5000 })
   const sleepQ = useCategories(SLEEP, sleepStartISO, endISO)
   const workoutsQ = useWorkouts({ start: workoutStartISO, end: endISO })
 
   const result = useMemo(() => {
-    if (!hrvQ.data || !rhrQ.data || !workoutsQ.data) return null
+    if (!hrvQ.data || !rhrQ.data || !rrQ.data || !spo2Q.data || !workoutsQ.data) return null
     const hrvSamples = hrvQ.data.data as Sample[]
     const rhrSamples = rhrQ.data.data as Sample[]
+    const rrSamples = rrQ.data.data as Sample[]
+    const spo2Samples = spo2Q.data.data as Sample[]
 
     // Recovery score di oggi (riusa la stessa logica della card sopra)
     const sleepByNight = new Map<string, CategorySample[]>()
@@ -66,12 +72,12 @@ export function ReadinessCard() {
       const s = computeSleepScore(sleepByNight.get(localISODate(d)) ?? [])
       if (s) sleepBaseline.push(s.score)
     }
-    const recovery = computeRecoveryScore(todayISO, hrvSamples, rhrSamples, todaySleepScore, sleepBaseline)
+    const recovery = computeRecoveryScore(todayISO, hrvSamples, rhrSamples, rrSamples, spo2Samples, todaySleepScore, sleepBaseline)
 
     return computeReadiness(todayISO, recovery?.score ?? null, workoutsQ.data, hrvSamples)
-  }, [hrvQ.data, rhrQ.data, sleepQ.data, workoutsQ.data, todayISO])
+  }, [hrvQ.data, rhrQ.data, rrQ.data, spo2Q.data, sleepQ.data, workoutsQ.data, todayISO])
 
-  const loading = hrvQ.isLoading || rhrQ.isLoading || sleepQ.isLoading || workoutsQ.isLoading
+  const loading = hrvQ.isLoading || rhrQ.isLoading || rrQ.isLoading || spo2Q.isLoading || sleepQ.isLoading || workoutsQ.isLoading
 
   return (
     <Card>
