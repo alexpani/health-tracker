@@ -96,6 +96,8 @@ interface ComponentInput {
   unit: string
   /** Cifre decimali da mostrare. */
   digits: number
+  /** Moltiplicatore per il display (es. SpO2 backend serve 0-1, mostro 0-100). */
+  displayMultiplier?: number
   daily: Map<string, number>
 }
 
@@ -113,14 +115,15 @@ function computeComponent(
   const z = inp.lowerIsBetter ? -rawZ : rawZ
   const sub = normFromZ(z)
   const deltaPct = ((todayVal - b) / b) * 100
+  const mult = inp.displayMultiplier ?? 1
   return {
     contrib: sub,
     weight: inp.weight,
     comp: {
       key: inp.key,
       label: inp.label,
-      value: `${todayVal.toFixed(inp.digits)} ${inp.unit}`.trim(),
-      baseline: `${b.toFixed(inp.digits)} ${inp.unit}`.trim(),
+      value: `${(todayVal * mult).toFixed(inp.digits)} ${inp.unit}`.trim(),
+      baseline: `${(b * mult).toFixed(inp.digits)} ${inp.unit}`.trim(),
       zOrPct: `${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(0)}%`,
       contrib: sub,
     },
@@ -152,7 +155,7 @@ export function computeRecoveryScore(
     { key: "hrv", label: "HRV (SDNN) notturna", weight: WEIGHTS.hrv,  lowerIsBetter: false, unit: "ms",     digits: 1, daily: nightlyAverage(hrvSamples) },
     { key: "rhr", label: "FC a riposo",         weight: WEIGHTS.rhr,  lowerIsBetter: true,  unit: "bpm",    digits: 1, daily: nightlyAverage(rhrSamples) },
     { key: "rr",  label: "Frequenza respiratoria notturna", weight: WEIGHTS.rr,   lowerIsBetter: true, unit: "/min", digits: 1, daily: nightlyAverage(rrSamples) },
-    { key: "spo2",label: "Saturazione O2 notturna", weight: WEIGHTS.spo2, lowerIsBetter: false, unit: "%",   digits: 1, daily: nightlyAverage(spo2Samples) },
+    { key: "spo2",label: "Saturazione O2 notturna", weight: WEIGHTS.spo2, lowerIsBetter: false, unit: "%",   digits: 1, displayMultiplier: 100, daily: nightlyAverage(spo2Samples) },
   ]
 
   for (const inp of inputs) {
