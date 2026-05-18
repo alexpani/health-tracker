@@ -58,6 +58,30 @@ export function ReadinessCard() {
           <p className="text-sm text-muted-foreground">Dati insufficienti.</p>
         ) : (
           <div className="space-y-4">
+            <details className="text-xs text-muted-foreground bg-muted/30 rounded p-3">
+              <summary className="cursor-pointer font-medium text-foreground">Come funziona l'ACWR</summary>
+              <div className="mt-2 space-y-2 leading-relaxed">
+                <p>
+                  <strong>ACWR = Acute:Chronic Workload Ratio</strong>. Confronta il carico
+                  delle ultime <strong>1 settimana</strong> (acuto) con la <strong>media
+                  settimanale delle ultime 4 settimane</strong> (cronico). Misura quanto sei
+                  uscito dalla tua routine.
+                </p>
+                <p>
+                  Gabbett 2016 (BJSM) ha mostrato che il <strong>sweet spot 0.8-1.3</strong> e' la
+                  zona di adattamento progressivo. <strong>Sopra 1.5</strong> il rischio infortuni
+                  aumenta del ~50%: il corpo non ha avuto tempo di adattarsi all'incremento.
+                  <strong> Sotto 0.5</strong> il carico e' insufficiente per mantenere la forma
+                  fisica (detraining).
+                </p>
+                <p>
+                  Misurato in <strong>kcal totali</strong> dei workout — proxy del TRIMP (Training
+                  Impulse) classico, dato che non ho la FC massima personalizzata per ogni sport.
+                  Funziona bene per chi corre/pedala col Watch; meno preciso con app esterne.
+                </p>
+              </div>
+            </details>
+
             <div className="flex items-center gap-3">
               <span className={`inline-block w-3 h-3 rounded-full flex-shrink-0 ${STATUS_DOT[result.status]}`} />
               <div className={`text-2xl font-bold ${STATUS_TEXT[result.status]}`}>{result.verdict}</div>

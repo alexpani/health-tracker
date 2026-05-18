@@ -25,6 +25,29 @@ const STATUS_TEXT: Record<RecoveryFlag["status"], string> = {
   red: "text-rose-600",
 }
 
+const FLAG_HELP: Record<RecoveryFlag["key"], string> = {
+  hrv_rolling:
+    "L'HRV notturna varia anche ±20% giorno per giorno a parità di stato fisiologico, " +
+    "quindi il singolo valore di una notte e' rumoroso. La media mobile su 7 giorni " +
+    "(rolling 7g) e' un segnale piu' stabile, e va confrontata col tuo baseline " +
+    "personale di 60 giorni — finestra raccomandata da Plews 2013 per atleti. " +
+    "Soglia clinica: se la rolling 7g scende oltre 1 deviazione standard sotto il " +
+    "baseline e' un marker di stress autonomico cronico.",
+  rhr_delta:
+    "La FC a riposo e' molto stabile nel tempo per la stessa persona (~58-65 bpm di " +
+    "range tipico). Un aumento di oltre +5 bpm rispetto al baseline 60g e' un marker " +
+    "validato di stress, malattia incipiente, sovrallenamento o disidratazione " +
+    "(Achten & Jeukendrup 2003). E' uno dei pochi indicatori che i medici sportivi " +
+    "consigliano di monitorare ogni mattina, dato il suo basso costo e alta " +
+    "informativita'.",
+  hrv_streak:
+    "Anche se l'HRV di oggi rientra nei limiti normali, una sequenza di 3+ giorni " +
+    "consecutivi sotto la media e' un trend che vale la pena fermare prima che " +
+    "diventi un problema. Plews 2013 e Stanley 2013 mostrano che lo streak e' un " +
+    "predittore indipendente di overtraining/malattia, anche quando i valori " +
+    "assoluti non sembrano allarmanti.",
+}
+
 export function RecoveryCard() {
   // Servono ~75 giorni per coprire baseline 60g + qualche buffer.
   const { todayISO, startISO, endISO } = useMemo(() => {
@@ -71,6 +94,25 @@ export function RecoveryCard() {
           </p>
         ) : (
           <div className="space-y-4">
+            <details className="text-xs text-muted-foreground bg-muted/30 rounded p-3">
+              <summary className="cursor-pointer font-medium text-foreground">Come funziona questo score</summary>
+              <div className="mt-2 space-y-2 leading-relaxed">
+                <p>
+                  Invece di una media pesata "ad cazzum" di vari biomarker (come fanno Bevel,
+                  Whoop, Oura), questa card mostra <strong>tre indicatori indipendenti</strong>,
+                  ognuno con la sua soglia validata da studi clinici.
+                </p>
+                <p>
+                  Ogni flag e' verde/ambra/rosso. Il <strong>verdetto finale</strong> in alto e' il
+                  peggiore dei tre — se anche un solo segnale e' rosso, prevale.
+                </p>
+                <p>
+                  Il <strong>baseline 60g</strong> e' il riferimento personale: ogni metrica viene
+                  confrontata col tuo storico recente, non con valori "da popolazione".
+                </p>
+              </div>
+            </details>
+
             <div className="flex items-baseline justify-between">
               <div className={`text-4xl font-bold ${result.color}`}>{result.verdict}</div>
               {result.partial && (
@@ -110,6 +152,12 @@ function FlagRow({ f }: { f: RecoveryFlag }) {
             Baseline: {f.baseline}
           </div>
           {f.spark && f.spark.length >= 3 && <Sparkline values={f.spark} status={f.status} />}
+          <details className="mt-2 text-[11px] text-muted-foreground">
+            <summary className="cursor-pointer hover:text-foreground transition-colors">
+              Cosa significa
+            </summary>
+            <p className="mt-1.5 leading-relaxed pl-1">{FLAG_HELP[f.key]}</p>
+          </details>
         </div>
       </div>
     </div>
