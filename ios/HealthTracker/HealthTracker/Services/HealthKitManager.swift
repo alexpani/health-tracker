@@ -565,6 +565,55 @@ actor HealthKitManager {
         }
     }
 
+    /// Anchored variant for category samples. Usato per il sonno: Apple Watch
+    /// scrive i sample della notte retroattivamente quando re-syncs con
+    /// l'iPhone (anche ore dopo il risveglio). Il path windowed con
+    /// `.strictStartDate` perde tutti i sample il cui `startDate` precede il
+    /// `lastSyncDate` corrente — risultato: intere notti scomparivano dal DB.
+    /// Anchored traccia l'`HKObjectID` (ordine di insert in HK), quindi i
+    /// sample late-arriving entrano comunque al prossimo sync.
+    func fetchCategorySamplesAnchored(
+        type: HKCategoryTypeIdentifier,
+        anchor: HKQueryAnchor?
+    ) async throws -> (added: [CategoryPayload], deletedUUIDs: [UUID], newAnchor: HKQueryAnchor?) {
+        guard let sampleType = HKCategoryType.categoryType(forIdentifier: type) else {
+            return ([], [], anchor)
+        }
+
+        let result: ([HKCategorySample], [HKDeletedObject], HKQueryAnchor?) = try await withCheckedThrowingContinuation { cont in
+            let query = HKAnchoredObjectQuery(
+                type: sampleType,
+                predicate: nil,
+                anchor: anchor,
+                limit: HKObjectQueryNoLimit
+            ) { _, samples, deleted, newAnchor, error in
+                if let error { cont.resume(throwing: error); return }
+                cont.resume(returning: ((samples as? [HKCategorySample]) ?? [], deleted ?? [], newAnchor))
+            }
+            healthStore.execute(query)
+        }
+
+        let (added, deleted, newAnchor) = result
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let payloads = added.map { sample in
+            CategoryPayload(
+                uuid: sample.uuid.uuidString,
+                type: type.rawValue,
+                value: sample.value,
+                startDate: formatter.string(from: sample.startDate),
+                endDate: formatter.string(from: sample.endDate),
+                sourceName: Self.normalizedSourceName(sample.sourceRevision.source.name),
+                sourceBundleId: sample.sourceRevision.source.bundleIdentifier,
+                metadata: sample.metadata?.compactMapValues { "\($0)" }
+            )
+        }
+
+        let deletedUUIDs = deleted.map { $0.uuid }
+        return (payloads, deletedUUIDs, newAnchor)
+    }
+
     /// Fetches workouts using an anchored query so we also receive deletions.
     /// Returns the workouts to upsert, the UUIDs of workouts deleted since the
     /// last anchor, and the new anchor (to persist).

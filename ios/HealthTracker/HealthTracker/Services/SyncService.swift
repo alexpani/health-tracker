@@ -691,6 +691,12 @@ final class SyncService {
 
     @MainActor
     private func syncCategoryType(typeId: HKCategoryTypeIdentifier) async {
+        // Dispatch ai tipi con anchored query (sonno: cattura write
+        // retroattivi del Watch che il path windowed perdeva).
+        if Self.anchoredCategoryIds.contains(typeId.rawValue) {
+            await syncCategoryTypeAnchored(typeId: typeId)
+            return
+        }
         let startDate = (await getSyncDate(for: typeId.rawValue)) ?? Date.distantPast
         let endDate = Date()
         var totalInserted = 0
@@ -1044,6 +1050,17 @@ final class SyncService {
         Set(anchoredQuantityTypes.map { $0.0.rawValue })
     }
 
+    /// Category types synced via HKAnchoredObjectQuery. Sonno: Apple Watch
+    /// scrive i sample della notte retroattivamente quando re-syncs con
+    /// l'iPhone (anche ore dopo). Il path windowed con `.strictStartDate`
+    /// e lastSyncDate gia' avanzata si "perdeva" intere notti.
+    static let anchoredCategoryTypes: [HKCategoryTypeIdentifier] = [
+        .sleepAnalysis,
+    ]
+    static var anchoredCategoryIds: Set<String> {
+        Set(anchoredCategoryTypes.map { $0.rawValue })
+    }
+
     /// HealthKit Clinical Records (FHIR) → POST /api/v1/clinical/batch.
     /// Re-fetch full per tipo, UPSERT idempotente sul backend. Esegue gli
     /// 8 tipi in parallelo via TaskGroup (i record per tipo sono pochi,
@@ -1115,6 +1132,57 @@ final class SyncService {
             // tipo di lavoro che richiede di "amplificare" il count
             // visualizzato in dashboard via heartbeat).
             dailyStatsUpsertedThisSync += total
+        }
+    }
+
+    @MainActor
+    private func syncCategoryTypeAnchored(typeId: HKCategoryTypeIdentifier) async {
+        let anchorKey = "hk_category_anchor_v1_\(typeId.rawValue)"
+        let anchor: HKQueryAnchor? = {
+            guard let data = UserDefaults.standard.data(forKey: anchorKey) else { return nil }
+            return try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
+        }()
+
+        do {
+            let (added, deletedUUIDs, newAnchor) = try await healthKitManager.fetchCategorySamplesAnchored(
+                type: typeId, anchor: anchor
+            )
+
+            var totalInserted = 0
+            if !added.isEmpty {
+                let chunks = added.chunked(into: Constants.syncBatchSize)
+                let inserted = try await postChunksInParallel(chunks) { chunk in
+                    try await self.apiClient.postCategories(chunk)
+                }
+                totalInserted = inserted
+                totalSamplesSynced += inserted
+            }
+
+            // NB: il backend per le category samples non ha un endpoint
+            // bulk-delete-by-uuids (a differenza di samples/workouts). Le
+            // deletions HK per ora vengono ignorate qui — non e' un
+            // regression rispetto al path windowed precedente, che
+            // ignorava anch'esso le deletions.
+            _ = deletedUUIDs
+
+            let locked = isProtectedDataInaccessible()
+            let didAnything = !added.isEmpty || !deletedUUIDs.isEmpty
+            if let newAnchor, (didAnything || !locked) {
+                if let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
+                    UserDefaults.standard.set(data, forKey: anchorKey)
+                }
+            }
+
+            if totalInserted > 0 {
+                let msg = "\(typeId.rawValue.replacingOccurrences(of: "HKCategoryTypeIdentifier", with: "")): \(totalInserted) synced (anchored)"
+                syncLog.append(msg)
+                logger.info("\(msg)")
+            }
+        } catch {
+            if isProtectedDataError(error) { hadProtectedDataErrorThisSync = true }
+            let msg = "\(typeId.rawValue): anchored fetch failed - \(error.localizedDescription)"
+            syncLog.append(msg)
+            logger.error("\(msg)")
         }
     }
 
