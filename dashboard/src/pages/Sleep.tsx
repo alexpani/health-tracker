@@ -8,6 +8,7 @@ import { SLEEP_STAGES } from "@/lib/healthkit"
 import { formatDate } from "@/lib/utils"
 import { Hypnogram } from "@/components/charts/Hypnogram"
 import { SleepScoreCard } from "@/components/charts/SleepScoreCard"
+import { computeSleepScore, type SleepScoreResult } from "@/lib/sleepScore"
 import { Link } from "react-router-dom"
 import type { TimeRange } from "@/lib/types"
 
@@ -85,6 +86,7 @@ function SleepTooltip({ active, payload, label }: any) {
     inBed += v
     if (asleepLabels.includes(p.name)) asleep += v
   }
+  const score: SleepScoreResult | null = payload[0]?.payload?.__score ?? null
   // Percentuali sul totale visibile della barra (somma fasi 2-5 = inBed).
   const pct = (v: number) => (inBed > 0 ? Math.round((v / inBed) * 100) : 0)
   return (
@@ -119,6 +121,15 @@ function SleepTooltip({ active, payload, label }: any) {
           <span className="tabular-nums">{fmtDur(inBed)}</span>
         </div>
       </div>
+      {score && (
+        <div className="mt-2 pt-2 border-t flex items-center justify-between">
+          <span className="font-medium">Valutazione</span>
+          <span className="tabular-nums">
+            <span className={`font-semibold ${score.color}`}>{score.score}</span>
+            <span className="text-muted-foreground">/100 · {score.label}</span>
+          </span>
+        </div>
+      )}
     </div>
   )
 }
@@ -131,6 +142,9 @@ export default function Sleep() {
 
   // Aggregate per night (grouping by the "wake-up" date)
   const byNight: Record<string, Record<number, number>> = {}
+  // Tieni i sample raw per notte per poter calcolare lo score lite nel
+  // tooltip (servono start/end e value per risvegli e TIB).
+  const samplesByNight: Record<string, typeof data> = {}
   ;(data ?? []).forEach(s => {
     const start = new Date(s.start_date)
     const end = new Date(s.end_date)
@@ -139,6 +153,8 @@ export default function Sleep() {
     const nightKey = new Date(end.getFullYear(), end.getMonth(), end.getDate()).toISOString()
     if (!byNight[nightKey]) byNight[nightKey] = {}
     byNight[nightKey][s.value] = (byNight[nightKey][s.value] || 0) + durationMinutes
+    if (!samplesByNight[nightKey]) samplesByNight[nightKey] = []
+    samplesByNight[nightKey]!.push(s)
   })
 
   const chartData = Object.entries(byNight)
@@ -147,6 +163,7 @@ export default function Sleep() {
       Object.entries(SLEEP_STAGES).forEach(([k, v]) => {
         row[v.label] = stages[Number(k)] || 0
       })
+      row.__score = computeSleepScore(samplesByNight[day] ?? [])
       return row
     })
     .sort((a, b) => (a.day < b.day ? -1 : 1))
