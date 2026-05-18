@@ -324,9 +324,9 @@ export const CATEGORIES: Record<Category, { label: string; types: string[] }> = 
 export const SLEEP_STAGES: Record<number, { label: string; color: string }> = {
   0: { label: "A letto", color: "#94a3b8" },
   1: { label: "Addormentato (non specificato)", color: "#64748b" },
-  2: { label: "Sveglio", color: "#f87171" },
-  3: { label: "Core", color: "#60a5fa" },
-  4: { label: "Deep", color: "#1e40af" },
+  2: { label: "Veglia", color: "#f87171" },
+  3: { label: "Principale", color: "#60a5fa" },
+  4: { label: "Profondo", color: "#1e40af" },
   5: { label: "REM", color: "#a78bfa" },
 }
 

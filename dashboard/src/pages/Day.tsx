@@ -28,6 +28,7 @@ import { HealthNoteForm } from "@/components/HealthNoteForm"
 import { JournalForm } from "@/components/JournalForm"
 import { CATEGORY_COLORS, CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/healthNotes"
 import { DayCalendarSidebar } from "@/components/DayCalendarSidebar"
+import { Hypnogram } from "@/components/charts/Hypnogram"
 
 function todayLocal(): string {
   const d = new Date()
@@ -412,9 +413,10 @@ function SleepCard({ data }: { data: DaySnapshot }) {
           <StatRow label="Dormito" value={fmtDuration((s.asleep_min ?? 0) * 60)} />
           {s.deep_min != null && <StatRow label="Profondo" value={fmtDuration(s.deep_min * 60)} />}
           {s.rem_min != null && <StatRow label="REM" value={fmtDuration(s.rem_min * 60)} />}
-          {s.core_min != null && <StatRow label="Core" value={fmtDuration(s.core_min * 60)} />}
-          {s.awake_min != null && <StatRow label="Sveglio" value={fmtDuration(s.awake_min * 60)} />}
+          {s.core_min != null && <StatRow label="Principale" value={fmtDuration(s.core_min * 60)} />}
+          {s.awake_min != null && <StatRow label="Veglia" value={fmtDuration(s.awake_min * 60)} />}
           <StatRow label="Orario" value={`${fmtTime(s.start)} → ${fmtTime(s.end)}`} />
+          <Hypnogram date={data.date} />
         </>
       )}
     </DayCard>

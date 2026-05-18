@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { TimeRangeSelector, timeRangeToDates } from "@/components/controls/TimeRangeSelector"
@@ -6,6 +7,12 @@ import { useCategories } from "@/lib/queries"
 import { SLEEP_STAGES } from "@/lib/healthkit"
 import { formatDate } from "@/lib/utils"
 import type { TimeRange } from "@/lib/types"
+
+function fmtDur(m: number): string {
+  const h = Math.floor(m / 60)
+  const mm = Math.round(m % 60)
+  return h > 0 ? `${h}h ${mm.toString().padStart(2, "0")}m` : `${mm} min`
+}
 
 /** Tooltip custom: mostra le singole fasi + totale "Dormito" (Core+Deep+REM,
  *  esclude Sveglio) e "A letto" (somma di tutte le fasi visibili). */
@@ -19,36 +26,38 @@ function SleepTooltip({ active, payload, label }: any) {
     inBed += v
     if (asleepLabels.includes(p.name)) asleep += v
   }
-  const fmt = (m: number) => {
-    const h = Math.floor(m / 60)
-    const mm = Math.round(m % 60)
-    return h > 0 ? `${h}h ${mm.toString().padStart(2, "0")}m` : `${mm} min`
-  }
+  // Percentuali sul totale visibile della barra (somma fasi 2-5 = inBed).
+  const pct = (v: number) => (inBed > 0 ? Math.round((v / inBed) * 100) : 0)
   return (
     <div
       className="rounded-md border bg-card text-card-foreground shadow-md p-3 text-sm"
-      style={{ minWidth: 200 }}
+      style={{ minWidth: 220 }}
     >
       <div className="font-medium mb-2">{label ? formatDate(String(label)) : ""}</div>
       <div className="space-y-1">
-        {payload.map((p: any) => (
-          <div key={p.name} className="flex items-center justify-between gap-3">
-            <span className="flex items-center gap-2">
-              <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: p.color }} />
-              {p.name}
-            </span>
-            <span className="tabular-nums">{Math.round(Number(p.value) || 0)} min</span>
-          </div>
-        ))}
+        {payload.map((p: any) => {
+          const v = Number(p.value) || 0
+          return (
+            <div key={p.name} className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2">
+                <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: p.color }} />
+                {p.name}
+              </span>
+              <span className="tabular-nums">
+                {fmtDur(v)} <span className="text-muted-foreground">({pct(v)}%)</span>
+              </span>
+            </div>
+          )
+        })}
       </div>
       <div className="mt-2 pt-2 border-t space-y-1">
         <div className="flex items-center justify-between font-medium">
           <span>Dormito</span>
-          <span className="tabular-nums">{fmt(asleep)}</span>
+          <span className="tabular-nums">{fmtDur(asleep)}</span>
         </div>
         <div className="flex items-center justify-between text-muted-foreground">
           <span>A letto</span>
-          <span className="tabular-nums">{fmt(inBed)}</span>
+          <span className="tabular-nums">{fmtDur(inBed)}</span>
         </div>
       </div>
     </div>
@@ -56,6 +65,7 @@ function SleepTooltip({ active, payload, label }: any) {
 }
 
 export default function Sleep() {
+  const navigate = useNavigate()
   const [range, setRange] = useState<TimeRange>("30d")
   const dates = useMemo(() => timeRangeToDates(range), [range])
   const { data, isLoading } = useCategories("HKCategoryTypeIdentifierSleepAnalysis", dates.start, dates.end)
@@ -147,7 +157,19 @@ export default function Sleep() {
           )}
           {!isLoading && chartData.length > 0 && (
             <ResponsiveContainer width="100%" height={380}>
-              <BarChart data={chartData}>
+              <BarChart
+                data={chartData}
+                onClick={(e: any) => {
+                  const iso: string | undefined = e?.activePayload?.[0]?.payload?.day ?? e?.activeLabel
+                  if (!iso) return
+                  // iso e' un toISOString() costruito da una Date locale a
+                  // mezzanotte → ricostruisco YYYY-MM-DD in fuso locale.
+                  const d = new Date(iso)
+                  const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+                  navigate(`/day/${ymd}`)
+                }}
+                style={{ cursor: "pointer" }}
+              >
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                 <XAxis
                   dataKey="day"
