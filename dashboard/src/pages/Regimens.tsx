@@ -2,17 +2,24 @@ import { useEffect, useMemo, useState } from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { useDiarioActivePlan, useRegimens } from "@/lib/queries"
 import type { Regimen, RegimenKind } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
 import { RegimenTimeline } from "@/components/RegimenTimeline"
 import { formatPeriodDuration } from "@/lib/duration"
 
-const KIND_ORDER: RegimenKind[] = ["medication", "supplement", "diet", "training", "gear"]
+type TabId = "salute" | "sport" | "alimentazione" | "gear"
+
+const SALUTE_KINDS: RegimenKind[] = ["medication", "supplement"]
+const SPORT_KINDS:  RegimenKind[] = ["training"]
+const FOOD_KINDS:   RegimenKind[] = ["diet"]
+const GEAR_KINDS:   RegimenKind[] = ["gear"]
+const TAB_STORAGE_KEY = "regimens_active_tab_v2"
+const VALID_TABS: readonly TabId[] = ["salute", "sport", "alimentazione", "gear"]
 
 function isOngoing(r: Regimen): boolean {
   if (r.end_date == null) return true
-  // R is "active today" if end_date >= today
   const today = new Date()
   const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`
   return r.end_date >= todayIso
@@ -25,15 +32,26 @@ function fmtDate(iso: string | null): string {
 }
 
 export default function Regimens() {
+  const [activeTab, setActiveTab] = useState<TabId>(() => {
+    if (typeof window === "undefined") return "salute"
+    const v = sessionStorage.getItem(TAB_STORAGE_KEY)
+    return VALID_TABS.includes(v as TabId) ? (v as TabId) : "salute"
+  })
+  useEffect(() => {
+    sessionStorage.setItem(TAB_STORAGE_KEY, activeTab)
+  }, [activeTab])
+
   const [viewMode, setViewMode] = useState<'timeline' | 'table'>('timeline')
-  // Filtri kind multi-select indipendenti. Set vuoto = "Tutti" (nessun
-  // filtro, mostra tutto). Set con uno o piu' kind = mostra solo quelli.
-  // Filtro applicato client-side (i regimi sono pochi — decine — quindi
-  // fetcho tutto e filtro qui invece di duplicare le call al backend).
+  // Filtri kind multi-select usati solo nella tab Salute. Set vuoto = "Tutti".
   const [selectedKinds, setSelectedKinds] = useState<Set<RegimenKind>>(new Set())
   const [includeEnded, setIncludeEnded] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [editing, setEditing] = useState<Regimen | null>(null)
+
+  // Alimentazione: la Timeline strippa i `kind='diet'` a monte
+  // (RegimenTimeline.tsx) — sarebbe sempre vuota. Forziamo Tabella e
+  // nascondiamo il toggle solo in questa tab.
+  const effectiveViewMode: 'timeline' | 'table' = activeTab === 'alimentazione' ? 'table' : viewMode
 
   const q = useRegimens({
     include_ended: includeEnded,
@@ -48,22 +66,8 @@ export default function Regimens() {
     })
   }
 
-  // Quando si passa a Timeline e "diet" e' nel set (non e' rappresentato
-  // nella Timeline), lo rimuoviamo per evitare confusione.
-  useEffect(() => {
-    if (viewMode === 'timeline' && selectedKinds.has('diet')) {
-      setSelectedKinds(prev => {
-        const next = new Set(prev)
-        next.delete('diet')
-        return next
-      })
-    }
-  }, [viewMode, selectedKinds])
-
-  // Piano alimentare attivo dal diario alimentare. Lo iniettamo come Regimen
-  // sintetico (id=-1, source='diario') in modo che la pagina /regimens
-  // mostri sotto "Piano alimentare" lo stesso piano che la /day/:date
-  // riconosce. Read-only — l'editing avviene nel diario.
+  // Piano alimentare attivo dal diario, iniettato come Regimen sintetico nella
+  // tab Alimentazione (read-only — editing avviene nel diario).
   const dietQ = useDiarioActivePlan()
   const dietPlanRegimen = useMemo<Regimen | null>(() => {
     if (!dietQ.data) return null
@@ -88,135 +92,215 @@ export default function Regimens() {
     }
   }, [dietQ.data])
 
-  // Applica il filtro multi-kind. Set vuoto = nessun filtro.
-  const filteredRegimens = useMemo(() => {
-    const all = q.data ?? []
+  // Subset Salute (medication + supplement) filtrato per chip kind.
+  const saluteRegimens = useMemo(() => {
+    const all = (q.data ?? []).filter(r => SALUTE_KINDS.includes(r.kind as RegimenKind))
     if (selectedKinds.size === 0) return all
     return all.filter(r => selectedKinds.has(r.kind as RegimenKind))
   }, [q.data, selectedKinds])
+  const saluteGrouped = useMemo(() => groupByStatus(saluteRegimens), [saluteRegimens])
 
-  const grouped = useMemo(() => {
-    const out: Record<"ongoing" | "ended", Regimen[]> = { ongoing: [], ended: [] }
-    for (const r of filteredRegimens) {
-      ;(isOngoing(r) ? out.ongoing : out.ended).push(r)
+  // Subset Sport (training).
+  const sportRegimens = useMemo(
+    () => (q.data ?? []).filter(r => r.kind === "training"),
+    [q.data]
+  )
+  const sportGrouped = useMemo(() => groupByStatus(sportRegimens), [sportRegimens])
+
+  // Subset Alimentazione (diet manuali + piano dal diario iniettato in cima).
+  const foodRegimens = useMemo(
+    () => (q.data ?? []).filter(r => r.kind === "diet"),
+    [q.data]
+  )
+  const foodGrouped = useMemo(() => {
+    const grouped = groupByStatus(foodRegimens)
+    if (dietPlanRegimen) grouped.ongoing.unshift(dietPlanRegimen)
+    return grouped
+  }, [foodRegimens, dietPlanRegimen])
+
+  // Subset Equipaggiamento (gear).
+  const gearRegimens = useMemo(
+    () => (q.data ?? []).filter(r => r.kind === "gear"),
+    [q.data]
+  )
+  const gearGrouped = useMemo(() => groupByStatus(gearRegimens), [gearRegimens])
+
+  const newDefaultKind: RegimenKind = (() => {
+    switch (activeTab) {
+      case "sport": return "training"
+      case "alimentazione": return "diet"
+      case "gear": return "gear"
+      case "salute":
+      default: return "medication"
     }
-    // Inietto il piano del diario in cima alla sezione "ongoing" (e' attivo
-    // per definizione: il diario espone solo il piano corrente). Solo se
-    // il filtro consente "diet" (set vuoto = tutti, o set che contiene "diet").
-    if (dietPlanRegimen && (selectedKinds.size === 0 || selectedKinds.has("diet"))) {
-      out.ongoing.unshift(dietPlanRegimen)
-    }
-    return out
-  }, [filteredRegimens, dietPlanRegimen, selectedKinds])
+  })()
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Regimi</h1>
-          <p className="text-muted-foreground">Farmaci, integratori, piani alimentari, piani di allenamento</p>
+          <p className="text-muted-foreground">Farmaci, integratori, allenamento, alimentazione, equipaggiamento</p>
         </div>
         <Button onClick={() => { setEditing(null); setShowAdd(true) }}>
           <Plus className="h-4 w-4 mr-1" /> Nuovo
         </Button>
       </div>
 
-      {/* Timeline/Table view toggle */}
-      <div className="flex gap-2">
-        <Button
-          variant={viewMode === 'timeline' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setViewMode('timeline')}
-        >
-          Timeline
-        </Button>
-        <Button
-          variant={viewMode === 'table' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setViewMode('table')}
-        >
-          Tabella
-        </Button>
-      </div>
+      <Tabs value={activeTab} onValueChange={v => setActiveTab(v as TabId)}>
+        <TabsList>
+          <TabsTrigger value="salute">Salute</TabsTrigger>
+          <TabsTrigger value="sport">Sport</TabsTrigger>
+          <TabsTrigger value="alimentazione">Alimentazione</TabsTrigger>
+          <TabsTrigger value="gear">Equipaggiamento</TabsTrigger>
+        </TabsList>
 
-      {/* Filtri kind multi-select indipendenti, condivisi fra Timeline e
-          Tabella. "Tutti" = set vuoto; click su un chip kind lo aggiunge
-          o lo rimuove dal set. */}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant={selectedKinds.size === 0 ? "default" : "outline"}
-          size="sm"
-          onClick={() => setSelectedKinds(new Set())}
-        >
-          Tutti
-        </Button>
-        {KIND_ORDER.map(k => {
-          // "Piano alimentare" non e' visualizzato nella Timeline
-          if (viewMode === 'timeline' && k === 'diet') return null
-          const isOn = selectedKinds.has(k)
-          return (
+        {/* Timeline/Table view toggle — nascosto in Alimentazione
+            (la Timeline ignora i diet, sarebbe sempre vuota). */}
+        {activeTab !== 'alimentazione' && (
+          <div className="mt-4 flex gap-2">
             <Button
-              key={k}
-              variant={isOn ? "default" : "outline"}
+              variant={viewMode === 'timeline' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => toggleKind(k)}
+              onClick={() => setViewMode('timeline')}
             >
-              {KIND_LABELS[k]}
+              Timeline
             </Button>
-          )
-        })}
-        {viewMode === 'table' && (
-          <>
-            <div className="flex-1" />
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={includeEnded} onChange={e => setIncludeEnded(e.target.checked)} />
-              Mostra terminati
-            </label>
-          </>
+            <Button
+              variant={viewMode === 'table' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setViewMode('table')}
+            >
+              Tabella
+            </Button>
+          </div>
         )}
-      </div>
 
-      {/* Timeline view */}
-      {viewMode === 'timeline' && (
-        <>
-          <RegimenTimeline
-            regimens={filteredRegimens}
+        <TabsContent value="salute" className="space-y-6">
+          {/* Chip kind: utili in Salute perche' ci sono 2 kind. */}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={selectedKinds.size === 0 ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSelectedKinds(new Set())}
+            >
+              Tutti
+            </Button>
+            {SALUTE_KINDS.map(k => {
+              const isOn = selectedKinds.has(k)
+              return (
+                <Button
+                  key={k}
+                  variant={isOn ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => toggleKind(k)}
+                >
+                  {KIND_LABELS[k]}
+                </Button>
+              )
+            })}
+            {effectiveViewMode === 'table' && (
+              <>
+                <div className="flex-1" />
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={includeEnded} onChange={e => setIncludeEnded(e.target.checked)} />
+                  Mostra terminati
+                </label>
+              </>
+            )}
+          </div>
+
+          <TabBody
+            viewMode={effectiveViewMode}
             isLoading={q.isLoading}
+            dataReady={!!q.data}
+            regimens={saluteRegimens}
+            grouped={saluteGrouped}
+            kindsOrder={SALUTE_KINDS}
+            includeEnded={includeEnded}
+            emptyLabel="Nessun farmaco o integratore registrato."
+            onEdit={r => { setShowAdd(false); setEditing(r) }}
             onRegimensChange={() => q.refetch()}
           />
-          {q.isLoading && <div className="h-32 animate-pulse bg-muted rounded" />}
-          {q.data && filteredRegimens.length === 0 && (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
-                Nessun regime registrato. Premi <strong>Nuovo</strong> per aggiungerne uno.
-              </CardContent>
-            </Card>
-          )}
-        </>
-      )}
+        </TabsContent>
 
-      {/* Table view */}
-      {viewMode === 'table' && (
-        <>
-          <Section title="In corso" items={grouped.ongoing} onEdit={r => { setShowAdd(false); setEditing(r) }} />
-          {includeEnded && grouped.ended.length > 0 && (
-            <Section title="Terminati" items={grouped.ended} onEdit={r => { setShowAdd(false); setEditing(r) }} />
+        <TabsContent value="sport" className="space-y-6">
+          {effectiveViewMode === 'table' && (
+            <div className="flex items-center justify-end">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={includeEnded} onChange={e => setIncludeEnded(e.target.checked)} />
+                Mostra terminati
+              </label>
+            </div>
           )}
 
-          {q.isLoading && <div className="h-32 animate-pulse bg-muted rounded" />}
-          {q.data && q.data.length === 0 && (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
-                Nessun regime registrato. Premi <strong>Nuovo</strong> per aggiungerne uno.
-              </CardContent>
-            </Card>
+          <TabBody
+            viewMode={effectiveViewMode}
+            isLoading={q.isLoading}
+            dataReady={!!q.data}
+            regimens={sportRegimens}
+            grouped={sportGrouped}
+            kindsOrder={SPORT_KINDS}
+            includeEnded={includeEnded}
+            emptyLabel="Nessun piano di allenamento registrato. I piani di allenamento si autodetettano dai workout sincronizzati."
+            onEdit={r => { setShowAdd(false); setEditing(r) }}
+            onRegimensChange={() => q.refetch()}
+          />
+        </TabsContent>
+
+        <TabsContent value="alimentazione" className="space-y-6">
+          {effectiveViewMode === 'table' && (
+            <div className="flex items-center justify-end">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={includeEnded} onChange={e => setIncludeEnded(e.target.checked)} />
+                Mostra terminati
+              </label>
+            </div>
           )}
-        </>
-      )}
+
+          <TabBody
+            viewMode={effectiveViewMode}
+            isLoading={q.isLoading}
+            dataReady={!!q.data}
+            regimens={foodRegimens}
+            grouped={foodGrouped}
+            kindsOrder={FOOD_KINDS}
+            includeEnded={includeEnded}
+            emptyLabel="Nessun piano alimentare registrato. Il piano corrente arriva dal diario alimentare."
+            onEdit={r => { setShowAdd(false); setEditing(r) }}
+            onRegimensChange={() => q.refetch()}
+          />
+        </TabsContent>
+
+        <TabsContent value="gear" className="space-y-6">
+          {effectiveViewMode === 'table' && (
+            <div className="flex items-center justify-end">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={includeEnded} onChange={e => setIncludeEnded(e.target.checked)} />
+                Mostra terminati
+              </label>
+            </div>
+          )}
+
+          <TabBody
+            viewMode={effectiveViewMode}
+            isLoading={q.isLoading}
+            dataReady={!!q.data}
+            regimens={gearRegimens}
+            grouped={gearGrouped}
+            kindsOrder={GEAR_KINDS}
+            includeEnded={includeEnded}
+            emptyLabel="Nessun equipaggiamento registrato. Premi Nuovo per aggiungere un paio di scarpe."
+            onEdit={r => { setShowAdd(false); setEditing(r) }}
+            onRegimensChange={() => q.refetch()}
+          />
+        </TabsContent>
+      </Tabs>
 
       {(showAdd || editing) && (
         <RegimenForm
           regimen={editing}
+          defaults={editing ? undefined : { kind: newDefaultKind }}
           onClose={() => { setShowAdd(false); setEditing(null) }}
         />
       )}
@@ -224,16 +308,102 @@ export default function Regimens() {
   )
 }
 
-function Section({ title, items, onEdit }: { title: string; items: Regimen[]; onEdit: (r: Regimen) => void }) {
+function groupByStatus(items: Regimen[]): { ongoing: Regimen[]; ended: Regimen[] } {
+  const out: { ongoing: Regimen[]; ended: Regimen[] } = { ongoing: [], ended: [] }
+  for (const r of items) {
+    ;(isOngoing(r) ? out.ongoing : out.ended).push(r)
+  }
+  return out
+}
+
+function TabBody({
+  viewMode, isLoading, dataReady, regimens, grouped, kindsOrder, includeEnded,
+  emptyLabel, onEdit, onRegimensChange,
+}: {
+  viewMode: 'timeline' | 'table'
+  isLoading: boolean
+  dataReady: boolean
+  regimens: Regimen[]
+  grouped: { ongoing: Regimen[]; ended: Regimen[] }
+  kindsOrder: RegimenKind[]
+  includeEnded: boolean
+  emptyLabel: string
+  onEdit: (r: Regimen) => void
+  onRegimensChange: () => void
+}) {
+  // Per Timeline: includiamo dietPlanRegimen synth? No — Timeline lo filtra
+  // gia' a monte e qui passiamo solo `regimens` "veri". Per Tabella usiamo
+  // `grouped` che puo' includere il synth diet in cima.
+  const isEmpty = dataReady && regimens.length === 0 && grouped.ongoing.length === 0
+  return (
+    <>
+      {viewMode === 'timeline' && (
+        <>
+          <RegimenTimeline
+            regimens={regimens}
+            isLoading={isLoading}
+            onRegimensChange={onRegimensChange}
+          />
+          {isLoading && <div className="h-32 animate-pulse bg-muted rounded" />}
+          {isEmpty && (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                {emptyLabel}
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+
+      {viewMode === 'table' && (
+        <>
+          <Section
+            title="In corso"
+            items={grouped.ongoing}
+            kindsOrder={kindsOrder}
+            onEdit={onEdit}
+          />
+          {includeEnded && grouped.ended.length > 0 && (
+            <Section
+              title="Terminati"
+              items={grouped.ended}
+              kindsOrder={kindsOrder}
+              onEdit={onEdit}
+            />
+          )}
+          {isLoading && <div className="h-32 animate-pulse bg-muted rounded" />}
+          {isEmpty && (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                {emptyLabel}
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+    </>
+  )
+}
+
+function Section({
+  title,
+  items,
+  kindsOrder,
+  onEdit,
+}: {
+  title: string
+  items: Regimen[]
+  kindsOrder: RegimenKind[]
+  onEdit: (r: Regimen) => void
+}) {
   if (items.length === 0) return null
-  // group by kind within section
   const byKind: Record<RegimenKind, Regimen[]> = { medication: [], supplement: [], diet: [], training: [], gear: [] }
   for (const r of items) byKind[r.kind].push(r)
 
   return (
     <div className="space-y-3">
       <h2 className="text-lg font-semibold">{title} ({items.length})</h2>
-      {KIND_ORDER.map(kind => byKind[kind].length > 0 && (
+      {kindsOrder.map(kind => byKind[kind].length > 0 && (
         <Card key={kind}>
           <CardHeader>
             <CardTitle className="text-base">{KIND_LABELS[kind]}</CardTitle>
