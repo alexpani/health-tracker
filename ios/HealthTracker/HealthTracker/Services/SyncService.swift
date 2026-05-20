@@ -955,24 +955,24 @@ final class SyncService {
 
                 group.addTask { [self, dayFmt] in
                     do {
-                        // Timeout 30s. HKStatisticsCollectionQuery puo'
-                        // hangare indefinitamente per tipi senza dati (o
-                        // edge case HK), facendo bloccare l'intero sync a
-                        // "Daily statistics" al N% senza modo di sapere
-                        // quale tipo e' quello bloccato. Col timeout, il
-                        // tipo problematico viene marcato `failed` e gli
-                        // altri continuano normalmente.
+                        // Timeout 60s su TUTTO il lavoro del tipo: la fetch
+                        // HK (HKStatisticsCollectionQuery puo' hangare per
+                        // tipi senza dati) E la POST al backend (una POST
+                        // impiantata bloccherebbe altrimenti l'intero sync a
+                        // "Daily statistics" al N%). Col timeout il tipo
+                        // problematico viene marcato `failed` e gli altri
+                        // continuano. L'anchor viene salvato solo se tutto
+                        // il blocco e' andato a buon fine entro il timeout.
                         let healthKitRef = healthKitManager
-                        let points = try await runWithTimeout(seconds: 30) {
-                            try await healthKitRef.fetchDailyStatistics(
+                        let apiRef = apiClient
+                        let upserted = try await runWithTimeout(seconds: 60) {
+                            let points = try await healthKitRef.fetchDailyStatistics(
                                 type: typeId, unit: unit, from: from, to: endOfToday
                             )
-                        }
-                        let nonZero = points.filter { $0.value > 0 }
-                        var upserted = 0
-                        if !nonZero.isEmpty {
+                            let nonZero = points.filter { $0.value > 0 }
+                            if nonZero.isEmpty { return 0 }
                             let payload = nonZero.map { (date: dayFmt.string(from: $0.date), value: $0.value) }
-                            upserted = try await apiClient.postDailyStats(type: typeId.rawValue, points: payload)
+                            return try await apiRef.postDailyStats(type: typeId.rawValue, points: payload)
                         }
                         UserDefaults.standard.set(now, forKey: anchorKey)
                         return (typeName, upserted, false)
@@ -983,6 +983,10 @@ final class SyncService {
             }
 
             for await (typeName, upserted, protectedErr) in group {
+                // "Ferma sync" durante questa fase: cancella i task ancora in
+                // volo. fetch HK e POST URLSession sono cancellation-aware,
+                // quindi mollano subito invece di aspettare il timeout 60s.
+                if shouldStop { group.cancelAll() }
                 done += 1
                 typeProgress = Double(done) / totalTypes
                 if protectedErr { hadProtectedDataErrorThisSync = true }

@@ -175,8 +175,13 @@ actor APIClient {
 
     init() {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 120
-        config.timeoutIntervalForResource = 300
+        // Timeout volutamente stretti: il backend e' su LAN, una richiesta
+        // sana risponde in <1s. 120s x 3 retry = ~6 min di stallo apparente
+        // se una POST si impianta — troppo. 45s/90s lascia comunque margine
+        // ampio per la POST batch piu' grande (storico daily-stats al primo
+        // sync) senza far sembrare l'app freezata.
+        config.timeoutIntervalForRequest = 45
+        config.timeoutIntervalForResource = 90
         config.waitsForConnectivity = true
         self.session = URLSession(configuration: config)
         self.dateFormatter = ISO8601DateFormatter()
