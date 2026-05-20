@@ -1028,6 +1028,43 @@ final class SyncService {
         (.dietaryCarbohydrates,  .gram()),
         (.dietaryFatTotal,       .gram()),
         (.dietaryProtein,        .gram()),
+        (.dietaryFiber,          .gram()),
+        (.dietarySugar,          .gram()),
+        (.dietaryWater,          .liter()),
+        (.dietaryCaffeine,       .gram()),
+        // Vitali a bassa frequenza che l'Apple Watch (o sorgenti esterne tipo
+        // Withings) scrive in HealthKit retroattivamente: il sample ha
+        // startDate nel passato (RestingHeartRate ed il temp da polso sono
+        // calcolati sulla finestra notturna, VO2Max dopo i workout, la
+        // pressione arriva dal device esterno) ma compare in HealthKit DOPO
+        // che la `lastSyncDate` windowed e' gia' avanzata oltre quello
+        // startDate — il path `.strictStartDate` lo perde per sempre. A 1
+        // sample/giorno una singola perdita = un giorno intero mancante,
+        // quindi e' molto piu' grave che per i tipi ad alta frequenza.
+        // NB: HeartRate e le metriche fitness da workout (running/cycling
+        // power/speed/cadence/...) restano sul path windowed: sono ~1Hz,
+        // milioni di sample, e l'anchored query li restituirebbe in un
+        // singolo callback (rischio OOM). Per loro l'aggregato sopravvive
+        // anche perdendo qualche sample.
+        (.restingHeartRate,          HKUnit.count().unitDivided(by: .minute())),
+        (.walkingHeartRateAverage,   HKUnit.count().unitDivided(by: .minute())),
+        (.heartRateVariabilitySDNN,  .secondUnit(with: .milli)),
+        (.oxygenSaturation,          .percent()),
+        (.respiratoryRate,           HKUnit.count().unitDivided(by: .minute())),
+        (.bodyTemperature,           .degreeCelsius()),
+        (.bloodPressureSystolic,     .millimeterOfMercury()),
+        (.bloodPressureDiastolic,    .millimeterOfMercury()),
+        (.bloodGlucose,              HKUnit.moleUnit(with: .milli, molarMass: HKUnitMolarMassBloodGlucose).unitDivided(by: .liter())),
+        (.vo2Max,                    HKUnit(from: "ml/(kg*min)")),
+        // Metriche di mobilita' calcolate dal telefono in modo asincrono
+        // (anch'esse scritte con startDate retrodatato), basso volume.
+        (.walkingSpeed,                   HKUnit.meter().unitDivided(by: .second())),
+        (.walkingStepLength,              .meter()),
+        (.walkingAsymmetryPercentage,     .percent()),
+        (.walkingDoubleSupportPercentage, .percent()),
+        (.stairAscentSpeed,               HKUnit.meter().unitDivided(by: .second())),
+        (.stairDescentSpeed,              HKUnit.meter().unitDivided(by: .second())),
+        (.sixMinuteWalkTestDistance,      .meter()),
         // Apple Watch cumulative activity types — Watch writes samples to
         // HealthKit retroactively when it syncs with the iPhone (often
         // hours after the activity). The windowed lastSyncDate path with

@@ -51,8 +51,8 @@ SwiftUI native app targeting iOS 17+.
 - Auto-sync on launch + foreground (10-min throttle), plus hourly `BGAppRefreshTask` fallback and **Significant Location Changes** wake-ups (CoreLocation SLC monitoring; the app uses cell-tower changes as a wake signal only — no GPS, no coordinates persisted)
 - **Writes** pending data from web apps to Apple Health via `HKHealthStore.save()`
 - **Deletes** samples via `HKHealthStore.delete()` (only samples the app created — HealthKit rule)
-- **Propagates Apple Health deletions**: workouts and body-metric samples (peso, BMI, grasso, magra, altezza, vita) are synced via `HKAnchoredObjectQuery`, so cancellations on the phone side are mirrored to the backend (and auto-blacklisted so they can't re-appear)
-- **Handles retroactive writes**: third-party scales like Withings write samples to HealthKit with `startDate` in the past but `creationDate` later; the anchored queries catch them reliably where a windowed `HKSampleQuery` would miss them
+- **Propagates Apple Health deletions**: workouts and ~30 low/medium-volume quantity types (body metrics, dietary, low-frequency vitals like resting heart rate / HRV / VO2 max, mobility metrics) are synced via `HKAnchoredObjectQuery`, so cancellations on the phone side are mirrored to the backend (and auto-blacklisted so they can't re-appear)
+- **Handles retroactive writes**: third-party scales like Withings — and the Apple Watch itself for resting HR, wrist temperature and VO2 max — write samples to HealthKit with `startDate` in the past but `creationDate` later; the anchored queries catch them reliably where a windowed `HKSampleQuery` would miss them (critical for once-a-day metrics, where a single missed sample loses a whole day)
 - Progress UI: per-type progress bar, sample counter, stop button, **date reached** display
 - Persistent sync summary (last sync log, duration, samples) across app launches via UserDefaults
 - Tabs: **Sync (default)**, Dashboard (today's body metrics), Settings
