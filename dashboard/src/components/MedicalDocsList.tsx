@@ -111,9 +111,11 @@ export default function MedicalDocsList({
                 >
                   <div className="flex items-center gap-2">
                     <span className="flex-1 truncate text-sm font-medium">
-                      {d.title || (d.analysis_status === "pending"
-                        ? "Analisi IA in corso…"
-                        : "(senza titolo)")}
+                      {d.title
+                        ? (d.doctor_name ? `${d.title} - ${d.doctor_name}` : d.title)
+                        : (d.analysis_status === "pending"
+                            ? "Analisi IA in corso…"
+                            : "(senza titolo)")}
                     </span>
                     {d.analysis_status === "pending" && (
                       <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
