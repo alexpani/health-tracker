@@ -144,6 +144,25 @@ async def _analyze_document(doc_id: int, data: bytes, section: str) -> None:
             content_text = await anyio.to_thread.run_sync(
                 medical_docs_ingest.extract_text, data
             )
+            # PDF scansionato (niente layer di testo) → OCR: genera un PDF
+            # cercabile e sostituisce il file su disco.
+            if not medical_docs_ingest.is_searchable(content_text):
+                ocr_bytes = await anyio.to_thread.run_sync(
+                    medical_docs_ingest.ocr_pdf, data
+                )
+                if ocr_bytes:
+                    doc_file = (await db.execute(
+                        select(MedicalDocFile)
+                        .where(MedicalDocFile.id == doc.file_id)
+                    )).scalar_one_or_none()
+                    if doc_file is not None:
+                        path = settings.medical_documents_dir / doc_file.relative_path
+                        path.write_bytes(ocr_bytes)
+                        doc_file.size_bytes = len(ocr_bytes)
+                    data = ocr_bytes
+                    content_text = await anyio.to_thread.run_sync(
+                        medical_docs_ingest.extract_text, data
+                    )
             cat_rows = (await db.execute(
                 select(MedicalDocCategory)
                 .where(MedicalDocCategory.section == section)

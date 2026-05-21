@@ -16,6 +16,7 @@ import hashlib
 import io
 import json
 import logging
+import tempfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -108,6 +109,37 @@ def extract_text(pdf_bytes: bytes) -> str:
     except Exception:
         logger.debug("medical_docs: estrazione testo fallita", exc_info=True)
         return ""
+
+
+def is_searchable(text_extracted: str) -> bool:
+    """True se il PDF ha gia' un layer di testo utile (non e' scansionato)."""
+    return len(text_extracted.strip()) >= 30
+
+
+def ocr_pdf(pdf_bytes: bytes) -> bytes | None:
+    """Converte un PDF scansionato in un PDF cercabile aggiungendo un layer
+    di testo OCR (ocrmypdf + tesseract, lingua ita+eng). Ritorna i nuovi
+    bytes del PDF, o `None` se l'OCR fallisce. `skip_text=True` lascia
+    intatte le pagine che hanno gia' del testo (PDF misti)."""
+    try:
+        import ocrmypdf
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as inp, \
+             tempfile.NamedTemporaryFile(suffix=".pdf") as outp:
+            inp.write(pdf_bytes)
+            inp.flush()
+            ocrmypdf.ocr(
+                inp.name,
+                outp.name,
+                language="ita+eng",
+                skip_text=True,
+                progress_bar=False,
+                optimize=0,
+            )
+            outp.seek(0)
+            return outp.read()
+    except Exception:
+        logger.warning("medical_docs: OCR del PDF fallito", exc_info=True)
+        return None
 
 
 # ---------------------------------------------------------------------------
