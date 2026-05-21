@@ -4,12 +4,13 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceArea,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts"
-import { ChevronLeft } from "lucide-react"
+import { ChevronLeft, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -94,6 +95,87 @@ function syncByNearestTime(
   return best
 }
 
+/** Intervallo X (epoch ms) selezionato trascinando su un grafico. */
+type ChartRange = { start: number; end: number }
+
+type ChartPoint = { t: number; value: number }
+
+/** Media dei valori di una serie nella finestra temporale [start, end] (ms). */
+function avgInRange(data: ChartPoint[], start: number, end: number): number | null {
+  let sum = 0
+  let n = 0
+  for (const d of data) {
+    if (d.t >= start && d.t <= end) {
+      sum += d.value
+      n++
+    }
+  }
+  return n > 0 ? sum / n : null
+}
+
+type DragHandlers = {
+  onMouseDown: (e: { activeLabel?: string | number } | null) => void
+  onMouseMove: (e: { activeLabel?: string | number } | null) => void
+  onMouseUp: () => void
+}
+
+/** Grafico time-series di un workout: linea singola, asse X temporale
+ *  condiviso, tooltip sincronizzati, e drag-to-select di un intervallo
+ *  (ReferenceArea blu) propagato a tutti gli altri grafici. */
+function MetricChart({
+  data,
+  color,
+  height = 220,
+  yDomain,
+  yTickFormatter,
+  tooltipFormatter,
+  xAxisProps,
+  msAxisFmt,
+  activeRange,
+  drag,
+}: {
+  data: ChartPoint[]
+  color: string
+  height?: number
+  yDomain?: [string | number, string | number]
+  yTickFormatter?: (v: number) => string
+  tooltipFormatter: (v: number) => [string, string]
+  xAxisProps: object
+  msAxisFmt: (ms: number) => string
+  activeRange: ChartRange | null
+  drag: DragHandlers
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <LineChart
+        data={data}
+        syncId="workout-charts"
+        syncMethod={syncByNearestTime}
+        onMouseDown={drag.onMouseDown}
+        onMouseMove={drag.onMouseMove}
+        onMouseUp={drag.onMouseUp}
+        style={{ cursor: "crosshair", userSelect: "none" }}
+      >
+        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+        <XAxis {...xAxisProps} />
+        <YAxis tick={{ fontSize: 12 }} domain={yDomain} tickFormatter={yTickFormatter} />
+        <Tooltip labelFormatter={msAxisFmt} formatter={tooltipFormatter} />
+        {activeRange && (
+          <ReferenceArea
+            x1={activeRange.start}
+            x2={activeRange.end}
+            fill="#3b82f6"
+            fillOpacity={0.12}
+            stroke="#3b82f6"
+            strokeOpacity={0.4}
+          />
+        )}
+        <Line dataKey="value" stroke={color} strokeWidth={2} dot={false} isAnimationActive={false} />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
 function MetricBox({ label, value, unit, color }: { label: string; value: string; unit?: string; color?: string }) {
   return (
     <div className="space-y-1">
@@ -125,6 +207,48 @@ export default function WorkoutDetail() {
   // sotto in base al kind.
   type Highlight = { kind: "km" | "activity"; id: number }
   const [highlight, setHighlight] = useState<Highlight | null>(null)
+
+  // Drag-to-select sui grafici time-series: si trascina orizzontalmente per
+  // selezionare un intervallo; la ReferenceArea blu e il popover con le medie
+  // sono condivisi da tutti i grafici (asse X = epoch ms comune).
+  const [dragStart, setDragStart] = useState<number | null>(null)
+  const [dragEnd, setDragEnd] = useState<number | null>(null)
+  const [selection, setSelection] = useState<ChartRange | null>(null)
+
+  const dragHandlers: DragHandlers = {
+    onMouseDown: e => {
+      const x = e?.activeLabel
+      if (x == null) return
+      setDragStart(Number(x))
+      setDragEnd(Number(x))
+      setSelection(null)
+    },
+    onMouseMove: e => {
+      const x = e?.activeLabel
+      if (x == null) return
+      setDragStart(prev => {
+        if (prev != null) setDragEnd(Number(x))
+        return prev
+      })
+    },
+    onMouseUp: () => {
+      setDragStart(prevStart => {
+        setDragEnd(prevEnd => {
+          if (prevStart != null && prevEnd != null && prevStart !== prevEnd) {
+            setSelection({ start: Math.min(prevStart, prevEnd), end: Math.max(prevStart, prevEnd) })
+          }
+          return null
+        })
+        return null
+      })
+    },
+  }
+
+  const activeRange: ChartRange | null =
+    selection ??
+    (dragStart != null && dragEnd != null && dragStart !== dragEnd
+      ? { start: Math.min(dragStart, dragEnd), end: Math.max(dragStart, dragEnd) }
+      : null)
 
   useEffect(() => {
     setTitleDraft(workout?.title ?? "")
@@ -406,6 +530,62 @@ export default function WorkoutDetail() {
     const arr = (activeCal.data?.data as Sample[] | undefined) ?? []
     return arr.reduce((s, x) => s + x.value, 0)
   }, [activeCal.data])
+
+  // Medie di ogni metrica nella finestra selezionata, per il popover.
+  const selectionStats = useMemo(() => {
+    if (!selection) return null
+    const items: { label: string; value: string; color: string }[] = []
+    const push = (
+      label: string,
+      data: ChartPoint[],
+      color: string,
+      fmt: (v: number) => string,
+    ) => {
+      const a = avgInRange(data, selection.start, selection.end)
+      if (a !== null) items.push({ label, value: fmt(a), color })
+    }
+    push("Battito", hrChartData, "#ef4444", v => `${Math.round(v)} bpm`)
+    push("Velocità", speedChartData, "#22c55e", v => {
+      if (v <= 0) return `${v.toFixed(2)} km/h`
+      const pace = 60 / v
+      const m = Math.floor(pace)
+      const s = Math.round((pace - m) * 60)
+      const paceStr = s === 60 ? `${m + 1}:00` : `${m}:${String(s).padStart(2, "0")}`
+      return `${v.toFixed(2)} km/h · ${paceStr}/km`
+    })
+    push("Potenza", powerChartData, "#f97316", v => `${Math.round(v)} W`)
+    push("Cadenza", cadenceChartData, "#38bdf8", v => `${Math.round(v)} rpm`)
+    push("Vertical ratio", verticalRatioChartData, "#a855f7", v => `${v.toFixed(1)} %`)
+    push("Oscillazione vert.", verticalOscChartData, "#86efac", v => `${v.toFixed(1)} cm`)
+    push("Contatto col suolo", groundContactChartData, "#4ade80", v => `${Math.round(v)} ms`)
+    push("Lunghezza falcata", strideLengthChartData, "#16a34a", v => `${v.toFixed(1)} cm`)
+    return {
+      durationS: Math.round((selection.end - selection.start) / 1000),
+      startMs: selection.start,
+      endMs: selection.end,
+      items,
+    }
+  }, [
+    selection,
+    hrChartData,
+    speedChartData,
+    powerChartData,
+    cadenceChartData,
+    verticalRatioChartData,
+    verticalOscChartData,
+    groundContactChartData,
+    strideLengthChartData,
+  ])
+
+  const hasAnyChart =
+    (hrChartData.length > 1 && hrAggregatedOnly === null) ||
+    speedChartData.length > 0 ||
+    powerChartData.length > 0 ||
+    cadenceChartData.length > 0 ||
+    verticalRatioChartData.length > 0 ||
+    verticalOscChartData.length > 0 ||
+    groundContactChartData.length > 0 ||
+    strideLengthChartData.length > 0
 
   if (isLoading) return <p className="text-muted-foreground">Caricamento...</p>
   if (!workout) return <p className="text-muted-foreground">Workout non trovato</p>
@@ -813,6 +993,13 @@ export default function WorkoutDetail() {
         </Card>
       )}
 
+      {hasAnyChart && (
+        <p className="text-xs text-muted-foreground">
+          Suggerimento: <strong>trascina orizzontalmente</strong> su un grafico per selezionare un
+          intervallo — comparirà un riquadro con i valori medi di tutte le metriche in quella finestra.
+        </p>
+      )}
+
       {hrChartData.length > 1 && hrAggregatedOnly === null && (
         <HRZonesCard
           samples={(hr.data?.data as Sample[] | undefined) ?? []}
@@ -828,15 +1015,17 @@ export default function WorkoutDetail() {
         <Card>
           <ChartCardHeader title="Frequenza cardiaca" data={hrChartData} format={v => `${Math.round(v)} bpm`} />
           <CardContent>
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={hrChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis {...xAxisProps} />
-                <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 5", "dataMax + 5"]} />
-                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${Math.round(v)} bpm`, "HR"]} />
-                <Line dataKey="value" stroke="#ef4444" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <MetricChart
+              data={hrChartData}
+              color="#ef4444"
+              height={260}
+              yDomain={["dataMin - 5", "dataMax + 5"]}
+              tooltipFormatter={(v: number) => [`${Math.round(v)} bpm`, "HR"]}
+              xAxisProps={xAxisProps}
+              msAxisFmt={msAxisFmt}
+              activeRange={activeRange}
+              drag={dragHandlers}
+            />
           </CardContent>
         </Card>
       )}
@@ -845,27 +1034,24 @@ export default function WorkoutDetail() {
         <Card>
           <ChartCardHeader title="Velocita' corsa" data={speedChartData} format={v => `${v.toFixed(2)} km/h`} />
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={speedChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis {...xAxisProps} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip
-                  labelFormatter={msAxisFmt}
-                  formatter={(v: number) => {
-                    if (!v || v <= 0) return [`${v.toFixed(2)} km/h`, "Velocita'"]
-                    const paceMinTotal = 60 / v
-                    const m = Math.floor(paceMinTotal)
-                    const s = Math.round((paceMinTotal - m) * 60)
-                    const sStr = s.toString().padStart(2, "0")
-                    // Edge case: 60s rounding overflow (e.g. 59.7 → 60).
-                    const paceStr = s === 60 ? `${m + 1}:00` : `${m}:${sStr}`
-                    return [`${v.toFixed(2)} km/h · ${paceStr}/km`, "Velocita'"]
-                  }}
-                />
-                <Line dataKey="value" stroke="#22c55e" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <MetricChart
+              data={speedChartData}
+              color="#22c55e"
+              tooltipFormatter={(v: number) => {
+                if (!v || v <= 0) return [`${v.toFixed(2)} km/h`, "Velocita'"]
+                const paceMinTotal = 60 / v
+                const m = Math.floor(paceMinTotal)
+                const s = Math.round((paceMinTotal - m) * 60)
+                const sStr = s.toString().padStart(2, "0")
+                // Edge case: 60s rounding overflow (e.g. 59.7 → 60).
+                const paceStr = s === 60 ? `${m + 1}:00` : `${m}:${sStr}`
+                return [`${v.toFixed(2)} km/h · ${paceStr}/km`, "Velocita'"]
+              }}
+              xAxisProps={xAxisProps}
+              msAxisFmt={msAxisFmt}
+              activeRange={activeRange}
+              drag={dragHandlers}
+            />
           </CardContent>
         </Card>
       )}
@@ -898,15 +1084,17 @@ export default function WorkoutDetail() {
                 </p>
               </div>
             </details>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={verticalRatioChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis {...xAxisProps} />
-                <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 1", "dataMax + 1"]} tickFormatter={(v: number) => v.toFixed(1)} />
-                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${v.toFixed(1)} %`, "Vertical ratio"]} />
-                <Line dataKey="value" stroke="#a855f7" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <MetricChart
+              data={verticalRatioChartData}
+              color="#a855f7"
+              yDomain={["dataMin - 1", "dataMax + 1"]}
+              yTickFormatter={(v: number) => v.toFixed(1)}
+              tooltipFormatter={(v: number) => [`${v.toFixed(1)} %`, "Vertical ratio"]}
+              xAxisProps={xAxisProps}
+              msAxisFmt={msAxisFmt}
+              activeRange={activeRange}
+              drag={dragHandlers}
+            />
           </CardContent>
         </Card>
       )}
@@ -944,15 +1132,15 @@ export default function WorkoutDetail() {
                 </p>
               </div>
             </details>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={powerChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis {...xAxisProps} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${Math.round(v)} W`, "Potenza"]} />
-                <Line dataKey="value" stroke="#f97316" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <MetricChart
+              data={powerChartData}
+              color="#f97316"
+              tooltipFormatter={(v: number) => [`${Math.round(v)} W`, "Potenza"]}
+              xAxisProps={xAxisProps}
+              msAxisFmt={msAxisFmt}
+              activeRange={activeRange}
+              drag={dragHandlers}
+            />
           </CardContent>
         </Card>
       )}
@@ -961,15 +1149,15 @@ export default function WorkoutDetail() {
         <Card>
           <ChartCardHeader title="Cadenza" data={cadenceChartData} format={v => `${Math.round(v)} rpm`} />
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={cadenceChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis {...xAxisProps} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${Math.round(v)} rpm`, "Cadenza"]} />
-                <Line dataKey="value" stroke="#38bdf8" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <MetricChart
+              data={cadenceChartData}
+              color="#38bdf8"
+              tooltipFormatter={(v: number) => [`${Math.round(v)} rpm`, "Cadenza"]}
+              xAxisProps={xAxisProps}
+              msAxisFmt={msAxisFmt}
+              activeRange={activeRange}
+              drag={dragHandlers}
+            />
           </CardContent>
         </Card>
       )}
@@ -978,15 +1166,16 @@ export default function WorkoutDetail() {
         <Card>
           <ChartCardHeader title="Oscillazione verticale" data={verticalOscChartData} format={v => `${v.toFixed(1)} cm`} />
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={verticalOscChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis {...xAxisProps} />
-                <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 1", "dataMax + 1"]} />
-                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${v.toFixed(1)} cm`, "Oscillazione verticale"]} />
-                <Line dataKey="value" stroke="#86efac" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <MetricChart
+              data={verticalOscChartData}
+              color="#86efac"
+              yDomain={["dataMin - 1", "dataMax + 1"]}
+              tooltipFormatter={(v: number) => [`${v.toFixed(1)} cm`, "Oscillazione verticale"]}
+              xAxisProps={xAxisProps}
+              msAxisFmt={msAxisFmt}
+              activeRange={activeRange}
+              drag={dragHandlers}
+            />
           </CardContent>
         </Card>
       )}
@@ -995,15 +1184,16 @@ export default function WorkoutDetail() {
         <Card>
           <ChartCardHeader title="Tempo di contatto col suolo" data={groundContactChartData} format={v => `${Math.round(v)} ms`} />
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={groundContactChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis {...xAxisProps} />
-                <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 10", "dataMax + 10"]} />
-                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${Math.round(v)} ms`, "Contatto col suolo"]} />
-                <Line dataKey="value" stroke="#4ade80" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <MetricChart
+              data={groundContactChartData}
+              color="#4ade80"
+              yDomain={["dataMin - 10", "dataMax + 10"]}
+              tooltipFormatter={(v: number) => [`${Math.round(v)} ms`, "Contatto col suolo"]}
+              xAxisProps={xAxisProps}
+              msAxisFmt={msAxisFmt}
+              activeRange={activeRange}
+              drag={dragHandlers}
+            />
           </CardContent>
         </Card>
       )}
@@ -1012,17 +1202,64 @@ export default function WorkoutDetail() {
         <Card>
           <ChartCardHeader title="Lunghezza falcata" data={strideLengthChartData} format={v => `${v.toFixed(1)} cm`} />
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={strideLengthChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis {...xAxisProps} />
-                <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 5", "dataMax + 5"]} />
-                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${v.toFixed(1)} cm`, "Lunghezza falcata"]} />
-                <Line dataKey="value" stroke="#16a34a" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <MetricChart
+              data={strideLengthChartData}
+              color="#16a34a"
+              yDomain={["dataMin - 5", "dataMax + 5"]}
+              tooltipFormatter={(v: number) => [`${v.toFixed(1)} cm`, "Lunghezza falcata"]}
+              xAxisProps={xAxisProps}
+              msAxisFmt={msAxisFmt}
+              activeRange={activeRange}
+              drag={dragHandlers}
+            />
           </CardContent>
         </Card>
+      )}
+
+      {selectionStats && (
+        <div className="fixed bottom-6 right-6 z-40 w-72 rounded-lg border bg-background shadow-lg">
+          <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
+            <div>
+              <p className="text-sm font-semibold">Intervallo selezionato</p>
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {msAxisFmt(selectionStats.startMs)}–{msAxisFmt(selectionStats.endMs)} ·{" "}
+                {formatDuration(selectionStats.durationS)}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 shrink-0"
+              onClick={() => setSelection(null)}
+              aria-label="Chiudi"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="px-4 py-2">
+            {selectionStats.items.length === 0 ? (
+              <p className="py-2 text-xs text-muted-foreground">
+                Nessun dato in questo intervallo.
+              </p>
+            ) : (
+              <dl className="divide-y">
+                {selectionStats.items.map(it => (
+                  <div key={it.label} className="flex items-center justify-between gap-3 py-1.5">
+                    <dt className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span
+                        className="inline-block h-2 w-2 rounded-full shrink-0"
+                        style={{ background: it.color }}
+                      />
+                      {it.label}
+                    </dt>
+                    <dd className="text-sm font-medium tabular-nums">{it.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            <p className="pt-1 text-[11px] text-muted-foreground">valori medi nell'intervallo</p>
+          </div>
+        </div>
       )}
 
     </div>
