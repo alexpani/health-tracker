@@ -6,7 +6,7 @@ import { NutritionCalendar } from "@/components/NutritionCalendar"
 import { NutritionFiltersSidebar } from "@/components/NutritionFiltersSidebar"
 import { TypeBrowser } from "@/components/TypeBrowser"
 import { CATEGORIES } from "@/lib/healthkit"
-import { useDiarioDailyTotals, useSampleFacets } from "@/lib/queries"
+import { useConsolidatedDailyTotals } from "@/lib/queries"
 import type { NutritionFilters } from "@/lib/types"
 
 const STORAGE_KEY = "nutrition_filters_v1"
@@ -41,17 +41,23 @@ export default function Nutrition() {
     if (filters.start) setCalendarFocusDay(filters.start)
   }, [filters.start])
 
-  // Year chips: derive from the union of (a) diario daily-totals and (b)
-  // HealthKit dietary facets — so a year with ONLY Lifesum samples (e.g.
-  // 2015, before the diario existed) still shows up as a filter chip.
-  const { data: allDaily } = useDiarioDailyTotals("2010-01-01", todayLocalISO())
-  const { data: facetKcal } = useSampleFacets("HKQuantityTypeIdentifierDietaryEnergyConsumed")
+  // Year chips: derivati dai totali giornalieri consolidati (diario + HK
+  // dietary di sorgenti esterne). Cosi' un anno con SOLO Lifesum (es. 2015)
+  // appare come chip, e il conteggio = giorni con registrazione (stessa
+  // unita' del calendario, non sample HK grezzi che gonfierebbero il numero).
+  const { data: consolidated } = useConsolidatedDailyTotals()
   const availableYears = useMemo(() => {
-    const set = new Set<number>()
-    ;(allDaily ?? []).forEach(d => set.add(Number(d.date.slice(0, 4))))
-    ;(facetKcal?.years ?? []).forEach(y => set.add(y.year))
-    return Array.from(set).sort((a, b) => b - a)
-  }, [allDaily, facetKcal])
+    const counts = new Map<number, number>()
+    for (const d of consolidated ?? []) {
+      const y = Number(d.date.slice(0, 4))
+      counts.set(y, (counts.get(y) ?? 0) + 1)
+    }
+    return Array.from(counts.entries())
+      .map(([year, days]) => ({ year, days }))
+      .sort((a, b) => b.year - a.year)
+  }, [consolidated])
+
+  const availableDailyTotals = consolidated  // alias per il filtro target
 
   // Lista dei `kcal_target` distinti dai daily totals storici. Il diario
   // espone solo lo snapshot per giorno, quindi target diversi = piani
@@ -59,11 +65,11 @@ export default function Nutrition() {
   // tipo 1499.999 vs 1500.
   const availableTargets = useMemo(() => {
     const set = new Set<number>()
-    for (const d of allDaily ?? []) {
+    for (const d of availableDailyTotals ?? []) {
       if (d.kcal_target != null) set.add(Math.round(d.kcal_target))
     }
     return Array.from(set).sort((a, b) => a - b)
-  }, [allDaily])
+  }, [availableDailyTotals])
 
   const activeFiltersCount = [
     filters.start, filters.end,
@@ -96,7 +102,7 @@ export default function Nutrition() {
           </Button>
         </div>
 
-        <NutritionCalendar kcalTargetFilter={filters.kcal_target} focusDay={calendarFocusDay} />
+        <NutritionCalendar filters={filters} focusDay={calendarFocusDay} />
 
         <DiarioSection filters={filters} onBarClick={setCalendarFocusDay} />
 

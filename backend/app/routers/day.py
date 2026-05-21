@@ -256,13 +256,12 @@ async def _fetch_nutrition(db: AsyncSession, d: date_cls) -> dict:
 
 
 async def _fetch_sleep(db: AsyncSession, d: date_cls) -> dict | None:
-    """Convenzione "bedtime date": la notte di D copre il sonno che si
-    svolge fra la sera di D e il mattino di D+1. Cerchiamo i sample il
-    cui end_date cade fra mezzanotte e mezzogiorno di D+1 (escludiamo
-    naps pomeridiani del D+1, che restano sul wake-up day come prima)."""
-    next_day = d + timedelta(days=1)
-    window_start = datetime.combine(next_day, time.min, tzinfo=LOCAL_TZ)
-    window_end = datetime.combine(next_day, time(12, 0), tzinfo=LOCAL_TZ)
+    """Convenzione "wake-up date": la notte di D e' il sonno da cui ci si
+    sveglia il mattino di D. Cerchiamo i sample il cui end_date cade fra
+    mezzanotte e mezzogiorno di D (il cutoff di mezzogiorno isola la notte
+    dai nap pomeridiani)."""
+    window_start = datetime.combine(d, time.min, tzinfo=LOCAL_TZ)
+    window_end = datetime.combine(d, time(12, 0), tzinfo=LOCAL_TZ)
     rows = (
         await db.execute(
             select(

@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useSamples, useUpdateWorkout, useWorkoutByUuid, useWorkoutRoute, useWorkoutSplits } from "@/lib/queries"
 import { WorkoutMap } from "@/components/WorkoutMap"
 import { ElevationChart } from "@/components/ElevationChart"
+import { HRZonesCard } from "@/components/HRZonesCard"
 import { extractWorkoutMetadata, workoutDisplayTitle, workoutName } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { AggregatedPoint, Sample } from "@/lib/types"
@@ -36,6 +37,61 @@ function formatPace(secPerKm: number | null | undefined): string {
   const m = Math.floor(secPerKm / 60)
   const s = Math.round(secPerKm % 60)
   return `${m}'${String(s).padStart(2, "0")}"/km`
+}
+
+/** Header di una card grafico: titolo a sinistra, min/max della serie in
+ *  alto a destra. Se la serie e' vuota mostra solo il titolo. */
+function ChartCardHeader({
+  title,
+  data,
+  format,
+}: {
+  title: string
+  data: { value: number }[]
+  format: (v: number) => string
+}) {
+  let mn = Infinity
+  let mx = -Infinity
+  for (const d of data) {
+    if (d.value < mn) mn = d.value
+    if (d.value > mx) mx = d.value
+  }
+  const hasRange = data.length > 0 && isFinite(mn) && isFinite(mx)
+  return (
+    <CardHeader>
+      <div className="flex items-baseline justify-between gap-4">
+        <CardTitle>{title}</CardTitle>
+        {hasRange && (
+          <span className="text-xs font-normal text-muted-foreground tabular-nums whitespace-nowrap">
+            min {format(mn)} · max {format(mx)}
+          </span>
+        )}
+      </div>
+    </CardHeader>
+  )
+}
+
+/** syncMethod per i chart sincronizzati: il `syncMethod="value"` nativo di
+ *  Recharts fa un match ESATTO sul valore X, ma le nostre serie hanno
+ *  timestamp diversi (HR a ~5s, oscillazione/falcata sfalsate, ecc.) → il
+ *  match esatto fallisce e il tooltip resta vuoto. Qui troviamo invece il
+ *  tick col tempo PIU' VICINO a quello del chart sorgente. */
+function syncByNearestTime(
+  ticks: { value: number }[],
+  data: { activeLabel?: string | number; activeTooltipIndex?: number },
+): number {
+  const target = typeof data.activeLabel === "number" ? data.activeLabel : Number(data.activeLabel)
+  if (!isFinite(target) || ticks.length === 0) return data.activeTooltipIndex ?? 0
+  let best = 0
+  let bestD = Infinity
+  for (let i = 0; i < ticks.length; i++) {
+    const d = Math.abs(ticks[i].value - target)
+    if (d < bestD) {
+      bestD = d
+      best = i
+    }
+  }
+  return best
 }
 
 function MetricBox({ label, value, unit, color }: { label: string; value: string; unit?: string; color?: string }) {
@@ -133,6 +189,30 @@ export default function WorkoutDetail() {
     limit: 2000,
   }, !!workout)
 
+  const verticalOsc = useSamples({
+    type: "HKQuantityTypeIdentifierRunningVerticalOscillation",
+    start: workout?.start_date,
+    end: workout?.end_date,
+    aggregation: "none",
+    limit: 2000,
+  }, !!workout)
+
+  const groundContact = useSamples({
+    type: "HKQuantityTypeIdentifierRunningGroundContactTime",
+    start: workout?.start_date,
+    end: workout?.end_date,
+    aggregation: "none",
+    limit: 2000,
+  }, !!workout)
+
+  const strideLength = useSamples({
+    type: "HKQuantityTypeIdentifierRunningStrideLength",
+    start: workout?.start_date,
+    end: workout?.end_date,
+    aggregation: "none",
+    limit: 2000,
+  }, !!workout)
+
   const activeCal = useSamples({
     type: "HKQuantityTypeIdentifierActiveEnergyBurned",
     start: workout?.start_date,
@@ -152,6 +232,18 @@ export default function WorkoutDetail() {
     return arr.length ? Math.max(...arr.map(s => s.value)) : null
   }, [hr.data])
 
+  const avgPower = useMemo(() => {
+    const arr = (runningPower.data?.data as Sample[] | undefined) ?? []
+    if (arr.length === 0) return null
+    return arr.reduce((s, x) => s + x.value, 0) / arr.length
+  }, [runningPower.data])
+
+  const avgCadence = useMemo(() => {
+    const arr = (cadence.data?.data as Sample[] | undefined) ?? []
+    if (arr.length === 0) return null
+    return arr.reduce((s, x) => s + x.value, 0) / arr.length
+  }, [cadence.data])
+
   const avgPaceSecPerKm = useMemo(() => {
     if (!workout?.duration || !workout?.total_distance) return null
     const km = workout.total_distance / 1000
@@ -161,8 +253,8 @@ export default function WorkoutDetail() {
   const hrChartData = useMemo(() => {
     const arr = (hr.data?.data as Sample[] | undefined) ?? []
     return arr
-      .map(s => ({ time: s.start_date, value: s.value }))
-      .sort((a, b) => a.time.localeCompare(b.time))
+      .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value }))
+      .sort((a, b) => a.t - b.t)
   }, [hr.data])
 
   // Fallback per workout pre-2019 dove watchOS salvava un singolo sample HR
@@ -241,23 +333,74 @@ export default function WorkoutDetail() {
   const speedChartData = useMemo(() => {
     const arr = (runningSpeed.data?.data as Sample[] | undefined) ?? []
     return arr
-      .map(s => ({ time: s.start_date, value: s.value * 3.6 })) // m/s -> km/h
-      .sort((a, b) => a.time.localeCompare(b.time))
+      .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value * 3.6 })) // m/s -> km/h
+      .sort((a, b) => a.t - b.t)
   }, [runningSpeed.data])
 
   const powerChartData = useMemo(() => {
     const arr = (runningPower.data?.data as Sample[] | undefined) ?? []
     return arr
-      .map(s => ({ time: s.start_date, value: s.value }))
-      .sort((a, b) => a.time.localeCompare(b.time))
+      .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value }))
+      .sort((a, b) => a.t - b.t)
   }, [runningPower.data])
 
   const cadenceChartData = useMemo(() => {
     const arr = (cadence.data?.data as Sample[] | undefined) ?? []
     return arr
-      .map(s => ({ time: s.start_date, value: s.value }))
-      .sort((a, b) => a.time.localeCompare(b.time))
+      .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value }))
+      .sort((a, b) => a.t - b.t)
   }, [cadence.data])
+
+  const verticalOscChartData = useMemo(() => {
+    const arr = (verticalOsc.data?.data as Sample[] | undefined) ?? []
+    return arr
+      .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value }))
+      .sort((a, b) => a.t - b.t)
+  }, [verticalOsc.data])
+
+  const groundContactChartData = useMemo(() => {
+    const arr = (groundContact.data?.data as Sample[] | undefined) ?? []
+    return arr
+      .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value }))
+      .sort((a, b) => a.t - b.t)
+  }, [groundContact.data])
+
+  const strideLengthChartData = useMemo(() => {
+    const arr = (strideLength.data?.data as Sample[] | undefined) ?? []
+    return arr
+      .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value * 100 })) // m -> cm
+      .sort((a, b) => a.t - b.t)
+  }, [strideLength.data])
+
+  // Vertical ratio = oscillazione verticale / lunghezza falcata, in %.
+  // Indicatore di economia di corsa normalizzato rispetto alla velocita'
+  // (a differenza dell'oscillazione grezza) — piu' basso = meglio.
+  // Apple Health non lo espone: lo ricostruiamo qui. I sample di
+  // oscillazione e falcata arrivano dall'Apple Watch su timestamp
+  // leggermente sfalsati (~2-3s), quindi facciamo un join al sample di
+  // falcata piu' vicino entro 4s con un two-pointer (le serie sono gia'
+  // ordinate per tempo). ratio% = osc_cm / falcata_cm * 100.
+  const verticalRatioChartData = useMemo(() => {
+    const stride = strideLengthChartData
+    if (stride.length === 0 || verticalOscChartData.length === 0) return []
+    const out: { time: string; t: number; value: number }[] = []
+    let j = 0
+    for (const o of verticalOscChartData) {
+      const ot = o.t
+      while (j < stride.length - 1 && stride[j + 1].t <= ot) j++
+      let bi = j
+      if (j + 1 < stride.length && Math.abs(stride[j + 1].t - ot) < Math.abs(stride[j].t - ot)) bi = j + 1
+      if (Math.abs(stride[bi].t - ot) <= 4000 && stride[bi].value > 0) {
+        out.push({ time: o.time, t: ot, value: (o.value / stride[bi].value) * 100 })
+      }
+    }
+    return out
+  }, [verticalOscChartData, strideLengthChartData])
+
+  const avgVerticalRatio = useMemo(() => {
+    if (verticalRatioChartData.length === 0) return null
+    return verticalRatioChartData.reduce((s, x) => s + x.value, 0) / verticalRatioChartData.length
+  }, [verticalRatioChartData])
 
   const caloriesTotal = useMemo(() => {
     const arr = (activeCal.data?.data as Sample[] | undefined) ?? []
@@ -272,7 +415,22 @@ export default function WorkoutDetail() {
   const distanceKm = workout.total_distance ? workout.total_distance / 1000 : null
   const meta = extractWorkoutMetadata(workout.metadata)
 
-  const timeAxisFmt = (iso: string) => new Date(iso).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
+  // Asse X numerico (epoch ms) condiviso da tutti i chart time-series: con
+  // dominio fisso [start, end] del workout, i grafici hanno la stessa scala
+  // orizzontale e il syncId di Recharts puo' sincronizzare i tooltip per
+  // valore (non per indice) anche se le serie hanno timestamp diversi.
+  const msAxisFmt = (ms: number) => new Date(ms).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
+  const wStartMs = new Date(workout.start_date).getTime()
+  const wEndMs = new Date(workout.end_date).getTime()
+  const xAxisProps = {
+    dataKey: "t",
+    type: "number" as const,
+    scale: "time" as const,
+    domain: [wStartMs, wEndMs] as [number, number],
+    tickFormatter: msAxisFmt,
+    minTickGap: 50,
+    tick: { fontSize: 12 },
+  }
 
   return (
     <div className="space-y-6">
@@ -311,6 +469,15 @@ export default function WorkoutDetail() {
             )}
             {maxHR !== null && (
               <MetricBox label="Battito max" value={`${Math.round(maxHR)}`} unit="bpm" color="#ef4444" />
+            )}
+            {avgPower !== null && (
+              <MetricBox label="Potenza media" value={`${Math.round(avgPower)}`} unit="W" color="#f97316" />
+            )}
+            {avgCadence !== null && (
+              <MetricBox label="Cadenza media" value={`${Math.round(avgCadence)}`} unit="rpm" color="#38bdf8" />
+            )}
+            {avgVerticalRatio !== null && (
+              <MetricBox label="Vertical ratio media" value={avgVerticalRatio.toFixed(1)} unit="%" color="#a855f7" />
             )}
             <MetricBox label="Sorgente" value={workout.source_name ?? "-"} />
           </div>
@@ -646,20 +813,27 @@ export default function WorkoutDetail() {
         </Card>
       )}
 
+      {hrChartData.length > 1 && hrAggregatedOnly === null && (
+        <HRZonesCard
+          samples={(hr.data?.data as Sample[] | undefined) ?? []}
+          workoutEnd={workout.end_date}
+        />
+      )}
+
       {/* Card chart cardiaco solo se ci sono almeno 2 sample puntuali — i
           workout pre-2019 di Apple Watch hanno 1 solo sample aggregato che
           non disegna una linea, meglio nascondere la card del tutto: la
           FC media e' gia' visibile nella sezione metriche in alto. */}
       {hrChartData.length > 1 && hrAggregatedOnly === null && (
         <Card>
-          <CardHeader><CardTitle>Frequenza cardiaca</CardTitle></CardHeader>
+          <ChartCardHeader title="Frequenza cardiaca" data={hrChartData} format={v => `${Math.round(v)} bpm`} />
           <CardContent>
             <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={hrChartData}>
+              <LineChart data={hrChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis dataKey="time" tickFormatter={timeAxisFmt} minTickGap={50} tick={{ fontSize: 12 }} />
+                <XAxis {...xAxisProps} />
                 <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 5", "dataMax + 5"]} />
-                <Tooltip labelFormatter={timeAxisFmt} formatter={(v: number) => [`${Math.round(v)} bpm`, "HR"]} />
+                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${Math.round(v)} bpm`, "HR"]} />
                 <Line dataKey="value" stroke="#ef4444" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
@@ -669,15 +843,15 @@ export default function WorkoutDetail() {
 
       {speedChartData.length > 0 && (
         <Card>
-          <CardHeader><CardTitle>Velocita' corsa</CardTitle></CardHeader>
+          <ChartCardHeader title="Velocita' corsa" data={speedChartData} format={v => `${v.toFixed(2)} km/h`} />
           <CardContent>
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={speedChartData}>
+              <LineChart data={speedChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis dataKey="time" tickFormatter={timeAxisFmt} minTickGap={50} tick={{ fontSize: 12 }} />
+                <XAxis {...xAxisProps} />
                 <YAxis tick={{ fontSize: 12 }} />
                 <Tooltip
-                  labelFormatter={timeAxisFmt}
+                  labelFormatter={msAxisFmt}
                   formatter={(v: number) => {
                     if (!v || v <= 0) return [`${v.toFixed(2)} km/h`, "Velocita'"]
                     const paceMinTotal = 60 / v
@@ -696,16 +870,86 @@ export default function WorkoutDetail() {
         </Card>
       )}
 
+      {verticalRatioChartData.length > 0 && (
+        <Card>
+          <ChartCardHeader title="Vertical ratio" data={verticalRatioChartData} format={v => `${v.toFixed(1)} %`} />
+          <CardContent className="space-y-4">
+            <details className="text-xs text-muted-foreground bg-muted/30 rounded p-3">
+              <summary className="cursor-pointer font-medium text-foreground">Come si interpreta</summary>
+              <div className="mt-2 space-y-2 leading-relaxed">
+                <p>
+                  La <strong>vertical ratio</strong> e' l'oscillazione verticale divisa per la
+                  lunghezza della falcata (in %). Dice quanto del tuo movimento va "avanti"
+                  invece che "su" — <strong>piu' bassa = piu' economico</strong>. A differenza
+                  dell'oscillazione grezza e' normalizzata rispetto alla velocita', quindi puoi
+                  confrontare allenamenti a ritmi diversi.
+                </p>
+                <p>
+                  Fasce di riferimento: <strong>&lt;6%</strong> eccellente · <strong>6-8%</strong> buona ·{" "}
+                  <strong>8-10%</strong> nella media degli amatori · <strong>&gt;10%</strong> stai
+                  "saltellando" troppo.
+                </p>
+                <p>
+                  Il segnale di progresso piu' pulito e' il <strong>trend nel tempo</strong> a parita'
+                  di ritmo. Dentro un allenamento, una ratio che peggiora nell'ultimo terzo indica
+                  cali di tecnica con la fatica. La leva principale per abbassarla e' la{" "}
+                  <strong>cadenza</strong> (+5-10% di passi/min). Dati stimati dall'Apple Watch:
+                  affidati ai trend, non al singolo decimale.
+                </p>
+              </div>
+            </details>
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={verticalRatioChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                <XAxis {...xAxisProps} />
+                <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 1", "dataMax + 1"]} tickFormatter={(v: number) => v.toFixed(1)} />
+                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${v.toFixed(1)} %`, "Vertical ratio"]} />
+                <Line dataKey="value" stroke="#a855f7" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
       {powerChartData.length > 0 && (
         <Card>
-          <CardHeader><CardTitle>Potenza</CardTitle></CardHeader>
-          <CardContent>
+          <ChartCardHeader title="Potenza" data={powerChartData} format={v => `${Math.round(v)} W`} />
+          <CardContent className="space-y-4">
+            <details className="text-xs text-muted-foreground bg-muted/30 rounded p-3">
+              <summary className="cursor-pointer font-medium text-foreground">Come si interpreta</summary>
+              <div className="mt-2 space-y-2 leading-relaxed">
+                <p>
+                  La <strong>potenza</strong> (in Watt) stima quanto stai effettivamente
+                  lavorando, non solo quanto vai veloce. Su terreno piatto e a ritmo costante
+                  e' quasi equivalente alla velocita' — la differenza emerge quando le
+                  condizioni cambiano.
+                </p>
+                <p>
+                  <strong>In salita</strong> rallenti ma spingi di piu': la velocita' crolla, la
+                  potenza resta stabile a parita' di sforzo. Lo stesso con vento contro, fondo
+                  morbido o accelerazioni. Per questo su percorsi ondulati la potenza
+                  rappresenta l'intensita' reale meglio del passo, e reagisce subito (la
+                  frequenza cardiaca ha 20-30s di ritardo).
+                </p>
+                <p>
+                  <strong>A cosa serve</strong>: gestire lo sforzo su sali-scendi tenendo una
+                  potenza-obiettivo invece del passo, e confrontare allenamenti su percorsi
+                  diversi (250 W sono 250 W ovunque).
+                </p>
+                <p>
+                  ⚠️ Apple <strong>stima</strong> la potenza da un modello (velocita', dislivello,
+                  oscillazione, massa) — non la misura come un misuratore da bici. I valori
+                  assoluti non sono confrontabili fra marche diverse, e in piano il modello
+                  degrada di fatto in "velocita' riscalata".
+                </p>
+              </div>
+            </details>
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={powerChartData}>
+              <LineChart data={powerChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis dataKey="time" tickFormatter={timeAxisFmt} minTickGap={50} tick={{ fontSize: 12 }} />
+                <XAxis {...xAxisProps} />
                 <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip labelFormatter={timeAxisFmt} formatter={(v: number) => [`${Math.round(v)} W`, "Potenza"]} />
+                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${Math.round(v)} W`, "Potenza"]} />
                 <Line dataKey="value" stroke="#f97316" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
@@ -715,20 +959,72 @@ export default function WorkoutDetail() {
 
       {cadenceChartData.length > 0 && (
         <Card>
-          <CardHeader><CardTitle>Cadenza</CardTitle></CardHeader>
+          <ChartCardHeader title="Cadenza" data={cadenceChartData} format={v => `${Math.round(v)} rpm`} />
           <CardContent>
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={cadenceChartData}>
+              <LineChart data={cadenceChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis dataKey="time" tickFormatter={timeAxisFmt} minTickGap={50} tick={{ fontSize: 12 }} />
+                <XAxis {...xAxisProps} />
                 <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip labelFormatter={timeAxisFmt} formatter={(v: number) => [`${Math.round(v)} rpm`, "Cadenza"]} />
+                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${Math.round(v)} rpm`, "Cadenza"]} />
                 <Line dataKey="value" stroke="#38bdf8" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
       )}
+
+      {verticalOscChartData.length > 0 && (
+        <Card>
+          <ChartCardHeader title="Oscillazione verticale" data={verticalOscChartData} format={v => `${v.toFixed(1)} cm`} />
+          <CardContent>
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={verticalOscChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                <XAxis {...xAxisProps} />
+                <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 1", "dataMax + 1"]} />
+                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${v.toFixed(1)} cm`, "Oscillazione verticale"]} />
+                <Line dataKey="value" stroke="#86efac" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {groundContactChartData.length > 0 && (
+        <Card>
+          <ChartCardHeader title="Tempo di contatto col suolo" data={groundContactChartData} format={v => `${Math.round(v)} ms`} />
+          <CardContent>
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={groundContactChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                <XAxis {...xAxisProps} />
+                <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 10", "dataMax + 10"]} />
+                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${Math.round(v)} ms`, "Contatto col suolo"]} />
+                <Line dataKey="value" stroke="#4ade80" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {strideLengthChartData.length > 0 && (
+        <Card>
+          <ChartCardHeader title="Lunghezza falcata" data={strideLengthChartData} format={v => `${v.toFixed(1)} cm`} />
+          <CardContent>
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={strideLengthChartData} syncId="workout-charts" syncMethod={syncByNearestTime}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                <XAxis {...xAxisProps} />
+                <YAxis tick={{ fontSize: 12 }} domain={["dataMin - 5", "dataMax + 5"]} />
+                <Tooltip labelFormatter={msAxisFmt} formatter={(v: number) => [`${v.toFixed(1)} cm`, "Lunghezza falcata"]} />
+                <Line dataKey="value" stroke="#16a34a" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
     </div>
   )
 }

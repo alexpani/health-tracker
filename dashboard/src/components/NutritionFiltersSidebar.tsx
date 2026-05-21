@@ -7,7 +7,7 @@ import type { NutritionFilters } from "@/lib/types"
 interface Props {
   value: NutritionFilters
   onChange: (v: NutritionFilters) => void
-  availableYears: number[]
+  availableYears: { year: number; days: number }[]
   /// Lista dei `kcal_target` distinti presenti nei daily totals storici.
   /// Usata per popolare le chip "Regime alimentare".
   availableTargets: number[]
@@ -151,14 +151,14 @@ export function NutritionFiltersSidebar({ value, onChange, availableYears, avail
         {availableYears.length > 0 && (
           <div className="flex flex-wrap gap-1 pt-1">
             {availableYears.map(y => {
-              const active = isYearActive(y)
+              const active = isYearActive(y.year)
               return (
-                <button key={y} type="button"
-                  onClick={() => applyYear(y)}
+                <button key={y.year} type="button"
+                  onClick={() => applyYear(y.year)}
                   className={`text-xs px-2 py-1 rounded-md border ${
                     active ? "bg-primary text-primary-foreground border-primary" : "bg-background hover:bg-accent"
                   }`}>
-                  {y}
+                  {y.year} <span className="opacity-60">({y.days})</span>
                 </button>
               )
             })}

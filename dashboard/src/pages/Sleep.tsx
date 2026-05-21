@@ -140,10 +140,8 @@ export default function Sleep() {
   const dates = useMemo(() => timeRangeToDates(range), [range])
   const { data, isLoading } = useCategories("HKCategoryTypeIdentifierSleepAnalysis", dates.start, dates.end)
 
-  // Aggregate per night. Convenzione "bedtime date": la notte appartiene
-  // alla sera in cui ti sei addormentato. Se end_date e' nel mattino
-  // (ora locale < 12) la notte viene attribuita al giorno precedente;
-  // altrimenti (nap pomeridiano/serale) resta sul wake-up day.
+  // Aggregate per night. Convenzione "wake-up date": la notte appartiene
+  // al giorno in cui ti sei svegliato, cioe' la data di end_date.
   const byNight: Record<string, Record<number, number>> = {}
   const samplesByNight: Record<string, typeof data> = {}
   ;(data ?? []).forEach(s => {
@@ -151,7 +149,6 @@ export default function Sleep() {
     const end = new Date(s.end_date)
     const durationMinutes = (end.getTime() - start.getTime()) / 60_000
     const nightDate = new Date(end.getFullYear(), end.getMonth(), end.getDate())
-    if (end.getHours() < 12) nightDate.setDate(nightDate.getDate() - 1)
     const nightKey = nightDate.toISOString()
     if (!byNight[nightKey]) byNight[nightKey] = {}
     byNight[nightKey][s.value] = (byNight[nightKey][s.value] || 0) + durationMinutes

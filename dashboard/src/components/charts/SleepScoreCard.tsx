@@ -15,7 +15,7 @@ const FOOTNOTE = "Criteri: NSF (Ohayon 2017, Hirshkowitz 2015), AASM Manual 2007
 export function SleepScoreCard({ date, compact = false }: Props) {
   const window = useMemo(() => {
     const [y, m, d] = date.split("-").map(Number)
-    const start = new Date(y, m - 1, d, 16, 0, 0)
+    const start = new Date(y, m - 1, d - 1, 16, 0, 0)
     const end = new Date(start)
     end.setDate(start.getDate() + 1)
     return { startIso: start.toISOString(), endIso: end.toISOString() }

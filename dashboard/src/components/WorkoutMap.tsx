@@ -145,7 +145,7 @@ function tooltipHtml(seg: Segment, ts: string): string {
 
 // Preset altezze (px). "default" = altezza iniziale al mount.
 const HEIGHT_PRESETS = { S: 300, M: 500, L: 800 } as const
-const DEFAULT_HEIGHT = HEIGHT_PRESETS.M
+const DEFAULT_HEIGHT = HEIGHT_PRESETS.S
 
 export function WorkoutMap({ points, hoverIndex, onHover, hrSeries, highlightedRange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -163,7 +163,10 @@ export function WorkoutMap({ points, hoverIndex, onHover, hrSeries, highlightedR
   // Init map once.
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
-    const map = L.map(containerRef.current, { preferCanvas: true })
+    // scrollWheelZoom disabilitato: scrollando la pagina e finendo col
+    // cursore sulla mappa, la rotella zoommava per sbaglio. Lo zoom resta
+    // disponibile via controlli +/- e doppio click.
+    const map = L.map(containerRef.current, { preferCanvas: true, scrollWheelZoom: false })
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19,

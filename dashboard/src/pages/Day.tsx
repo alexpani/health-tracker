@@ -179,7 +179,7 @@ export default function Day() {
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {date === today && (
-                <DayCard icon={Sparkles} title="Recupero">
+                <DayCard icon={Sparkles} title="Recupero" to="/vitals">
                   <RecoveryWidget />
                 </DayCard>
               )}
@@ -267,19 +267,32 @@ export default function Day() {
 function DayCard({
   icon: Icon,
   title,
+  to,
   action,
   children,
 }: {
   icon: React.ComponentType<{ className?: string }>
   title: string
+  to?: string
   action?: React.ReactNode
   children: React.ReactNode
 }) {
+  const titleInner = (
+    <>
+      <Icon className="h-4 w-4" /> {title}
+    </>
+  )
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between p-3 pb-1 space-y-0">
-        <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
-          <Icon className="h-4 w-4" /> {title}
+        <CardTitle className="text-sm font-semibold">
+          {to ? (
+            <Link to={to} className="flex items-center gap-1.5 hover:underline">
+              {titleInner}
+            </Link>
+          ) : (
+            <span className="flex items-center gap-1.5">{titleInner}</span>
+          )}
         </CardTitle>
         {action}
       </CardHeader>
@@ -305,7 +318,7 @@ function StatRow({ label, value, sub }: { label: string; value: string; sub?: st
 function ActivityCard({ data }: { data: DaySnapshot }) {
   const a = data.activity
   return (
-    <DayCard icon={Activity} title="Attivita'">
+    <DayCard icon={Activity} title="Attivita'" to="/activity">
       <StatRow label="Passi" value={fmt(a.steps)} />
       <StatRow label="Distanza" value={a.distance_walking_running_m != null ? fmt(a.distance_walking_running_m / 1000, 2) : "—"} sub="km" />
       {a.distance_cycling_m != null && a.distance_cycling_m > 0 && (
@@ -341,7 +354,7 @@ function BodyCard({ data }: { data: DaySnapshot }) {
     b.weight_kg != null || b.bmi != null || b.body_fat_pct != null ||
     b.lean_mass_kg != null || (waistOk && b.waist_m != null)
   return (
-    <DayCard icon={Scale} title="Corpo">
+    <DayCard icon={Scale} title="Corpo" to="/body">
       {!anything && <p className="text-xs text-muted-foreground">Nessun dato.</p>}
       {b.weight_kg && <StatRow label="Peso" value={fmt(b.weight_kg.value, 2)} sub="kg" />}
       {b.bmi && <StatRow label="BMI" value={fmt(b.bmi.value, 1)} />}
@@ -366,7 +379,7 @@ function VitalsCard({ data }: { data: DaySnapshot }) {
     v.hrv_ms_avg != null || v.spo2_avg != null || hasBp ||
     v.respiratory_rate_avg != null || v.temp_c_avg != null
   return (
-    <DayCard icon={Heart} title="Vitali">
+    <DayCard icon={Heart} title="Vitali" to="/vitals">
       {!anything && <p className="text-xs text-muted-foreground">Nessun dato.</p>}
       {v.hr_avg != null && <StatRow label="HR media" value={fmt(v.hr_avg, 0)} sub="bpm" />}
       {hasHrRange && <StatRow label="HR min/max" value={`${fmt(v.hr_min, 0)} / ${fmt(v.hr_max, 0)}`} sub="bpm" />}
@@ -403,7 +416,7 @@ function NutritionCard({ data }: { data: DaySnapshot }) {
     )
   }
   return (
-    <DayCard icon={AppleIcon} title="Nutrizione">
+    <DayCard icon={AppleIcon} title="Nutrizione" to="/nutrition">
       <Bar label="Calorie" value={n.kcal} target={n.kcal_target} unit="kcal" />
       <Bar label="Proteine" value={n.protein_g} target={null} unit="g" />
       <Bar label="Grassi" value={n.fat_g} target={null} unit="g" />
@@ -425,7 +438,7 @@ function NutritionCard({ data }: { data: DaySnapshot }) {
 function SleepCard({ data }: { data: DaySnapshot }) {
   const s = data.sleep
   return (
-    <DayCard icon={Moon} title="Sonno">
+    <DayCard icon={Moon} title="Sonno" to="/sleep">
       {!s ? (
         <p className="text-xs text-muted-foreground">Nessun dato.</p>
       ) : (
@@ -446,7 +459,7 @@ function SleepCard({ data }: { data: DaySnapshot }) {
 
 function WorkoutsCard({ data }: { data: DaySnapshot }) {
   return (
-    <DayCard icon={Dumbbell} title="Workout">
+    <DayCard icon={Dumbbell} title="Workout" to="/workouts">
       {data.workouts.length === 0 ? (
         <p className="text-xs text-muted-foreground">Nessun workout.</p>
       ) : (
@@ -477,7 +490,7 @@ function StretchingCard({ date }: { date: string }) {
   const sessions = q.data ?? []
   const totalMin = Math.round(sessions.reduce((s, x) => s + (x.duration_sec || 0), 0) / 60)
   return (
-    <DayCard icon={StretchHorizontal} title="Stretching">
+    <DayCard icon={StretchHorizontal} title="Stretching" to="/stretching">
       {sessions.length === 0 ? (
         <p className="text-xs text-muted-foreground">Nessuna sessione.</p>
       ) : (
@@ -514,7 +527,7 @@ function StretchingCard({ date }: { date: string }) {
 function LabCard({ data }: { data: DaySnapshot }) {
   if (data.lab_panels.length === 0) return null
   return (
-    <DayCard icon={FlaskConical} title="Laboratorio">
+    <DayCard icon={FlaskConical} title="Laboratorio" to="/lab">
       <ul className="space-y-1">
         {data.lab_panels.map(p => (
           <li key={p.id}>
@@ -553,7 +566,9 @@ function JournalCard({
     <Card>
       <CardHeader className="flex flex-row items-center justify-between p-3 pb-1 space-y-0">
         <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
-          <BookOpen className="h-4 w-4" /> Diario
+          <Link to="/journal" className="flex items-center gap-1.5 hover:underline">
+            <BookOpen className="h-4 w-4" /> Diario
+          </Link>
           {entries.length > 0 && (
             <span className="ml-1 text-xs font-normal text-muted-foreground">
               ({entries.length} {entries.length === 1 ? "nota" : "note"})
@@ -631,6 +646,7 @@ function HealthNotesCard({
     <DayCard
       icon={StickyNote}
       title="Note di salute"
+      to="/health-notes"
       action={
         <Button variant="outline" size="sm" className="h-7 px-2" onClick={onAdd}>
           <Plus className="h-3.5 w-3.5 mr-1" /> Aggiungi
@@ -708,6 +724,7 @@ function RegimensCard({
     <DayCard
       icon={Pill}
       title="Regimi attivi"
+      to="/regimens"
       action={
         <Button variant="outline" size="sm" className="h-7 px-2" onClick={onAdd}>
           <Plus className="h-3.5 w-3.5 mr-1" /> Aggiungi

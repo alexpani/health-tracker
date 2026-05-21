@@ -3,15 +3,14 @@ import { ChevronLeft, ChevronRight, ExternalLink, X } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { useConsolidatedDailyTotals, useDiarioActivePlan } from "@/lib/queries"
-import type { DiarioDailyTotal } from "@/lib/types"
+import { useConsolidatedDailyTotals, useDiarioActivePlan, useRegimens } from "@/lib/queries"
+import type { DiarioDailyTotal, NutritionFilters, Regimen } from "@/lib/types"
 
 interface Props {
-  /// Filtro opzionale per regime: se valorizzato come numero, vengono
-  /// "colorate" solo le celle con quel `kcal_target`. Le altre celle del
-  /// mese restano visibili ma in grigio chiaro per il contesto. `null` =
-  /// "Senza target", `undefined` = nessun filtro.
-  kcalTargetFilter?: number | null
+  /// Filtri della pagina Nutrizione. Le celle che non matchano il filtro
+  /// vengono mostrate in grigio chiaro (dimmed) per dare contesto senza
+  /// nascondere completamente i giorni vicini.
+  filters?: NutritionFilters
   /// Giorno verso cui il calendario deve "focalizzarsi": navigarci sopra
   /// (mostrarne il mese) e selezionare la cella. Cambia quando l'utente
   /// imposta un filtro periodo o clicca un giorno nell'istogramma storico.
@@ -71,7 +70,8 @@ function formatDateIT(iso: string): string {
   return dt.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
 }
 
-export function NutritionCalendar({ kcalTargetFilter, focusDay }: Props) {
+export function NutritionCalendar({ filters, focusDay }: Props) {
+  const f = filters ?? {}
   const today = todayIsoLocal()
   const [view, setView] = useState<{ year: number; month: number }>(() => {
     const t = new Date()
@@ -86,6 +86,19 @@ export function NutritionCalendar({ kcalTargetFilter, focusDay }: Props) {
   // il giorno selezionato matcha il `kcal_target` del piano corrente
   // (probabile stesso piano).
   const { data: activePlan } = useDiarioActivePlan()
+  // Tutti i regimi alimentari (kind='diet'), all-time. Servono per mostrare
+  // il nome del piano in vigore per la giornata selezionata (e per "oggi"
+  // nell'header) — il diario non espone i nomi storici, mentre i regimi
+  // manuali sì.
+  const { data: dietRegimens } = useRegimens({ kind: "diet", include_ended: true })
+  const dietForIso = (iso: string): Regimen | null => {
+    if (!dietRegimens) return null
+    return dietRegimens.find(r =>
+      (!r.start_date || r.start_date <= iso) && (!r.end_date || r.end_date >= iso)
+    ) ?? null
+  }
+  const headerPlanName = dietForIso(selectedDay ?? today)?.name ?? activePlan?.name ?? null
+  const headerPlanKcal = dietForIso(selectedDay ?? today)?.metadata?.kcal_target ?? activePlan?.kcal_target ?? null
 
   // Totali consolidati (diario + HK external) all-time. Dedup automatico via
   // TanStack Query con le query identiche di DiarioSection. Cosi' i giorni
@@ -97,10 +110,13 @@ export function NutritionCalendar({ kcalTargetFilter, focusDay }: Props) {
   // navighiamo al mese di quel giorno e selezioniamo la cella corrispondente.
   useEffect(() => {
     if (!focusDay) return
-    const [y, m, d] = focusDay.split("-").map(Number)
-    if (!y || !m || !d) return
-    setView({ year: y, month: m - 1 })
-    setSelectedDay(focusDay)
+    // focusDay puo' essere "YYYY-MM-DD" (click istogramma) oppure ISO datetime
+    // completo (filtri periodo/anno → toISOString). Normalizzo in entrambi.
+    const dt = new Date(focusDay.length === 10 ? focusDay + "T12:00:00" : focusDay)
+    if (isNaN(dt.getTime())) return
+    const iso = isoLocal(dt)
+    setView({ year: dt.getFullYear(), month: dt.getMonth() })
+    setSelectedDay(iso)
   }, [focusDay])
 
   // Lookup per data YYYY-MM-DD → DiarioDailyTotal
@@ -147,10 +163,38 @@ export function NutritionCalendar({ kcalTargetFilter, focusDay }: Props) {
 
   const todayMonthVisible = view.year === new Date().getFullYear() && view.month === new Date().getMonth()
 
-  function isCellDimmed(d: DiarioDailyTotal | undefined): boolean {
-    if (kcalTargetFilter === undefined) return false
-    if (kcalTargetFilter === null) return d?.kcal_target != null
-    return d?.kcal_target !== kcalTargetFilter
+  /// Stessa logica di filtro applicata da `DiarioSection` allo storico.
+  /// Ritorna true se il giorno NON matcha (→ cella da dimmare).
+  function isCellDimmed(d: DiarioDailyTotal | undefined, iso: string): boolean {
+    // Periodo
+    if (f.start || f.end) {
+      const t = new Date(iso + "T12:00:00").getTime()
+      if (f.start && t < new Date(f.start).getTime()) return true
+      if (f.end && t > new Date(f.end).getTime()) return true
+    }
+    // Tutti i filtri data-dipendenti: un giorno senza dato non puo' matcharli.
+    const hasValueFilter = f.kcal_min !== undefined || f.kcal_max !== undefined
+      || f.adherence !== undefined || f.kcal_target !== undefined
+    if (hasValueFilter && !d) return true
+    if (d) {
+      if (f.kcal_min !== undefined && d.kcal < f.kcal_min) return true
+      if (f.kcal_max !== undefined && d.kcal > f.kcal_max) return true
+      if (f.adherence) {
+        if (!d.kcal_target) return true
+        const ratio = d.kcal / d.kcal_target
+        if (f.adherence === "under" && ratio >= 0.9) return true
+        if (f.adherence === "over" && ratio <= 1.1) return true
+        if (f.adherence === "on_target" && (ratio < 0.9 || ratio > 1.1)) return true
+      }
+      if (f.kcal_target !== undefined) {
+        if (f.kcal_target === null) {
+          if (d.kcal_target != null) return true
+        } else {
+          if (d.kcal_target == null || Math.round(d.kcal_target) !== f.kcal_target) return true
+        }
+      }
+    }
+    return false
   }
 
   return (
@@ -158,9 +202,10 @@ export function NutritionCalendar({ kcalTargetFilter, focusDay }: Props) {
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-base flex items-baseline gap-2 flex-wrap">
           <span>Calendario registrazioni</span>
-          {activePlan && (
+          {headerPlanName && (
             <span className="text-xs font-normal text-muted-foreground">
-              · piano: {activePlan.name} ({activePlan.kcal_target.toLocaleString("it-IT")} kcal/die)
+              · piano: {headerPlanName}
+              {headerPlanKcal != null && <> ({Math.round(headerPlanKcal).toLocaleString("it-IT")} kcal/die)</>}
             </span>
           )}
         </CardTitle>
@@ -196,7 +241,7 @@ export function NutritionCalendar({ kcalTargetFilter, focusDay }: Props) {
             const adh = classify(d)
             const isToday = cell.iso === today
             const isSelected = cell.iso === selectedDay
-            const dimmed = !cell.inMonth || isCellDimmed(d)
+            const dimmed = !cell.inMonth || isCellDimmed(d, cell.iso)
             const cls =
               "h-16 rounded text-xs font-medium tabular-nums transition-colors flex flex-col items-center justify-center px-1 gap-0.5 " +
               adherenceClass(adh, dimmed) +
@@ -227,6 +272,7 @@ export function NutritionCalendar({ kcalTargetFilter, focusDay }: Props) {
             iso={selectedDay}
             data={byDate.get(selectedDay)}
             activePlan={activePlan ?? null}
+            dietRegimen={dietForIso(selectedDay)}
             onClose={() => setSelectedDay(null)}
           />
         )}
@@ -260,10 +306,14 @@ interface DaySummaryProps {
   /// kcal_target del giorno coincide col piano attuale (probabile
   /// che siano lo stesso piano — il diario non espone i piani storici).
   activePlan: { name: string; kcal_target: number; protein_g: number; fat_g: number; carbs_g: number } | null
+  /// Regime alimentare manuale (kind='diet') in vigore quel giorno, se c'e'.
+  /// Fonte autorevole per il NOME del piano (il diario non espone i nomi
+  /// storici, solo lo snapshot numerico del target).
+  dietRegimen: Regimen | null
   onClose: () => void
 }
 
-function DaySummary({ iso, data, activePlan, onClose }: DaySummaryProps) {
+function DaySummary({ iso, data, activePlan, dietRegimen, onClose }: DaySummaryProps) {
   const sameAsCurrent =
     activePlan != null && data?.kcal_target != null
       ? Math.round(activePlan.kcal_target) === Math.round(data.kcal_target)
@@ -284,6 +334,14 @@ function DaySummary({ iso, data, activePlan, onClose }: DaySummaryProps) {
       <div className="flex items-start justify-between gap-2">
         <div className="space-y-0.5">
           <div className="text-base font-semibold capitalize">{formatDateIT(iso)}</div>
+          {dietRegimen && (
+            <p className="text-xs text-muted-foreground">
+              Piano: <span className="font-medium text-foreground">{dietRegimen.name}</span>
+              {dietRegimen.metadata?.kcal_target != null && (
+                <> · {Math.round(dietRegimen.metadata.kcal_target).toLocaleString("it-IT")} kcal/die</>
+              )}
+            </p>
+          )}
           {!data && (
             <p className="text-sm text-muted-foreground">Nessuna registrazione alimentare per questo giorno.</p>
           )}

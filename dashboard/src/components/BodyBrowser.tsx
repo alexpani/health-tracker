@@ -305,9 +305,9 @@ export default function BodyBrowser() {
     const hasSelected = selStart !== null || selEnd !== null
 
     return {
+      week:     deltaInRange(now - 7 * 86400_000, null),
       month:    deltaInRange(now - 30 * 86400_000, null),
       year:     deltaInRange(now - 365 * 86400_000, null),
-      all:      deltaInRange(null, null),
       selected: hasSelected ? deltaInRange(selStart, selEnd) : null,
     }
   }, [allBodyMassQ.data, filters.start, filters.end, filters.weight_min, filters.weight_max])
@@ -422,13 +422,22 @@ export default function BodyBrowser() {
   const selectionStats = useMemo(() => {
     if (!selStart || !selEnd) return null
     const lo = selStart < selEnd ? selStart : selEnd
-    const hi = selStart < selEnd ? selEnd : selStart
+    const hiFloor = selStart < selEnd ? selEnd : selStart
+    // selStart/selEnd are the *floor* of the bucket (es. 2024-05-15T00:00 per il giorno 15
+    // con aggregazione "daily"). Estendiamo l'upper bound alla fine del bucket per includere
+    // i sample registrati nello stesso giorno/ora/settimana/mese.
+    const hiDate = new Date(hiFloor)
+    if (aggregation === "hourly")       hiDate.setHours(hiDate.getHours() + 1)
+    else if (aggregation === "daily")   hiDate.setDate(hiDate.getDate() + 1)
+    else if (aggregation === "weekly")  hiDate.setDate(hiDate.getDate() + 7)
+    else if (aggregation === "monthly") hiDate.setMonth(hiDate.getMonth() + 1)
+    const hi = hiDate.toISOString()
     return selectedTypes.map(type => {
       const meta = getMeta(type)
       const samples = rawFor(type)
         .filter(s => {
           if (!passesWeight(type, s.value)) return false
-          return s.start_date >= lo && s.start_date <= hi
+          return s.start_date >= lo && s.start_date < hi
         })
         .sort((a, b) => a.start_date.localeCompare(b.start_date))
       if (samples.length === 0) return { type, meta, first: null, last: null, delta: null, n: 0 }
@@ -443,7 +452,7 @@ export default function BodyBrowser() {
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selStart, selEnd, selectedTypes, filters.weight_min, filters.weight_max,
+  }, [selStart, selEnd, aggregation, selectedTypes, filters.weight_min, filters.weight_max,
       q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
 
   return (
@@ -466,9 +475,9 @@ export default function BodyBrowser() {
 
         {showWeightStats && weightStats && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <WeightDeltaCard label="Ultima settimana" stat={weightStats.week} />
             <WeightDeltaCard label="Ultimo mese" stat={weightStats.month} />
             <WeightDeltaCard label="Ultimo anno" stat={weightStats.year} />
-            <WeightDeltaCard label="Tutto" stat={weightStats.all} />
             <WeightDeltaCard label="Periodo selezionato" stat={weightStats.selected} />
           </div>
         )}
