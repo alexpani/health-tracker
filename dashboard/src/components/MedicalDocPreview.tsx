@@ -89,8 +89,10 @@ export default function MedicalDocPreview({ section, doc }: Props) {
     await del.mutateAsync(doc.id)
   }
 
+  // `#navpanes=0&pagemode=none` nasconde la barra laterale con le miniature
+  // delle pagine nel viewer PDF nativo del browser.
   const fileSrc = doc.file_id != null
-    ? `${API_URL}/api/v1/medical-docs/files/${doc.file_id}`
+    ? `${API_URL}/api/v1/medical-docs/files/${doc.file_id}#navpanes=0&pagemode=none`
     : null
 
   return (
