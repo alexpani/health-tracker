@@ -27,6 +27,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-7}
       LAB_DOCUMENTS_DIR: /app/data/lab_documents
+      MEDICAL_DOCUMENTS_DIR: /app/data/medical_documents
       # --- APNs silent push ---
       # Lasciare i 3 valori vuoti disabilita il push (le call diventano
       # no-op silenziose). Per abilitare: APNs Auth Key da Apple Developer,
@@ -39,6 +40,7 @@ services:
     volumes:
       - ./alembic/versions:/app/alembic/versions
       - ./data/lab_documents:/app/data/lab_documents
+      - ./data/medical_documents:/app/data/medical_documents
       - ./data/apns:/app/data/apns:ro
       - ./scripts:/app/scripts:ro
     depends_on:

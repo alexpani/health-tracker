@@ -827,3 +827,47 @@ export interface ClinicalFilters {
   limit?: number
   offset?: number
 }
+
+// --- Medical Docs (Visite / Referti / Documentazione) ---
+
+export type MedicalDocSection = "visit" | "imaging" | "document"
+export type MedicalDocStatus = "draft" | "confirmed"
+
+export interface MedicalDoc {
+  id: number
+  section: MedicalDocSection
+  category_id: number | null
+  file_id: number | null
+  title: string | null
+  doc_date: string | null
+  facility_name: string | null
+  doctor_name: string | null
+  status: MedicalDocStatus
+  notes: string | null
+  parsing_failed: boolean
+  created_at: string | null
+  updated_at: string | null
+  deduplicated?: boolean
+}
+
+export interface MedicalDocListResponse {
+  total: number
+  offset: number
+  limit: number
+  items: MedicalDoc[]
+}
+
+export interface MedicalDocCategory {
+  id: number
+  section: MedicalDocSection
+  name: string
+  doc_count: number
+}
+
+export interface MedicalDocFilters {
+  category_id?: number | null
+  status?: MedicalDocStatus | null
+  q?: string | null
+  start?: string | null
+  end?: string | null
+}

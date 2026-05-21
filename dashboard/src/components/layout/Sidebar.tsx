@@ -6,8 +6,10 @@ import {
   CalendarDays,
   Compass,
   Dumbbell,
+  FileArchive,
   FlaskConical,
   Heart,
+  ScanLine,
   Moon,
   Pill,
   PlusCircle,
@@ -38,6 +40,9 @@ const navItems: Array<{
   { to: "/sleep", label: "Sonno", icon: Moon },
   { to: "/regimens", label: "Regimi", icon: Pill },
   { to: "/lab", label: "Laboratorio", icon: FlaskConical },
+  { to: "/visite", label: "Visite", icon: Stethoscope },
+  { to: "/referti", label: "Referti", icon: ScanLine },
+  { to: "/documentazione", label: "Documentazione", icon: FileArchive },
   // Cartelle cliniche (HealthKit Clinical Records / FHIR): nascosta finche'
   // l'autorizzazione lato iPhone non sara' operativa. Codice (page, queries,
   // backend models/routers, iOS sync) resta in piedi — basta ripristinare

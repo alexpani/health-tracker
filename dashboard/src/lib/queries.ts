@@ -1,6 +1,14 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "./api"
 import type {
+  MedicalDoc,
+  MedicalDocCategory,
+  MedicalDocFilters,
+  MedicalDocListResponse,
+  MedicalDocSection,
+  MedicalDocStatus,
+} from "./types"
+import type {
   Aggregation,
   BlacklistEntry,
   CategorySample,
@@ -1139,4 +1147,103 @@ export function useLatestWeightBefore(
     enabled: !!testDate,
     refetchInterval: 30 * 60_000, // 30 min polling
   })
+}
+
+// --- Medical Docs (Visite / Referti / Documentazione) ---
+
+export function useMedicalDocs(section: MedicalDocSection, filters?: MedicalDocFilters) {
+  return useQuery({
+    queryKey: ["medicalDocs", section, filters],
+    queryFn: () =>
+      apiGet<MedicalDocListResponse>("/api/v1/medical-docs", {
+        section,
+        category_id: filters?.category_id ?? undefined,
+        status: filters?.status ?? undefined,
+        q: filters?.q?.trim() || undefined,
+        start: filters?.start || undefined,
+        end: filters?.end || undefined,
+        limit: 500,
+      }),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  })
+}
+
+export function useMedicalDocCategories(section: MedicalDocSection) {
+  return useQuery({
+    queryKey: ["medicalDocCategories", section],
+    queryFn: () =>
+      apiGet<MedicalDocCategory[]>("/api/v1/medical-docs/categories", { section }),
+    staleTime: 5 * 60_000,
+  })
+}
+
+export function useMedicalDocIngest(section: MedicalDocSection) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) =>
+      apiUpload<MedicalDoc>(`/api/v1/medical-docs/ingest?section=${section}`, file),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["medicalDocs", section] })
+      await qc.invalidateQueries({ queryKey: ["medicalDocCategories", section] })
+    },
+  })
+}
+
+export interface MedicalDocPatch {
+  title?: string | null
+  doc_date?: string | null
+  category_id?: number | null
+  facility_name?: string | null
+  doctor_name?: string | null
+  notes?: string | null
+  status?: MedicalDocStatus
+}
+
+export function useMedicalDocPatch(section: MedicalDocSection) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: number; patch: MedicalDocPatch }) =>
+      apiPatch<MedicalDoc>(`/api/v1/medical-docs/${id}`, patch),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["medicalDocs", section] })
+      await qc.invalidateQueries({ queryKey: ["medicalDocCategories", section] })
+    },
+  })
+}
+
+export function useMedicalDocDelete(section: MedicalDocSection) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiDelete<{ ok: boolean }>(`/api/v1/medical-docs/${id}?delete_file=true`),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["medicalDocs", section] })
+      await qc.invalidateQueries({ queryKey: ["medicalDocCategories", section] })
+    },
+  })
+}
+
+export function useMedicalDocCategoryMutations(section: MedicalDocSection) {
+  const qc = useQueryClient()
+  const invalidate = async () => {
+    await qc.invalidateQueries({ queryKey: ["medicalDocCategories", section] })
+    await qc.invalidateQueries({ queryKey: ["medicalDocs", section] })
+  }
+  const create = useMutation({
+    mutationFn: (name: string) =>
+      apiPost<MedicalDocCategory>("/api/v1/medical-docs/categories", { section, name }),
+    onSuccess: invalidate,
+  })
+  const rename = useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      apiPatch<MedicalDocCategory>(`/api/v1/medical-docs/categories/${id}`, { name }),
+    onSuccess: invalidate,
+  })
+  const remove = useMutation({
+    mutationFn: (id: number) =>
+      apiDelete<{ ok: boolean }>(`/api/v1/medical-docs/categories/${id}`),
+    onSuccess: invalidate,
+  })
+  return { create, rename, remove }
 }

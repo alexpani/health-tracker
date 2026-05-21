@@ -344,3 +344,4 @@ from . import devices  # noqa: E402, F401  — registra `Device` su Base.metadat
 from .devices import Device  # noqa: E402, F401  — re-export per `from app.models import Device`
 from . import clinical  # noqa: E402, F401  — registra `ClinicalRecord` su Base.metadata
 from .clinical import ClinicalRecord  # noqa: E402, F401
+from . import medical_docs  # noqa: E402, F401  — registra i modelli medical_docs su Base.metadata
