@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # finiscono nei container logs.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from app.routers import blacklist, clinical, daily_stats, day, delete as delete_router, devices, diario, health_notes, ingest, journal, lab, query, regimens, rules, stretching, write
+from app.routers import blacklist, clinical, daily_stats, day, delete as delete_router, devices, diario, health_notes, ingest, journal, lab, medical_docs, query, regimens, rules, stretching, write
 
 
 @asynccontextmanager
@@ -49,6 +49,7 @@ app.include_router(journal.router)
 app.include_router(day.router)
 app.include_router(devices.router)
 app.include_router(clinical.router)
+app.include_router(medical_docs.router)
 
 
 @app.get("/health")
