@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { CheckCircle2, Maximize2, Minimize2, Save, Trash2 } from "lucide-react"
+import { CheckCircle2, Loader2, Maximize2, Minimize2, Save, Trash2 } from "lucide-react"
 import { API_URL } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -99,7 +99,12 @@ export default function MedicalDocPreview({ section, doc }: Props) {
         <div className="flex items-center justify-between">
           <span className="text-sm font-semibold">Metadati</span>
           <div className="flex items-center gap-2">
-            {doc.parsing_failed && (
+            {doc.analysis_status === "pending" && (
+              <span className="flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-xs text-sky-800">
+                <Loader2 className="h-3 w-3 animate-spin" /> analisi IA in corso…
+              </span>
+            )}
+            {doc.analysis_status === "failed" && (
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
                 analisi IA fallita
               </span>

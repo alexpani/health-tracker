@@ -82,6 +82,11 @@ class MedicalDocument(Base):
     parsing_failed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
     )
+    # Stato dell'analisi IA, eseguita in background dopo l'upload:
+    # `pending` (in corso) → `done` | `failed`.
+    analysis_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="done"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

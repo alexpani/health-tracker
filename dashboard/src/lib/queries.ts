@@ -1166,6 +1166,11 @@ export function useMedicalDocs(section: MedicalDocSection, filters?: MedicalDocF
       }),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
+    // Se un documento ha l'analisi IA in corso, ricontrolla ogni 3s.
+    refetchInterval: query =>
+      query.state.data?.items.some(d => d.analysis_status === "pending")
+        ? 3000
+        : false,
   })
 }
 

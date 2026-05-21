@@ -11,14 +11,23 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+import anyio
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
+from app.database import async_session, get_db
 from app.models.medical_docs import (
     MedicalDocCategory,
     MedicalDocFile,
@@ -47,6 +56,7 @@ def _serialize_doc(d: MedicalDocument) -> dict[str, Any]:
         "status": d.status,
         "notes": d.notes,
         "parsing_failed": d.parsing_failed,
+        "analysis_status": d.analysis_status,
         "created_at": d.created_at.isoformat() if d.created_at else None,
         "updated_at": d.updated_at.isoformat() if d.updated_at else None,
     }
@@ -58,13 +68,16 @@ def _serialize_doc(d: MedicalDocument) -> dict[str, Any]:
 
 @router.post("/ingest")
 async def ingest_document(
+    background_tasks: BackgroundTasks,
     section: str = Query(..., pattern=_SECTION_RE),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Upload di un PDF. Dedup per sha256: se lo stesso PDF e' gia' presente
-    nella stessa sezione ritorna il documento esistente. Crea il documento
-    in `draft` con metadati pre-compilati dall'IA."""
+    nella stessa sezione ritorna il documento esistente. Il documento viene
+    creato subito in `draft` con `analysis_status='pending'` e ritornato;
+    l'estrazione testo + analisi IA girano in background (non bloccano la
+    risposta) e popolano i metadati in un secondo momento."""
     data = await file.read()
     if not data:
         raise HTTPException(400, "file vuoto")
@@ -88,7 +101,7 @@ async def ingest_document(
         if existing_doc is not None:
             return {**_serialize_doc(existing_doc), "deduplicated": True}
 
-    full_path, rel_path, size = medical_docs_ingest.save_document(
+    _full_path, rel_path, size = medical_docs_ingest.save_document(
         data, original_filename=file.filename or "documento.pdf"
     )
     if existing_file is None:
@@ -103,45 +116,60 @@ async def ingest_document(
     else:
         doc_file = existing_file
 
-    content_text = medical_docs_ingest.extract_text(data)
-
-    # Categorie esistenti della sezione: il prompt LLM le usa per suggerire.
-    cat_rows = (await db.execute(
-        select(MedicalDocCategory).where(MedicalDocCategory.section == section)
-    )).scalars().all()
-    cat_by_lower = {c.name.lower(): c.id for c in cat_rows}
-
-    parsing_failed = False
-    meta: medical_docs_ingest.ExtractedMeta | None = None
-    try:
-        payload = medical_docs_ingest.call_llm(
-            data, section, [c.name for c in cat_rows]
-        )
-        meta = medical_docs_ingest.parse_extracted_meta(payload)
-    except Exception:
-        logger.exception("medical-docs/ingest: LLM parsing failed")
-        parsing_failed = True
-
-    category_id: int | None = None
-    if meta is not None and meta.suggested_category:
-        category_id = cat_by_lower.get(meta.suggested_category.lower())
-
     doc = MedicalDocument(
         section=section,
-        category_id=category_id,
         file_id=doc_file.id,
-        title=meta.title if meta else None,
-        doc_date=meta.doc_date if meta else None,
-        facility_name=meta.facility_name if meta else None,
-        doctor_name=meta.doctor_name if meta else None,
         status="draft",
-        content_text=content_text or None,
-        parsing_failed=parsing_failed,
+        analysis_status="pending",
     )
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
+
+    # Analisi IA differita: non blocca la risposta HTTP.
+    background_tasks.add_task(_analyze_document, doc.id, data, section)
     return _serialize_doc(doc)
+
+
+async def _analyze_document(doc_id: int, data: bytes, section: str) -> None:
+    """Estrazione testo (pdfplumber) + analisi IA (Anthropic) in background.
+    Le parti bloccanti girano in un thread per non bloccare l'event loop."""
+    async with async_session() as db:
+        doc = (await db.execute(
+            select(MedicalDocument).where(MedicalDocument.id == doc_id)
+        )).scalar_one_or_none()
+        if doc is None:
+            return
+        try:
+            content_text = await anyio.to_thread.run_sync(
+                medical_docs_ingest.extract_text, data
+            )
+            cat_rows = (await db.execute(
+                select(MedicalDocCategory)
+                .where(MedicalDocCategory.section == section)
+            )).scalars().all()
+            cat_names = [c.name for c in cat_rows]
+            cat_by_lower = {c.name.lower(): c.id for c in cat_rows}
+
+            payload = await anyio.to_thread.run_sync(
+                medical_docs_ingest.call_llm, data, section, cat_names
+            )
+            meta = medical_docs_ingest.parse_extracted_meta(payload)
+
+            doc.content_text = content_text or None
+            doc.title = meta.title
+            doc.doc_date = meta.doc_date
+            doc.facility_name = meta.facility_name
+            doc.doctor_name = meta.doctor_name
+            if meta.suggested_category:
+                doc.category_id = cat_by_lower.get(meta.suggested_category.lower())
+            doc.parsing_failed = False
+            doc.analysis_status = "done"
+        except Exception:
+            logger.exception("medical-docs: analisi IA fallita per doc %s", doc_id)
+            doc.parsing_failed = True
+            doc.analysis_status = "failed"
+        await db.commit()
 
 
 # ---------------------------------------------------------------------------

@@ -41,9 +41,6 @@ export default function MedicalDocsList({
     }
     try {
       const res = await ingest.mutateAsync(f)
-      if (res.parsing_failed) {
-        alert(`Analisi IA fallita sul PDF. Documento creato (#${res.id}), compila i metadati a mano.`)
-      }
       onSelect(res.id)
     } catch (e) {
       alert(`Errore upload: ${e instanceof Error ? e.message : String(e)}`)
@@ -114,9 +111,14 @@ export default function MedicalDocsList({
                 >
                   <div className="flex items-center gap-2">
                     <span className="flex-1 truncate text-sm font-medium">
-                      {d.title || "(senza titolo)"}
+                      {d.title || (d.analysis_status === "pending"
+                        ? "Analisi IA in corso…"
+                        : "(senza titolo)")}
                     </span>
-                    {d.parsing_failed && (
+                    {d.analysis_status === "pending" && (
+                      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                    )}
+                    {d.analysis_status === "failed" && (
                       <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
                     )}
                     <StatusBadge status={d.status} />

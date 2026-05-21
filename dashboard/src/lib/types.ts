@@ -845,6 +845,7 @@ export interface MedicalDoc {
   status: MedicalDocStatus
   notes: string | null
   parsing_failed: boolean
+  analysis_status: "pending" | "done" | "failed"
   created_at: string | null
   updated_at: string | null
   deduplicated?: boolean
