@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/button"
 import { TimeRangeSelector, timeRangeToDates } from "@/components/controls/TimeRangeSelector"
 import { useCategories } from "@/lib/queries"
 import { SLEEP_STAGES } from "@/lib/healthkit"
-import { formatDate } from "@/lib/utils"
+import { formatDate, formatDateShort } from "@/lib/utils"
 import { Hypnogram } from "@/components/charts/Hypnogram"
 import { SleepScoreCard } from "@/components/charts/SleepScoreCard"
-import { computeSleepScore, type SleepScoreResult } from "@/lib/sleepScore"
+import { computeSleepScore, sleepNarrative, type SleepScoreResult } from "@/lib/sleepScore"
 import { Link } from "react-router-dom"
 import type { TimeRange } from "@/lib/types"
 
@@ -71,6 +71,91 @@ function SelectedNightBreakdown({
         </div>
       </div>
     </div>
+  )
+}
+
+/** Commento discorsivo sulla notte selezionata: come e' andata, punti di
+ *  forza e criticita'. Riusa la stessa finestra/dati di SleepScoreCard. */
+function SleepComment({ date }: { date: string }) {
+  const window = useMemo(() => {
+    const [y, m, d] = date.split("-").map(Number)
+    const start = new Date(y, m - 1, d - 1, 16, 0, 0)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 1)
+    return { startIso: start.toISOString(), endIso: end.toISOString() }
+  }, [date])
+
+  const q = useCategories(
+    "HKCategoryTypeIdentifierSleepAnalysis",
+    window.startIso,
+    window.endIso,
+  )
+  const result = useMemo(() => computeSleepScore(q.data ?? []), [q.data])
+
+  if (q.isLoading || !result) return null
+
+  return (
+    <div className="rounded-md border-l-4 border-l-primary bg-muted/40 px-3 py-2 text-sm">
+      <p className="font-medium text-muted-foreground mb-0.5">Com'e' andata</p>
+      <p className="leading-relaxed">{sleepNarrative(result)}</p>
+    </div>
+  )
+}
+
+/** Leggenda collassabile che spiega le fasi del sonno. */
+function SleepLegend() {
+  const items: { label: string; color: string; desc: string }[] = [
+    {
+      label: SLEEP_STAGES[2].label,
+      color: SLEEP_STAGES[2].color,
+      desc: "Brevi risvegli durante la notte. Sono normali; contano nel tempo \"a letto\" ma non nel \"dormito\".",
+    },
+    {
+      label: SLEEP_STAGES[3].label,
+      color: SLEEP_STAGES[3].color,
+      desc: "Sonno leggero (Core). La fase piu' lunga della notte, di transizione e consolidamento.",
+    },
+    {
+      label: SLEEP_STAGES[4].label,
+      color: SLEEP_STAGES[4].color,
+      desc: "Sonno profondo. Recupero fisico, rilascio dell'ormone della crescita; concentrato nelle prime ore.",
+    },
+    {
+      label: SLEEP_STAGES[5].label,
+      color: SLEEP_STAGES[5].color,
+      desc: "Sonno REM. Sogni vividi, consolidamento della memoria; piu' frequente verso il mattino.",
+    },
+  ]
+  return (
+    <details className="text-sm rounded-md border bg-muted/30 px-3 py-2">
+      <summary className="cursor-pointer font-medium text-muted-foreground select-none">
+        Cosa significano le fasi?
+      </summary>
+      <div className="mt-2 space-y-2">
+        {items.map(it => (
+          <div key={it.label} className="flex gap-2">
+            <span
+              className="mt-1 inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
+              style={{ background: it.color }}
+            />
+            <span>
+              <span className="font-medium">{it.label}</span>
+              <span className="text-muted-foreground"> — {it.desc}</span>
+            </span>
+          </div>
+        ))}
+        <div className="pt-2 border-t text-muted-foreground space-y-1">
+          <div>
+            <span className="font-medium text-foreground">Dormito</span> — somma di
+            Principale, Profondo e REM (esclude la Veglia).
+          </div>
+          <div>
+            <span className="font-medium text-foreground">A letto</span> — tempo totale
+            registrato, incluse le fasi di veglia.
+          </div>
+        </div>
+      </div>
+    </details>
   )
 }
 
@@ -218,7 +303,7 @@ export default function Sleep() {
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                 <XAxis
                   dataKey="day"
-                  tickFormatter={v => formatDate(v, { day: "2-digit", month: "2-digit" })}
+                  tickFormatter={v => formatDateShort(v)}
                   tick={{ fontSize: 11 }}
                   minTickGap={20}
                 />
@@ -257,7 +342,9 @@ export default function Sleep() {
           </CardHeader>
           <CardContent className="space-y-4">
             <Hypnogram date={selectedYmd} height={80} showEmpty />
+            <SleepComment date={selectedYmd} />
             <SelectedNightBreakdown ymd={selectedYmd} chartData={chartData} />
+            <SleepLegend />
             <SleepScoreCard date={selectedYmd} />
           </CardContent>
         </Card>

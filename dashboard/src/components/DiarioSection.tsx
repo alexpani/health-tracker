@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useDiarioDailyTotals, useSamples } from "@/lib/queries"
 import type { DiarioDailyTotal, NutritionFilters, Sample } from "@/lib/types"
+import { formatDateShort as utilFormatDateShort, formatDateShortYear } from "@/lib/utils"
 
 // HealthKit dietary types we consolidate with the diario
 const HK_DIETARY_MAP = [
@@ -35,8 +36,7 @@ interface Props {
 }
 
 function formatDateShort(iso: string): string {
-  const d = new Date(iso + "T00:00:00")
-  return d.toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "2-digit" })
+  return formatDateShortYear(iso)
 }
 
 function todayLocalISO(): string {
@@ -219,7 +219,7 @@ export function DiarioSection({ filters, onBarClick }: Props) {
                 >
                   <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }}
-                    tickFormatter={s => new Date(s + "T00:00:00").toLocaleDateString("it-IT", { day: "2-digit", month: "short" })}
+                    tickFormatter={s => utilFormatDateShort(s)}
                     minTickGap={30} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip

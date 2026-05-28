@@ -11,6 +11,14 @@ import {
 } from "recharts"
 import { useSamples } from "@/lib/queries"
 import type { AdvancedFilters, AggregatedPoint, Aggregation, Sample } from "@/lib/types"
+import {
+  formatDateShort,
+  formatDateShortYear,
+  formatDateTime,
+  formatMonthYear,
+  formatMonthYearLong,
+  formatDateLong,
+} from "@/lib/utils"
 
 const SYS = "HKQuantityTypeIdentifierBloodPressureSystolic"
 const DIA = "HKQuantityTypeIdentifierBloodPressureDiastolic"
@@ -90,27 +98,21 @@ export function BloodPressureChart({ start, end, aggregation, advanced, height =
     const d = new Date(iso)
     if (aggregation === "hourly") {
       return multiYear
-        ? d.toLocaleString("it-IT", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })
+        ? formatDateTime(d)
         : d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
     }
-    if (aggregation === "monthly") return d.toLocaleDateString("it-IT", { month: "short", year: "2-digit" })
+    if (aggregation === "monthly") return formatMonthYear(d)
     if (aggregation === "weekly") {
-      return multiYear
-        ? d.toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "2-digit" })
-        : d.toLocaleDateString("it-IT", { day: "2-digit", month: "short" })
+      return multiYear ? formatDateShortYear(d) : formatDateShort(d)
     }
-    return multiYear
-      ? d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit", year: "2-digit" })
-      : d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })
+    return multiYear ? formatDateShortYear(d) : formatDateShort(d)
   }
 
   const tooltipLabel = (iso: string) => {
     const d = new Date(iso)
-    if (aggregation === "hourly") {
-      return d.toLocaleString("it-IT", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
-    }
-    if (aggregation === "monthly") return d.toLocaleDateString("it-IT", { month: "long", year: "numeric" })
-    return d.toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })
+    if (aggregation === "hourly") return formatDateTime(d)
+    if (aggregation === "monthly") return formatMonthYearLong(d)
+    return formatDateLong(d)
   }
 
   // Y-axis tight domain — sis e dia condividono mmHg.
@@ -161,9 +163,7 @@ function BpTooltip({ active, payload, label }: any) {
   const diaEntry = payload.find((p: any) => p.dataKey === "dia")
   const sys = sysEntry?.value as number | null | undefined
   const dia = diaEntry?.value as number | null | undefined
-  const labelText = label
-    ? new Date(String(label)).toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })
-    : ""
+  const labelText = label ? formatDateLong(String(label)) : ""
   return (
     <div className="rounded-md border bg-card text-card-foreground shadow-md p-3 text-sm" style={{ minWidth: 200 }}>
       <div className="font-medium mb-2">{labelText}</div>

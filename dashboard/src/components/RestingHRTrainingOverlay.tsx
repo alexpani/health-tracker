@@ -12,6 +12,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useRegimens, useSamples } from "@/lib/queries"
 import type { AggregatedPoint, Regimen } from "@/lib/types"
+import { formatMonthYear, formatMonthYearLong } from "@/lib/utils"
 
 const RHR_TYPE = "HKQuantityTypeIdentifierRestingHeartRate"
 const TRAINING_FILL = "#f59e0b" // amber-500
@@ -149,9 +150,7 @@ export function RestingHRTrainingOverlay() {
                   type="number"
                   scale="time"
                   domain={xDomain as any}
-                  tickFormatter={(v: number) =>
-                    new Date(v).toLocaleDateString("it-IT", { year: "numeric", month: "short" })
-                  }
+                  tickFormatter={(v: number) => formatMonthYear(new Date(v))}
                   tick={{ fontSize: 11 }}
                   minTickGap={40}
                 />
@@ -182,7 +181,7 @@ export function RestingHRTrainingOverlay() {
                     return (
                       <div className="rounded-md border bg-popover px-3 py-2 text-xs shadow-md">
                         <div className="font-medium mb-1 tabular-nums">
-                          {new Date(p.ts).toLocaleDateString("it-IT", { year: "numeric", month: "long" })}
+                          {formatMonthYearLong(new Date(p.ts))}
                         </div>
                         <div className="tabular-nums">
                           <span className="text-muted-foreground">avg </span>

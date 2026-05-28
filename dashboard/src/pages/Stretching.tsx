@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useStretchingSessions } from "@/lib/queries"
 import type { StretchingSession } from "@/lib/types"
+import { formatDateTime as utilFormatDateTime, formatDateShort, formatDateLong } from "@/lib/utils"
 
 function todayLocalISO(): string {
   const d = new Date()
@@ -34,11 +35,7 @@ function formatDuration(totalSec: number): string {
 }
 
 function formatDateTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleString("it-IT", {
-    day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  })
+  return utilFormatDateTime(iso)
 }
 
 interface Stats {
@@ -194,16 +191,12 @@ export default function Stretching() {
                 <XAxis
                   dataKey="date"
                   tick={{ fontSize: 11 }}
-                  tickFormatter={s => new Date(s + "T00:00:00").toLocaleDateString("it-IT", { day: "2-digit", month: "short" })}
+                  tickFormatter={s => formatDateShort(s)}
                   minTickGap={30}
                 />
                 <YAxis tick={{ fontSize: 11 }} label={{ value: "min", angle: -90, position: "insideLeft", fontSize: 11 }} />
                 <Tooltip
-                  labelFormatter={(label) =>
-                    new Date((label as string) + "T00:00:00").toLocaleDateString("it-IT", {
-                      weekday: "short", day: "2-digit", month: "short", year: "numeric",
-                    })
-                  }
+                  labelFormatter={(label) => formatDateLong(label as string)}
                   formatter={(v: any, name: any, entry: any) => {
                     if (name === "minutes") {
                       const sessCount = entry?.payload?.sessions ?? 0

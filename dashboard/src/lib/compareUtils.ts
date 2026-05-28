@@ -1,4 +1,4 @@
-import type { Sample, Workout, WorkoutDetail, WorkoutSplit } from "./types"
+import type { Sample, Workout, WorkoutActivity, WorkoutDetail, WorkoutSplit } from "./types"
 
 /**
  * Derive the effective_type slug client-side using the same rules the backend
@@ -86,6 +86,77 @@ export function mergeSplits(
       ? a.pace_sec_per_km - b.pace_sec_per_km
       : null
     out.push({ n: i + 1, a, b, paceDelta })
+  }
+  return out
+}
+
+export interface MergedActivity {
+  n: number
+  a: WorkoutActivity | null
+  b: WorkoutActivity | null
+  /** A.duration - B.duration (seconds). null when one side missing. */
+  durationDelta: number | null
+  /** A.pace - B.pace (sec/km). null when missing. */
+  paceDelta: number | null
+  /** A.avg_hr - B.avg_hr (bpm). null when missing. */
+  hrDelta: number | null
+}
+
+/**
+ * Two activity sequences are considered "coherent" (= worth comparing
+ * row-by-row) when both have entries and follow the same kind pattern.
+ * If the lengths differ, we still allow comparison but flag it.
+ */
+export interface ActivitiesCoherence {
+  comparable: boolean
+  /** true if the kind sequence (work/rest/lap...) matches exactly. */
+  sameStructure: boolean
+  reason?: string
+}
+
+export function checkActivitiesCoherence(
+  a: WorkoutActivity[] | null | undefined,
+  b: WorkoutActivity[] | null | undefined,
+): ActivitiesCoherence {
+  if (!a || !b || a.length === 0 || b.length === 0) {
+    return { comparable: false, sameStructure: false, reason: "Uno dei workout non ha intervalli." }
+  }
+  if (a.length !== b.length) {
+    return {
+      comparable: true,
+      sameStructure: false,
+      reason: `Numero di intervalli diverso (A: ${a.length}, B: ${b.length}).`,
+    }
+  }
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].kind !== b[i].kind) {
+      return {
+        comparable: true,
+        sameStructure: false,
+        reason: "La sequenza work/rest differisce: confronto per indice.",
+      }
+    }
+  }
+  return { comparable: true, sameStructure: true }
+}
+
+export function mergeActivities(
+  a: WorkoutActivity[] | null | undefined,
+  b: WorkoutActivity[] | null | undefined,
+): MergedActivity[] {
+  const max = Math.max(a?.length ?? 0, b?.length ?? 0)
+  const out: MergedActivity[] = []
+  for (let i = 0; i < max; i++) {
+    const av = a?.[i] ?? null
+    const bv = b?.[i] ?? null
+    const durationDelta = av && bv ? av.duration_s - bv.duration_s : null
+    const paceDelta = av?.pace_s_per_km != null && bv?.pace_s_per_km != null
+      ? av.pace_s_per_km - bv.pace_s_per_km
+      : null
+    const hrDelta = av?.avg_hr != null && bv?.avg_hr != null
+      ? av.avg_hr - bv.avg_hr
+      : null
+    out.push({ n: i + 1, a: av, b: bv, durationDelta, paceDelta, hrDelta })
   }
   return out
 }

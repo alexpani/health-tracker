@@ -11,6 +11,7 @@ import {
   CATEGORY_ORDER,
 } from "@/lib/healthNotes"
 import type { HealthNote, HealthNoteCategory, HealthNoteFilters } from "@/lib/types"
+import { formatDate, formatMonthYearLong } from "@/lib/utils"
 
 const STORAGE_KEY = "health_notes_filters_v1"
 
@@ -27,8 +28,7 @@ function shiftDate(iso: string, days: number): string {
 }
 
 function fmtDateIT(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" })
+  return formatDate(iso)
 }
 
 function monthKey(iso: string): string {
@@ -36,8 +36,7 @@ function monthKey(iso: string): string {
 }
 
 function fmtMonthIT(yyyymm: string): string {
-  const [y, m] = yyyymm.split("-").map(Number)
-  return new Date(y, m - 1, 1).toLocaleDateString("it-IT", { month: "long", year: "numeric" })
+  return formatMonthYearLong(yyyymm + "-01")
 }
 
 const PRESETS = [

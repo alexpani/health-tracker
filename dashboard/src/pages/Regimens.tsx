@@ -8,6 +8,7 @@ import type { Regimen, RegimenKind } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
 import { RegimenTimeline } from "@/components/RegimenTimeline"
 import { formatPeriodDuration } from "@/lib/duration"
+import { formatDate } from "@/lib/utils"
 
 type TabId = "salute" | "sport" | "alimentazione" | "gear"
 
@@ -27,8 +28,7 @@ function isOngoing(r: Regimen): boolean {
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—"
-  const [y, m, d] = iso.split("-").map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" })
+  return formatDate(iso)
 }
 
 export default function Regimens() {
@@ -77,11 +77,14 @@ export default function Regimens() {
     if (p.protein_g != null) dose.push(`P ${Math.round(p.protein_g)}g`)
     if (p.fat_g != null) dose.push(`F ${Math.round(p.fat_g)}g`)
     if (p.carbs_g != null) dose.push(`C ${Math.round(p.carbs_g)}g`)
+    // Il diario non espone una data di inizio piano; `updated_at` e' la data
+    // in cui il piano e' stato impostato/modificato — la usiamo come "attivo da".
+    const startDate = p.updated_at ? p.updated_at.slice(0, 10) : null
     return {
       id: -1,
       kind: "diet",
       name: p.name,
-      start_date: null,
+      start_date: startDate,
       end_date: null,
       dose: dose.join(" · ") || null,
       notes: "Sincronizzato dal diario alimentare. Modifica nel diario.",
@@ -445,7 +448,21 @@ function Section({
                       {kind !== "training" && <td className="p-3 hidden md:table-cell">{r.dose ?? "—"}</td>}
                       <td className="p-3 tabular-nums whitespace-nowrap">
                         {fromDiario
-                          ? <em className="text-emerald-600">in corso</em>
+                          ? (
+                              <>
+                                <div>
+                                  {fmtDate(r.start_date)} → <em className="text-emerald-600">in corso</em>
+                                </div>
+                                {(() => {
+                                  const duration = formatPeriodDuration(r.start_date, r.end_date)
+                                  return duration ? (
+                                    <div className="text-xs text-muted-foreground whitespace-normal max-w-[24rem]" title={duration}>
+                                      da {duration}
+                                    </div>
+                                  ) : null
+                                })()}
+                              </>
+                            )
                           : (() => {
                               const duration = formatPeriodDuration(r.start_date, r.end_date)
                               return (

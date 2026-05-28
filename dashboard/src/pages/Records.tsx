@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { useWorkoutRecords, useWorkoutRecordsFacets } from "@/lib/queries"
 import { effectiveTypeLabel } from "@/lib/healthkit"
+import { formatDateShortYear } from "@/lib/utils"
 import type { AtDistanceRecord, BestSingleKm, EffectiveTypeRecords, RecordEntry, RecordsFilters } from "@/lib/types"
 
 const STORAGE_KEY = "records_filters_v1"
@@ -32,7 +33,7 @@ function formatKm(meters: number | null | undefined): string {
 }
 
 function formatShortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "2-digit" })
+  return formatDateShortYear(iso)
 }
 
 function RecordRow({

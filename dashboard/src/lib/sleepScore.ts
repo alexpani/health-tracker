@@ -149,3 +149,53 @@ export function computeSleepScore(samples: CategorySample[]): SleepScoreResult |
 
   return { score: total, label, color, components }
 }
+
+/** Genera un commento discorsivo in italiano su com'e' andata la notte,
+ *  a partire dai componenti gia' calcolati dello score. Mette in evidenza
+ *  i punti di forza e le criticita' principali. */
+export function sleepNarrative(result: SleepScoreResult): string {
+  const get = (k: string) => result.components.find(c => c.key === k)
+  const dur = get("duration")
+  const eff = get("efficiency")
+  const deep = get("deep")
+  const rem = get("rem")
+  const wake = get("continuity")
+
+  const parts: string[] = []
+
+  const opener: Record<string, string> = {
+    Eccellente: "Notte di sonno eccellente.",
+    Buono: "Buona notte di sonno.",
+    Discreto: "Notte di riposo nella media.",
+    Scarso: "Notte poco ristoratrice.",
+  }
+  parts.push(opener[result.label] ?? "Notte di sonno.")
+
+  if (dur) {
+    if (dur.score >= 18) parts.push(`Hai dormito ${dur.value}, una durata ottimale.`)
+    else if (dur.score >= 10) parts.push(`Durata di ${dur.value}, un po' fuori dalla fascia ideale di 7-9 ore.`)
+    else parts.push(`Durata di sole ${dur.value}: il riposo e' stato troppo breve.`)
+  }
+
+  if (eff) {
+    if (eff.score >= 18) parts.push(`Sonno molto continuo (efficienza ${eff.value}).`)
+    else if (eff.score < 10) parts.push(`Hai passato parecchio tempo sveglio a letto (efficienza ${eff.value}).`)
+  }
+
+  if (deep) {
+    if (deep.score >= 14) parts.push(`Buona quota di sonno profondo (${deep.value}), utile al recupero fisico.`)
+    else if (deep.score < 10) parts.push(`Poco sonno profondo (${deep.value}): il recupero fisico potrebbe risentirne.`)
+  }
+
+  if (rem) {
+    if (rem.score >= 14) parts.push(`Fase REM nella norma (${rem.value}).`)
+    else if (rem.score < 10) parts.push(`Fase REM ridotta (${rem.value}), legata a memoria e umore.`)
+  }
+
+  if (wake) {
+    if (wake.score >= 18) parts.push("Sonno praticamente ininterrotto.")
+    else if (wake.score < 10) parts.push(`Diversi risvegli hanno frammentato la notte (${wake.value}).`)
+  }
+
+  return parts.join(" ")
+}

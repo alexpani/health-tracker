@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { useClinicalFacets, useClinicalRecord, useClinicalRecords } from "@/lib/queries"
 import type { ClinicalFilters, ClinicalRecord } from "@/lib/types"
+import { formatDate, formatMonthYearLong } from "@/lib/utils"
 
 const STORAGE_KEY = "clinical_filters_v1"
 
@@ -35,8 +36,7 @@ function shortCategory(cat: string): string {
 }
 
 function fmtDateIT(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" })
+  return formatDate(iso)
 }
 
 function loadFilters(): ClinicalFilters {
@@ -169,7 +169,7 @@ export default function Clinical() {
         {grouped.map(([yyyymm, rows]) => (
           <div key={yyyymm} className="space-y-2">
             <h2 className="text-sm font-semibold text-muted-foreground sticky top-0 bg-background py-1">
-              {new Date(yyyymm + "-01").toLocaleDateString("it-IT", { month: "long", year: "numeric" })}
+              {formatMonthYearLong(yyyymm + "-01")}
             </h2>
             <Card>
               <CardContent className="p-0">

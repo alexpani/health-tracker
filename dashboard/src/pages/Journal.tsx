@@ -14,6 +14,7 @@ import {
   useRenameJournalTag,
 } from "@/lib/queries"
 import type { JournalEntry, JournalFilters } from "@/lib/types"
+import { formatDate, formatMonthYearLong } from "@/lib/utils"
 
 const STORAGE_KEY = "journal_filters_v1"
 
@@ -31,13 +32,13 @@ function shiftDate(iso: string, days: number): string {
 
 function fmtDateIT(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString("it-IT", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })
+  const weekday = new Date(y, m - 1, d).toLocaleDateString("it-IT", { weekday: "short" })
+  return `${weekday} ${formatDate(iso)}`
 }
 
 function monthKey(iso: string): string { return iso.slice(0, 7) }
 function fmtMonthIT(yyyymm: string): string {
-  const [y, m] = yyyymm.split("-").map(Number)
-  return new Date(y, m - 1, 1).toLocaleDateString("it-IT", { month: "long", year: "numeric" })
+  return formatMonthYearLong(yyyymm + "-01")
 }
 
 function truncatePlain(s: string, max = 220): string {

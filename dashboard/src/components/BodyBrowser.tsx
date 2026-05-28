@@ -17,7 +17,7 @@ import { BodyFiltersSidebar } from "@/components/BodyFiltersSidebar"
 import { WeightCalculator } from "@/components/WeightCalculator"
 import { fetchCorrelated, useBulkDeleteSamples, useSampleFacets, useSamples } from "@/lib/queries"
 import { CATEGORIES, getMeta } from "@/lib/healthkit"
-import { formatDateTime } from "@/lib/utils"
+import { formatDateTime, formatDateShortYear, formatDateShort, formatDateLong, formatMonthYear } from "@/lib/utils"
 import type { BodyFilters, CorrelatedSample, Sample } from "@/lib/types"
 
 const BODY_TYPES = CATEGORIES.body.types
@@ -73,8 +73,7 @@ function WeightDeltaCard({ label, stat }: { label: string; stat: WeightStat | nu
     Math.abs(stat.delta) < 0.05 ? "text-muted-foreground"
     : stat.delta > 0 ? "text-red-500"
     : "text-green-500"
-  const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "2-digit" })
+  const fmtDate = (iso: string) => formatDateShortYear(iso)
   return (
     <Card>
       <CardContent className="p-3">
@@ -351,14 +350,14 @@ export default function BodyBrowser() {
   const axisFormat = (iso: string) => {
     const d = new Date(iso)
     if (aggregation === "hourly") return d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
-    if (aggregation === "monthly") return d.toLocaleDateString("it-IT", { month: "short", year: "2-digit" })
-    if (multiYear) return d.toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "2-digit" })
-    return d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })
+    if (aggregation === "monthly") return formatMonthYear(d)
+    if (multiYear) return formatDateShortYear(d)
+    return formatDateShort(d)
   }
 
   const tooltipLabel = (iso: string) => {
     const d = new Date(iso)
-    const datePart = d.toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })
+    const datePart = formatDateLong(d)
     // Per i bucket daily/weekly/monthly il timestamp è troncato a mezzanotte
     // (vedi bucketFloor), quindi mostrare l'ora porterebbe sempre "00:00".
     if (aggregation === "none" || aggregation === "hourly") {
@@ -493,9 +492,7 @@ export default function BodyBrowser() {
                   ? meta.formatValue(ov.lastValue * meta.unitMultiplier)
                   : (ov.lastValue * meta.unitMultiplier).toLocaleString("it-IT", { maximumFractionDigits: 2 }))
               : null
-            const dateStr = ov?.lastDate
-              ? new Date(ov.lastDate).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "2-digit" })
-              : null
+            const dateStr = ov?.lastDate ? formatDateShortYear(ov.lastDate) : null
             return (
               <Card key={t}>
                 <CardContent className="p-3">

@@ -14,7 +14,7 @@ import { RotateCcw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useLabAnalytes, useLabTimeseries, useSamples } from "@/lib/queries"
 import type { LabAnalyte, LabTimeseriesResponse, SamplesResponse } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { cn, formatDate } from "@/lib/utils"
 
 const MAX_SERIES = 5
 const COLORS = ["#ef4444", "#3b82f6", "#10b981", "#f59e0b", "#8b5cf6"]
@@ -371,7 +371,7 @@ function SeriesCard({
             <XAxis
               dataKey="test_date"
               tick={{ fontSize: 11 }}
-              tickFormatter={v => v.slice(2, 7)}
+              tickFormatter={v => formatDate(v)}
             />
             <YAxis tick={{ fontSize: 11 }} />
             {(ref_low != null || ref_high != null) && (
@@ -390,6 +390,7 @@ function SeriesCard({
             )}
             <Tooltip
               contentStyle={{ fontSize: 12 }}
+              labelFormatter={l => formatDate(l as string)}
               formatter={(v: number) => [v, data.analyte.display_name_it]}
             />
             <Line
@@ -534,7 +535,7 @@ function DerivedSeriesCard({
             <XAxis
               dataKey="test_date"
               tick={{ fontSize: 11 }}
-              tickFormatter={v => v.slice(2, 7)}
+              tickFormatter={v => formatDate(v)}
             />
             <YAxis tick={{ fontSize: 11 }} />
             {/* Banda "rischio molto basso" sotto 3.5 — verde intenso */}
@@ -562,6 +563,7 @@ function DerivedSeriesCard({
             )}
             <Tooltip
               contentStyle={{ fontSize: 12 }}
+              labelFormatter={l => formatDate(l as string)}
               formatter={(v: number) => [v.toFixed(2), d.label]}
             />
             <Line
@@ -674,11 +676,12 @@ function HkSeriesCard({
             <XAxis
               dataKey="test_date"
               tick={{ fontSize: 11 }}
-              tickFormatter={v => v.slice(2, 7)}
+              tickFormatter={v => formatDate(v)}
             />
             <YAxis tick={{ fontSize: 11 }} domain={["auto", "auto"]} />
             <Tooltip
               contentStyle={{ fontSize: 12 }}
+              labelFormatter={l => formatDate(l as string)}
               formatter={(v: number) => [
                 Number(v).toFixed(1) + (metric.unit ? ` ${metric.unit}` : ""),
                 metric.label,

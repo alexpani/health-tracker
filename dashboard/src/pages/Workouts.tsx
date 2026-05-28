@@ -10,7 +10,7 @@ import { WorkoutFiltersSidebar } from "@/components/WorkoutFiltersSidebar"
 import { useDeleteWorkout, useRestoreWorkout, useWorkouts } from "@/lib/queries"
 import { workoutDisplayTitle, workoutName } from "@/lib/healthkit"
 import { deriveEffectiveType } from "@/lib/compareUtils"
-import { formatDateTime, formatNumber } from "@/lib/utils"
+import { formatDateTime, formatNumber, formatDate, formatDateShort, formatMonthYearLong } from "@/lib/utils"
 import type { Workout, WorkoutFilters } from "@/lib/types"
 
 type ChartAggregation = "day" | "week" | "month" | "all"
@@ -54,19 +54,16 @@ function bucketKey(d: Date, agg: ChartAggregation): string {
 
 function formatBucketLabel(key: string, agg: ChartAggregation, withYear = false): string {
   if (agg === "day") {
-    return new Date(key).toLocaleDateString("it-IT", withYear
-      ? { day: "2-digit", month: "short", year: "numeric" }
-      : { day: "2-digit", month: "short" })
+    return withYear ? formatDate(key) : formatDateShort(key)
   }
   if (agg === "week") {
     const d = new Date(key)
-    const start = d.toLocaleDateString("it-IT", { day: "2-digit", month: "short" })
-    const end = new Date(d.getTime() + 6 * 24 * 3600 * 1000).toLocaleDateString("it-IT", { day: "2-digit", month: "short" })
+    const start = formatDateShort(d)
+    const end = formatDateShort(new Date(d.getTime() + 6 * 24 * 3600 * 1000))
     return withYear ? `${start} - ${end} ${d.getFullYear()}` : `${start} - ${end}`
   }
   if (agg === "month") {
-    const [y, m] = key.split("-")
-    return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString("it-IT", { month: "long", year: "numeric" })
+    return formatMonthYearLong(key + "-01")
   }
   return key
 }

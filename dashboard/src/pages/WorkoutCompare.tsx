@@ -7,13 +7,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { CompareLineChart } from "@/components/CompareLineChart"
 import { useSamples, useWorkoutByUuid, useWorkoutSplits } from "@/lib/queries"
 import { workoutDisplayTitle, workoutName } from "@/lib/healthkit"
-import { formatDateTime, formatNumber } from "@/lib/utils"
+import { formatDate, formatDateTime, formatNumber } from "@/lib/utils"
 import {
+  checkActivitiesCoherence,
   deriveEffectiveType,
   diffMetric,
   formatElapsed,
   formatPaceSecPerKm,
   formatSignedSeconds,
+  mergeActivities,
   mergeSplits,
   toElapsedSeries,
 } from "@/lib/compareUtils"
@@ -142,8 +144,8 @@ export default function WorkoutCompare() {
   const hrSamplesA = hrA.data?.data as Sample[] | undefined
   const hrSamplesB = hrB.data?.data as Sample[] | undefined
 
-  const labelA = wA.data ? `A · ${formatDateTime(wA.data.start_date).split(",")[0]}` : "A"
-  const labelB = wB.data ? `B · ${formatDateTime(wB.data.start_date).split(",")[0]}` : "B"
+  const labelA = wA.data ? `A · ${formatDate(wA.data.start_date)}` : "A"
+  const labelB = wB.data ? `B · ${formatDate(wB.data.start_date)}` : "B"
 
   const hrSeriesA = useMemo(
     () => wA.data ? toElapsedSeries(hrSamplesA, wA.data.start_date) : [],
@@ -176,6 +178,13 @@ export default function WorkoutCompare() {
   const mergedSplits = useMemo(
     () => mergeSplits(splitsA.data?.splits, splitsB.data?.splits),
     [splitsA.data, splitsB.data])
+
+  const mergedActivities = useMemo(
+    () => mergeActivities(wA.data?.activities, wB.data?.activities),
+    [wA.data, wB.data])
+  const activitiesCoherence = useMemo(
+    () => checkActivitiesCoherence(wA.data?.activities, wB.data?.activities),
+    [wA.data, wB.data])
 
   if (!uuidA || !uuidB) {
     return (
@@ -344,6 +353,81 @@ export default function WorkoutCompare() {
             </Table>
             <p className="text-xs text-muted-foreground mt-2">
               Δ ritmo = A − B per km. Verde = A più veloce.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {activitiesCoherence.comparable && mergedActivities.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Intervalli
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {activitiesCoherence.sameStructure
+                  ? "stessa struttura — confronto per indice"
+                  : (activitiesCoherence.reason ?? "confronto per indice")}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[50px]">#</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead className="text-right" style={{ color: COLOR_A }}>Durata A</TableHead>
+                  <TableHead className="text-right" style={{ color: COLOR_A }}>Ritmo A</TableHead>
+                  <TableHead className="text-right" style={{ color: COLOR_A }}>HR A</TableHead>
+                  <TableHead className="text-right" style={{ color: COLOR_B }}>Durata B</TableHead>
+                  <TableHead className="text-right" style={{ color: COLOR_B }}>Ritmo B</TableHead>
+                  <TableHead className="text-right" style={{ color: COLOR_B }}>HR B</TableHead>
+                  <TableHead className="text-right">Δ durata</TableHead>
+                  <TableHead className="text-right">Δ ritmo</TableHead>
+                  <TableHead className="text-right">Δ HR</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {mergedActivities.map(row => {
+                  const kindLabel = row.a?.kind ?? row.b?.kind ?? "-"
+                  const nameLabel = row.a?.name ?? row.b?.name ?? null
+                  const isRest = (row.a?.kind ?? row.b?.kind) === "rest"
+                  const paceCls = row.paceDelta == null ? "text-muted-foreground"
+                    : row.paceDelta < 0 ? "text-green-600 dark:text-green-400"
+                    : row.paceDelta > 0 ? "text-red-600 dark:text-red-400"
+                    : "text-muted-foreground"
+                  const durCls = row.durationDelta == null ? "text-muted-foreground" : "text-muted-foreground"
+                  const hrCls = row.hrDelta == null ? "text-muted-foreground"
+                    : row.hrDelta < 0 ? "text-green-600 dark:text-green-400"
+                    : row.hrDelta > 0 ? "text-red-600 dark:text-red-400"
+                    : "text-muted-foreground"
+                  return (
+                    <TableRow key={row.n} className={isRest ? "bg-muted/40" : ""}>
+                      <TableCell className="font-medium tabular-nums">{row.n}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="capitalize">{nameLabel ?? kindLabel}</span>
+                          {nameLabel && nameLabel !== kindLabel && (
+                            <span className="text-[11px] text-muted-foreground capitalize">{kindLabel}</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{row.a ? formatElapsed(row.a.duration_s) : "-"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatPaceSecPerKm(row.a?.pace_s_per_km)}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{row.a?.avg_hr != null ? Math.round(row.a.avg_hr) : "-"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{row.b ? formatElapsed(row.b.duration_s) : "-"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatPaceSecPerKm(row.b?.pace_s_per_km)}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{row.b?.avg_hr != null ? Math.round(row.b.avg_hr) : "-"}</TableCell>
+                      <TableCell className={`text-right tabular-nums ${durCls}`}>{row.durationDelta != null ? formatSignedSeconds(row.durationDelta) : ""}</TableCell>
+                      <TableCell className={`text-right tabular-nums ${paceCls}`}>{row.paceDelta != null ? formatSignedSeconds(row.paceDelta) : ""}</TableCell>
+                      <TableCell className={`text-right tabular-nums ${hrCls}`}>{row.hrDelta != null ? `${row.hrDelta > 0 ? "+" : row.hrDelta < 0 ? "−" : ""}${Math.round(Math.abs(row.hrDelta))} bpm` : ""}</TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+            <p className="text-xs text-muted-foreground mt-2">
+              Δ = A − B. Verde = A migliore (ritmo più veloce / HR più basso).
             </p>
           </CardContent>
         </Card>

@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useDailyStats, useLatest } from "@/lib/queries"
+import { formatDate } from "@/lib/utils"
 
 const KCAL_PER_KG = 7700
 const STORAGE_KEY = "body_calculator_v1"
@@ -65,7 +66,7 @@ function average(nums: number[]): number {
 }
 
 function fmtDateIT(d: Date): string {
-  return d.toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" })
+  return formatDate(d)
 }
 
 export function WeightCalculator() {

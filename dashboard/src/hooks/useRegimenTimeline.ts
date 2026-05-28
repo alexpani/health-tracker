@@ -344,11 +344,10 @@ export function formatDateForDisplay(iso: string | null): string {
 
   const date = stringToDate(iso)
   const day = String(date.getUTCDate()).padStart(2, '0')
-  const monthNames = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic']
-  const month = monthNames[date.getUTCMonth()]
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
   const year = date.getUTCFullYear()
 
-  return `${day} ${month} ${year}`
+  return `${day}-${month}-${year}`
 }
 
 export function useRegimenTimeline(regimens: Regimen[], rangeStart: string, rangeEnd: string) {

@@ -13,6 +13,14 @@ import {
 } from "recharts"
 import type { AggregatedPoint, Sample } from "@/lib/types"
 import { getMeta } from "@/lib/healthkit"
+import {
+  formatDateShort,
+  formatDateShortYear,
+  formatDateTime,
+  formatMonthYear,
+  formatMonthYearLong,
+  formatDateLong,
+} from "@/lib/utils"
 
 interface Props {
   type: string
@@ -61,28 +69,22 @@ export function TimeSeriesChart({ type, data, aggregation, chartType = "line", h
     const d = new Date(iso)
     if (aggregation === "hourly") {
       return multiYear
-        ? d.toLocaleString("it-IT", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })
+        ? formatDateTime(d)
         : d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })
     }
-    if (aggregation === "monthly") return d.toLocaleDateString("it-IT", { month: "short", year: "2-digit" })
+    if (aggregation === "monthly") return formatMonthYear(d)
     if (aggregation === "weekly") {
-      return multiYear
-        ? d.toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "2-digit" })
-        : d.toLocaleDateString("it-IT", { day: "2-digit", month: "short" })
+      return multiYear ? formatDateShortYear(d) : formatDateShort(d)
     }
-    return multiYear
-      ? d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit", year: "2-digit" })
-      : d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })
+    return multiYear ? formatDateShortYear(d) : formatDateShort(d)
   }
 
   // Full date for tooltip (always shows year)
   const tooltipLabel = (iso: string) => {
     const d = new Date(iso)
-    if (aggregation === "hourly") {
-      return d.toLocaleString("it-IT", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
-    }
-    if (aggregation === "monthly") return d.toLocaleDateString("it-IT", { month: "long", year: "numeric" })
-    return d.toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })
+    if (aggregation === "hourly") return formatDateTime(d)
+    if (aggregation === "monthly") return formatMonthYearLong(d)
+    return formatDateLong(d)
   }
 
   const valueFormatter = (v: number) => {
