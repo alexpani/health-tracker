@@ -1,0 +1,469 @@
+# Catalogo metriche per i tool analitici.
+#
+# Ogni metric è una subquery che ritorna (t timestamptz, v float).
+# I tool aggregate/compare/correlate/find_periods/life_timeline wrappano
+# queste subquery con date_trunc + aggregati standard.
+#
+# Aggiungere una metrica = aggiungere una voce qui. Nessun codice da toccare.
+# Hot-reload disponibile via tool `reload_metrics_catalog`.
+
+# ─── Body ────────────────────────────────────────────────────────────────────
+
+body.weight:
+  category: body
+  unit: kg
+  description: Peso corporeo (HKBodyMass)
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierBodyMass'
+
+body.bmi:
+  category: body
+  unit: ""
+  description: Body Mass Index
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierBodyMassIndex'
+
+body.fat_pct:
+  category: body
+  unit: "%"
+  description: Body fat percentage (0-1, da moltiplicare per 100 per la percentuale)
+  query: |
+    SELECT start_date AS t, (value::float * 100) AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierBodyFatPercentage'
+
+body.lean_mass:
+  category: body
+  unit: kg
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierLeanBodyMass'
+
+body.waist:
+  category: body
+  unit: cm
+  query: |
+    SELECT start_date AS t, (value::float * 100) AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierWaistCircumference'
+
+# ─── Vitals ──────────────────────────────────────────────────────────────────
+
+vitals.rhr:
+  category: vitals
+  unit: bpm
+  description: Resting heart rate (Apple Watch, 1 sample/giorno)
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierRestingHeartRate'
+
+vitals.hrv:
+  category: vitals
+  unit: ms
+  description: HRV SDNN (Apple Watch, finestra notturna)
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN'
+
+vitals.walking_hr:
+  category: vitals
+  unit: bpm
+  description: Walking heart rate average
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierWalkingHeartRateAverage'
+
+vitals.spo2:
+  category: vitals
+  unit: "%"
+  query: |
+    SELECT start_date AS t, (value::float * 100) AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierOxygenSaturation'
+
+vitals.bp_systolic:
+  category: vitals
+  unit: mmHg
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierBloodPressureSystolic'
+
+vitals.bp_diastolic:
+  category: vitals
+  unit: mmHg
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierBloodPressureDiastolic'
+
+vitals.respiratory_rate:
+  category: vitals
+  unit: breaths/min
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierRespiratoryRate'
+
+vitals.body_temp:
+  category: vitals
+  unit: °C
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierBodyTemperature'
+
+vitals.glucose:
+  category: vitals
+  unit: mg/dL
+  description: Glicemia (HK BloodGlucose, valore in mg/dL)
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierBloodGlucose'
+
+vitals.vo2max:
+  category: vitals
+  unit: ml/(kg·min)
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierVO2Max'
+
+# ─── Activity (dai daily_stats pre-aggregati) ────────────────────────────────
+
+activity.steps:
+  category: activity
+  unit: passi
+  description: Passi giornalieri (da daily_stats, dedup HK Watch+iPhone)
+  query: |
+    SELECT date::timestamptz AS t, value::float AS v
+    FROM daily_stats
+    WHERE type = 'HKQuantityTypeIdentifierStepCount' AND source IS NULL
+
+activity.distance_walking:
+  category: activity
+  unit: km
+  description: Distanza walking/running giornaliera (da daily_stats, km)
+  query: |
+    SELECT date::timestamptz AS t, (value::float / 1000.0) AS v
+    FROM daily_stats
+    WHERE type = 'HKQuantityTypeIdentifierDistanceWalkingRunning' AND source IS NULL
+
+activity.distance_cycling:
+  category: activity
+  unit: km
+  query: |
+    SELECT date::timestamptz AS t, (value::float / 1000.0) AS v
+    FROM daily_stats
+    WHERE type = 'HKQuantityTypeIdentifierDistanceCycling' AND source IS NULL
+
+activity.active_kcal:
+  category: activity
+  unit: kcal
+  description: Calorie attive giornaliere
+  query: |
+    SELECT date::timestamptz AS t, value::float AS v
+    FROM daily_stats
+    WHERE type = 'HKQuantityTypeIdentifierActiveEnergyBurned' AND source IS NULL
+
+activity.basal_kcal:
+  category: activity
+  unit: kcal
+  description: Calorie basali giornaliere (BMR Watch)
+  query: |
+    SELECT date::timestamptz AS t, value::float AS v
+    FROM daily_stats
+    WHERE type = 'HKQuantityTypeIdentifierBasalEnergyBurned' AND source IS NULL
+
+activity.exercise_min:
+  category: activity
+  unit: min
+  description: Apple Exercise Time
+  query: |
+    SELECT date::timestamptz AS t, value::float AS v
+    FROM daily_stats
+    WHERE type = 'HKQuantityTypeIdentifierAppleExerciseTime' AND source IS NULL
+
+activity.flights_climbed:
+  category: activity
+  unit: piani
+  query: |
+    SELECT date::timestamptz AS t, value::float AS v
+    FROM daily_stats
+    WHERE type = 'HKQuantityTypeIdentifierFlightsClimbed' AND source IS NULL
+
+# ─── Workout (per intero workout, niente bucket fixed) ───────────────────────
+
+workout.running.km:
+  category: workout
+  unit: km
+  description: Distanza dei singoli workout di corsa (activity_type=37)
+  query: |
+    SELECT start_date AS t, (total_distance::float / 1000.0) AS v
+    FROM workouts
+    WHERE activity_type = 37 AND total_distance > 0
+
+workout.running.duration_min:
+  category: workout
+  unit: min
+  query: |
+    SELECT start_date AS t, (duration::float / 60.0) AS v
+    FROM workouts
+    WHERE activity_type = 37
+
+workout.running.pace:
+  category: workout
+  unit: s/km
+  description: Ritmo medio del workout di corsa (s/km, lowerIsBetter)
+  query: |
+    SELECT start_date AS t, (duration::float / NULLIF(total_distance::float / 1000.0, 0)) AS v
+    FROM workouts
+    WHERE activity_type = 37 AND total_distance > 100
+
+workout.running.kcal:
+  category: workout
+  unit: kcal
+  query: |
+    SELECT start_date AS t, total_energy_burned::float AS v
+    FROM workouts
+    WHERE activity_type = 37 AND total_energy_burned > 0
+
+workout.cycling.km:
+  category: workout
+  unit: km
+  query: |
+    SELECT start_date AS t, (total_distance::float / 1000.0) AS v
+    FROM workouts
+    WHERE activity_type = 13 AND total_distance > 0
+
+workout.swimming.km:
+  category: workout
+  unit: km
+  query: |
+    SELECT start_date AS t, (total_distance::float / 1000.0) AS v
+    FROM workouts
+    WHERE activity_type = 46 AND total_distance > 0
+
+workout.strength.duration_min:
+  category: workout
+  unit: min
+  query: |
+    SELECT start_date AS t, (duration::float / 60.0) AS v
+    FROM workouts
+    WHERE activity_type = 50
+
+workout.any.count:
+  category: workout
+  unit: count
+  description: 1 per workout (sum = total workout count nel bucket)
+  query: |
+    SELECT start_date AS t, 1.0 AS v
+    FROM workouts
+
+# ─── Nutrition ───────────────────────────────────────────────────────────────
+
+nutrition.kcal:
+  category: nutrition
+  unit: kcal
+  description: Energia consumata da HKDietaryEnergyConsumed (sommato per giorno via aggregate)
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierDietaryEnergyConsumed'
+
+nutrition.protein:
+  category: nutrition
+  unit: g
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierDietaryProtein'
+
+nutrition.fat:
+  category: nutrition
+  unit: g
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierDietaryFatTotal'
+
+nutrition.carbs:
+  category: nutrition
+  unit: g
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierDietaryCarbohydrates'
+
+nutrition.water:
+  category: nutrition
+  unit: ml
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierDietaryWater'
+
+nutrition.caffeine:
+  category: nutrition
+  unit: mg
+  query: |
+    SELECT start_date AS t, value::float AS v
+    FROM health_samples
+    WHERE type = 'HKQuantityTypeIdentifierDietaryCaffeine'
+
+# ─── Sleep ───────────────────────────────────────────────────────────────────
+
+sleep.total_h:
+  category: sleep
+  unit: ore
+  description: |
+    Durata totale del sonno per notte (in ore). Tutti gli stage tranne InBed e Awake.
+    end_date - start_date di ogni record sleepAnalysis non-awake, sommati per notte
+    (raggruppando per la data di end).
+  query: |
+    SELECT end_date AS t,
+           (EXTRACT(EPOCH FROM end_date - start_date) / 3600.0)::float AS v
+    FROM category_samples
+    WHERE type = 'HKCategoryTypeIdentifierSleepAnalysis'
+      AND value IN (3, 4, 5)
+
+sleep.deep_h:
+  category: sleep
+  unit: ore
+  query: |
+    SELECT end_date AS t,
+           (EXTRACT(EPOCH FROM end_date - start_date) / 3600.0)::float AS v
+    FROM category_samples
+    WHERE type = 'HKCategoryTypeIdentifierSleepAnalysis' AND value = 4
+
+sleep.rem_h:
+  category: sleep
+  unit: ore
+  query: |
+    SELECT end_date AS t,
+           (EXTRACT(EPOCH FROM end_date - start_date) / 3600.0)::float AS v
+    FROM category_samples
+    WHERE type = 'HKCategoryTypeIdentifierSleepAnalysis' AND value = 5
+
+# ─── Lab (analiti più frequenti — espandere col tempo) ───────────────────────
+# Usano lab_results JOIN lab_analytes; solo panel confirmed.
+
+lab.ldl:
+  category: lab
+  unit: mg/dL
+  query: |
+    SELECT p.test_date::timestamptz AS t, r.value_numeric::float AS v
+    FROM lab_results r
+    JOIN lab_panels p ON r.panel_id = p.id
+    JOIN lab_analytes a ON r.analyte_id = a.id
+    WHERE a.slug = 'ldl_cholesterol' AND p.status = 'confirmed' AND r.value_numeric IS NOT NULL
+
+lab.hdl:
+  category: lab
+  unit: mg/dL
+  query: |
+    SELECT p.test_date::timestamptz AS t, r.value_numeric::float AS v
+    FROM lab_results r
+    JOIN lab_panels p ON r.panel_id = p.id
+    JOIN lab_analytes a ON r.analyte_id = a.id
+    WHERE a.slug = 'hdl_cholesterol' AND p.status = 'confirmed' AND r.value_numeric IS NOT NULL
+
+lab.triglycerides:
+  category: lab
+  unit: mg/dL
+  query: |
+    SELECT p.test_date::timestamptz AS t, r.value_numeric::float AS v
+    FROM lab_results r
+    JOIN lab_panels p ON r.panel_id = p.id
+    JOIN lab_analytes a ON r.analyte_id = a.id
+    WHERE a.slug = 'triglycerides' AND p.status = 'confirmed' AND r.value_numeric IS NOT NULL
+
+lab.total_cholesterol:
+  category: lab
+  unit: mg/dL
+  query: |
+    SELECT p.test_date::timestamptz AS t, r.value_numeric::float AS v
+    FROM lab_results r
+    JOIN lab_panels p ON r.panel_id = p.id
+    JOIN lab_analytes a ON r.analyte_id = a.id
+    WHERE a.slug = 'total_cholesterol' AND p.status = 'confirmed' AND r.value_numeric IS NOT NULL
+
+lab.glucose:
+  category: lab
+  unit: mg/dL
+  description: Glicemia a digiuno da lab
+  query: |
+    SELECT p.test_date::timestamptz AS t, r.value_numeric::float AS v
+    FROM lab_results r
+    JOIN lab_panels p ON r.panel_id = p.id
+    JOIN lab_analytes a ON r.analyte_id = a.id
+    WHERE a.slug = 'glucose' AND p.status = 'confirmed' AND r.value_numeric IS NOT NULL
+
+lab.hba1c:
+  category: lab
+  unit: "%"
+  query: |
+    SELECT p.test_date::timestamptz AS t, r.value_numeric::float AS v
+    FROM lab_results r
+    JOIN lab_panels p ON r.panel_id = p.id
+    JOIN lab_analytes a ON r.analyte_id = a.id
+    WHERE a.slug = 'hba1c' AND p.status = 'confirmed' AND r.value_numeric IS NOT NULL
+
+lab.creatinine:
+  category: lab
+  unit: mg/dL
+  query: |
+    SELECT p.test_date::timestamptz AS t, r.value_numeric::float AS v
+    FROM lab_results r
+    JOIN lab_panels p ON r.panel_id = p.id
+    JOIN lab_analytes a ON r.analyte_id = a.id
+    WHERE a.slug = 'creatinine' AND p.status = 'confirmed' AND r.value_numeric IS NOT NULL
+
+lab.vitamin_d:
+  category: lab
+  unit: ng/mL
+  query: |
+    SELECT p.test_date::timestamptz AS t, r.value_numeric::float AS v
+    FROM lab_results r
+    JOIN lab_panels p ON r.panel_id = p.id
+    JOIN lab_analytes a ON r.analyte_id = a.id
+    WHERE a.slug = 'vitamin_d' AND p.status = 'confirmed' AND r.value_numeric IS NOT NULL
+
+lab.tsh:
+  category: lab
+  unit: mU/L
+  query: |
+    SELECT p.test_date::timestamptz AS t, r.value_numeric::float AS v
+    FROM lab_results r
+    JOIN lab_panels p ON r.panel_id = p.id
+    JOIN lab_analytes a ON r.analyte_id = a.id
+    WHERE a.slug = 'tsh' AND p.status = 'confirmed' AND r.value_numeric IS NOT NULL
+
+lab.alt:
+  category: lab
+  unit: U/L
+  query: |
+    SELECT p.test_date::timestamptz AS t, r.value_numeric::float AS v
+    FROM lab_results r
+    JOIN lab_panels p ON r.panel_id = p.id
+    JOIN lab_analytes a ON r.analyte_id = a.id
+    WHERE a.slug = 'alt' AND p.status = 'confirmed' AND r.value_numeric IS NOT NULL
+
+lab.ast:
+  category: lab
+  unit: U/L
+  query: |
+    SELECT p.test_date::timestamptz AS t, r.value_numeric::float AS v
+    FROM lab_results r
+    JOIN lab_panels p ON r.panel_id = p.id
+    JOIN lab_analytes a ON r.analyte_id = a.id
+    WHERE a.slug = 'ast' AND p.status = 'confirmed' AND r.value_numeric IS NOT NULL

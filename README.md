@@ -12,6 +12,7 @@ HealthKit is only accessible from native iOS apps. This project lets you:
 6. **Filter spurious data** at ingest via DB-configurable rules + UUID blacklist (auto-populated by PG trigger on delete)
 7. **Bulk import** historical data from legacy apps (e.g., Endomondo)
 8. **Edit workout notes** persistently
+9. **Chat with Claude about your health data** via a dedicated MCP server (read-only) accessible from Claude Desktop, Claude Code and claude.ai connector
 
 ## Architecture
 
@@ -22,7 +23,14 @@ HealthKit is only accessible from native iOS apps. This project lets you:
 │             │ ◄────── │                  │ ──────► │                 │
 │  SwiftUI    │  write  │  Rules + BL      │  write  │  Recharts       │
 │             │  delete │  Trigger         │  delete │  shadcn/ui      │
-└─────────────┘         └──────────────────┘         └─────────────────┘
+└─────────────┘         └─────────┬────────┘         └─────────────────┘
+                                  │ SELECT-only (health_ro)
+                                  ▼
+                        ┌──────────────────┐
+                        │  MCP server      │  ── HTTPS ──►  Claude
+                        │  (Proxmox LXC)   │   (NPM)         (Desktop / Code / web)
+                        │  FastMCP+asyncpg │
+                        └──────────────────┘
 ```
 
 ## Components
@@ -83,6 +91,22 @@ React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui + Recharts + TanStack Qu
 - **Impostazioni** — ingest rules CRUD (add, edit min/max, toggle active, reset stats), blacklist UUID list with remove
 
 **Filters (generic, TypeBrowser pages)**: precise date range + multiple sources + multiple devices + value min/max, with DB-range hints.
+
+### MCP Server (`mcp/`)
+
+Read-only Model Context Protocol server che espone Health Tracker a Claude (Desktop, Code, claude.ai connector). Permette di chattare con Claude sui propri dati salute usando linguaggio naturale.
+
+**13 tool**:
+- `query_sql` / `describe_schema` / `describe_table` — SQL libero su utente Postgres `health_ro` (SELECT-only, statement_timeout 10s, auto-LIMIT 5000).
+- `get_day` / `get_active_regimens` / `get_health_profile` — sintesi via FastAPI backend.
+- `aggregate` / `compare_periods` / `correlate` / `find_periods` / `life_timeline` — primitive analitiche per domande tipo "esamina 10 anni e trova correlazioni". Bucket day/week/month/quarter/year, aggregati avg/sum/median/stddev/slope, Pearson/Spearman.
+- `list_metrics` / `reload_metrics_catalog` — gestione del catalogo `metrics.yaml`.
+
+**3 resource statiche** caricate automaticamente: `profile://me`, `metrics://catalog`, `glossary://project` (convenzioni semantiche del progetto).
+
+**Catalogo metriche estensibile** in `mcp/metrics.yaml`: ~45 slug per body, vitals, activity, workout, nutrition, sleep, lab. Ogni metrica è una subquery che ritorna `(t, v)`; aggiungere una metrica = aggiungere una voce YAML (hot-reload via tool, niente restart).
+
+**Deploy**: Debian 13 LXC `ealth-mcp` (192.168.68.100), Python venv + systemd nativo. NPM (`healthmcp.activeproxy.it`) per TLS. Token segreto nel PATH dell'URL (`/mcp/<64-hex>`) perché claude.ai web non supporta header custom. `cd mcp && ./deploy/deploy.sh`.
 
 ## Quick Start
 

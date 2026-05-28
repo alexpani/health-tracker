@@ -1,0 +1,28 @@
+[Unit]
+Description=Health Tracker MCP server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/health-mcp
+EnvironmentFile=/etc/health-mcp/env
+ExecStart=/opt/health-mcp/.venv/bin/python -m health_mcp
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=10
+
+# Hardening leggero (siamo in LXC unprivileged, comunque)
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+# Log su journald
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
