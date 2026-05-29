@@ -67,7 +67,7 @@ Convenzioni e gotcha da conoscere per scrivere SQL/tool corretti.
 
 - **health_samples** — quantity samples (peso, HR, passi raw, ecc.). Discriminatore `type` (formato `HKQuantityTypeIdentifier*`). `start_date` timestamptz.
 - **category_samples** — category samples (sonno, stand hour). `value` enum integer.
-- **workouts** — uno per workout. `activity_type` int HKWorkoutActivityType. `total_distance` METRI. `duration` SECONDI. `total_energy_burned` kcal.
+- **workouts** — uno per workout. `activity_type` int HKWorkoutActivityType. `total_distance` METRI. `duration` SECONDI. `total_energy_burned` kcal. **`activities` JSONB** = array di segmenti/intervalli interni (Intervals Pro, Apple Workout custom, Strava intervals, ecc.) — ogni elemento ha `{kind, n, start, end, duration_s, distance_m, pace_s_per_km, avg_hr, max_hr, kcal}`. `jsonb_array_length(activities) > 1` distingue workout strutturati da continui. Per dettaglio interno usa il tool `get_workout_intervals(uuid)`; per elenco filtrato `list_recent_workouts`. **`metadata` JSONB** contiene `HKIndoorWorkout`, `HKSwimmingLocationType`, `HKLapLength`, METs, weather, brand. Field user-editable: `title`, `notes`.
 - **daily_stats** — totali giornalieri pre-aggregati (Steps, Distance{WR,Cyc,Swim}, Energy{Active,Basal}, AppleExerciseTime, Flights, ApplStandTime/MoveTime). UNIQUE su `(type, date, COALESCE(source, '_all_'))`. Per i totali aggregati cross-source usa `source IS NULL`. Questi numeri combaciano coi widget Apple Salute (dedup HK proprietario Watch+iPhone).
 - **regimens** — periodi farmaci/integratori/dieta/training/gear. `kind ∈ {medication, supplement, diet, training, gear}`. `start_date` NULL = "iniziato prima del tracking". `end_date` NULL = "in corso".
 - **lab_panels / lab_results / lab_analytes** — referti laboratorio. Filtra SEMPRE `lab_panels.status = 'confirmed'` per dati affidabili. `lab_results.value_numeric` per numerici, `value_text` per qualitativi. `lab_analytes.slug` chiave canonica (es. 'ldl_cholesterol').
@@ -120,5 +120,21 @@ Convenzioni e gotcha da conoscere per scrivere SQL/tool corretti.
 - `correlate` — matrice di correlazione fra N metriche su bucket allineati.
 - `find_periods` — trova range in cui una metrica soddisfa una condizione.
 - `life_timeline` — overview compatta una-riga-per-bucket con tutte le metriche salienti.
+- `get_workout_intervals(uuid)` — segmenti interni di un singolo workout (Intervals Pro → ripetute, recuperi).
+- `list_recent_workouts` — elenco workout filtrato con flag `has_intervals` per scegliere quali approfondire.
 - `query_sql` — fallback per qualsiasi cosa non coperta dai precedenti.
+
+## Classificazione segmenti corsa/cammino
+
+Quando leggi `activities` di un workout di corsa, le soglie euristiche per
+distinguere segmenti corsa da camminata sono basate sul `pace_s_per_km` medio
+del segmento:
+
+- `pace_s_per_km <= 480` (≤ 8 min/km) → **corsa** ("run")
+- `pace_s_per_km >= 600` (≥ 10 min/km) → **camminata** ("walk")
+- `480 < pace_s_per_km < 600` → **transizione/mixed**
+- `pace_s_per_km` mancante o ≤ 0 → **unknown**
+
+Queste soglie sono usate dal tool `get_workout_intervals` e dalle metriche
+`workout.running.walk_share_pct` e `workout.running.run_avg_pace_in_intervals`.
 """

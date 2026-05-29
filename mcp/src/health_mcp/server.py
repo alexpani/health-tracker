@@ -13,7 +13,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from .auth import BearerAuthMiddleware
 from .config import settings
 from .resources import resource_glossary, resource_metrics_catalog, resource_profile
-from .tools import analytics, snapshots, sql
+from .tools import analytics, snapshots, sql, workouts as workouts_tools
 
 
 class HostHeaderRewrite:
@@ -287,6 +287,72 @@ async def life_timeline(
               lab_oor_count, nutrition_kcal_avg}]}.
     """
     return await analytics.life_timeline(bucket, start, end)
+
+
+@mcp.tool()
+async def get_workout_intervals(uuid: str) -> dict:
+    """Segmenti interni di un singolo workout (Intervals Pro, custom Apple, ecc.).
+
+    Apple Salute mostra solo il sommario aggregato del workout (km totali, ritmo medio).
+    Ma i workout strutturati scrivono la loro composizione in `workouts.activities`
+    JSONB: array di segmenti con kind, durata, distanza, pace, HR per ciascun lap.
+    Questo tool legge `activities` e ritorna i segmenti + un sommario che classifica
+    ogni segmento come 'run' / 'walk' / 'mixed' / 'unknown' in base al pace medio.
+
+    Soglie: pace <= 480 s/km = run, >= 600 s/km = walk.
+
+    Esempio: per una uscita Intervals Pro con ripetute, vedi quanti tratti di corsa,
+    quante camminate di recupero, il loro pace medio, e la share % corsa vs cammino.
+
+    Args:
+        uuid: HKWorkoutActivity UUID (chiave di workouts).
+
+    Returns: {workout, intervals:[{n, kind, segment_type, duration_s, distance_m,
+              pace_s_per_km, avg_hr, max_hr, kcal}], summary:{n_intervals, n_run,
+              n_walk, run_share_pct, walk_share_pct, run_avg_pace_s_km,
+              walk_avg_pace_s_km, run_distance_km, walk_distance_km}}.
+    """
+    return await workouts_tools.get_workout_intervals(uuid)
+
+
+@mcp.tool()
+async def list_recent_workouts(
+    activity_type: int | None = None,
+    source_contains: str | None = None,
+    only_with_intervals: bool = False,
+    days_back: int | None = None,
+    limit: int = 50,
+) -> dict:
+    """Elenca workout recenti con UUID e flag `has_intervals` per drilldown.
+
+    Strumento di esplorazione: per ogni workout vedi se ha intervalli strutturati
+    (es. quali uscite Intervals Pro hanno ripetute vs lente continue), poi usi
+    `get_workout_intervals(uuid)` sulle interessanti.
+
+    Esempi:
+    - list_recent_workouts(activity_type=37, source_contains='Intervals', days_back=60)
+    - list_recent_workouts(activity_type=37, only_with_intervals=True, limit=20)
+
+    Args:
+        activity_type: HKWorkoutActivityType int (37=running, 13=cycling, 50=strength,
+                       46=swimming, ecc.). Default: nessun filtro.
+        source_contains: filtra source_name con ILIKE %x% (es. 'Intervals' per Intervals Pro,
+                         'Apple' per Apple Watch).
+        only_with_intervals: se True, solo workout con activities strutturate (>1 segmento).
+        days_back: limita agli ultimi N giorni.
+        limit: max righe (default 50, max 500).
+
+    Returns: {n_workouts, rows:[{uuid, start, activity_type, effective_type,
+              distance_km, duration_s, pace_s_per_km, kcal, source_name, title,
+              has_intervals, n_intervals}]}.
+    """
+    return await workouts_tools.list_recent_workouts(
+        activity_type=activity_type,
+        source_contains=source_contains,
+        only_with_intervals=only_with_intervals,
+        days_back=days_back,
+        limit=limit,
+    )
 
 
 @mcp.tool()

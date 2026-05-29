@@ -269,6 +269,86 @@ workout.any.count:
     SELECT start_date AS t, 1.0 AS v
     FROM workouts
 
+# ─── Intervalli / structured workouts ────────────────────────────────────────
+# Distingue workout strutturati (Intervals Pro, custom Apple, Strava intervals)
+# da uscite continue, e quantifica il rapporto corsa/camminata DENTRO i workout.
+
+workout.running.is_interval:
+  category: workout
+  unit: 0/1
+  description: |
+    1 se il workout di corsa ha activities strutturate (>1 segmento), 0 altrimenti.
+    sum = numero workout interval nel bucket. count = totale workout. avg = frazione.
+  query: |
+    SELECT start_date AS t,
+           CASE WHEN jsonb_typeof(activities) = 'array'
+                     AND jsonb_array_length(activities) > 1 THEN 1.0 ELSE 0.0 END AS v
+    FROM workouts
+    WHERE activity_type = 37
+
+workout.running.n_intervals:
+  category: workout
+  unit: count
+  description: Numero di segmenti dentro un workout di corsa (0 se non strutturato)
+  query: |
+    SELECT start_date AS t,
+           COALESCE(jsonb_array_length(activities), 0)::float AS v
+    FROM workouts
+    WHERE activity_type = 37
+
+workout.running.walk_share_pct:
+  category: workout
+  unit: "%"
+  description: |
+    Percentuale di tempo in segmenti di camminata (pace > 600 s/km) dentro un workout
+    di corsa con activities. Solo per workout strutturati: workout senza activities
+    sono filtrati. avg = % cammino medio per workout.
+  query: |
+    WITH per_workout AS (
+      SELECT w.start_date AS t,
+             SUM(CASE
+                   WHEN (seg->>'pace_s_per_km')::float >= 600
+                   THEN (seg->>'duration_s')::float ELSE 0
+                 END) AS walk_s,
+             SUM((seg->>'duration_s')::float) AS total_s
+      FROM workouts w,
+           jsonb_array_elements(w.activities) AS seg
+      WHERE w.activity_type = 37
+        AND jsonb_typeof(w.activities) = 'array'
+        AND jsonb_array_length(w.activities) > 0
+        AND (seg->>'duration_s') IS NOT NULL
+        AND (seg->>'pace_s_per_km') IS NOT NULL
+      GROUP BY w.uuid, w.start_date
+      HAVING SUM((seg->>'duration_s')::float) > 0
+    )
+    SELECT t, (100.0 * walk_s / total_s)::float AS v
+    FROM per_workout
+
+workout.running.run_avg_pace_in_intervals:
+  category: workout
+  unit: s/km
+  description: |
+    Pace medio (s/km) dei SOLI segmenti di corsa (pace <= 480 s/km) dentro un workout
+    strutturato. Indicatore di velocita' effettiva nei tratti corsa veri, escludendo
+    le camminate di recupero.
+  query: |
+    WITH per_workout AS (
+      SELECT w.start_date AS t,
+             SUM((seg->>'duration_s')::float * (seg->>'pace_s_per_km')::float) AS num,
+             SUM((seg->>'duration_s')::float) AS den
+      FROM workouts w,
+           jsonb_array_elements(w.activities) AS seg
+      WHERE w.activity_type = 37
+        AND jsonb_typeof(w.activities) = 'array'
+        AND (seg->>'pace_s_per_km')::float <= 480
+        AND (seg->>'pace_s_per_km') IS NOT NULL
+        AND (seg->>'duration_s') IS NOT NULL
+      GROUP BY w.uuid, w.start_date
+      HAVING SUM((seg->>'duration_s')::float) > 0
+    )
+    SELECT t, (num / den)::float AS v
+    FROM per_workout
+
 # ─── Nutrition ───────────────────────────────────────────────────────────────
 
 nutrition.kcal:
