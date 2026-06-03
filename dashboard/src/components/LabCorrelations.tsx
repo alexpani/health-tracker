@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import {
   CartesianGrid,
@@ -12,6 +12,14 @@ import {
   YAxis,
 } from "recharts"
 import { Info, Loader2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useLabCorrelations, useLabTimeseries } from "@/lib/queries"
 import type {
   LabCorrelationCandidate,
@@ -233,9 +241,61 @@ export function CorrelationCard({ c, showChart = true }: { c: LabCorrelationCand
 
 // --- tab Correlazioni -------------------------------------------------------
 
+interface CorrFilters {
+  year: string // "all" | "2024" | ...
+  analyte: string // "all" | slug
+  plausibility: "all" | "high" | "medium"
+}
+
+const EMPTY_CORR_FILTERS: CorrFilters = { year: "all", analyte: "all", plausibility: "all" }
+const CORR_FILTERS_KEY = "lab_correlations_filters_v1"
+
 export default function LabCorrelations() {
   const { data, isLoading } = useLabCorrelations()
   const candidates = data?.candidates ?? []
+
+  const [filters, setFilters] = useState<CorrFilters>(() => {
+    try {
+      const raw = sessionStorage.getItem(CORR_FILTERS_KEY)
+      if (raw) return { ...EMPTY_CORR_FILTERS, ...JSON.parse(raw) }
+    } catch {
+      // ignore
+    }
+    return EMPTY_CORR_FILTERS
+  })
+  useEffect(() => {
+    sessionStorage.setItem(CORR_FILTERS_KEY, JSON.stringify(filters))
+  }, [filters])
+
+  // Opzioni derivate dalle candidate disponibili.
+  const years = useMemo(() => {
+    const s = new Set<string>()
+    candidates.forEach(c => s.add(c.cur_date.slice(0, 4)))
+    return Array.from(s).sort((a, b) => b.localeCompare(a))
+  }, [candidates])
+
+  const analytes = useMemo(() => {
+    const m = new Map<string, string>()
+    candidates.forEach(c => m.set(c.analyte_slug, c.analyte_name))
+    return Array.from(m.entries())
+      .map(([slug, name]) => ({ slug, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "it"))
+  }, [candidates])
+
+  const filtered = useMemo(() => {
+    return candidates.filter(c => {
+      if (filters.year !== "all" && c.cur_date.slice(0, 4) !== filters.year) return false
+      if (filters.analyte !== "all" && c.analyte_slug !== filters.analyte) return false
+      if (filters.plausibility !== "all") {
+        if (c.annotation.status !== "done") return false
+        if (c.annotation.plausibility !== filters.plausibility) return false
+      }
+      return true
+    })
+  }, [candidates, filters])
+
+  const anyFilter =
+    filters.year !== "all" || filters.analyte !== "all" || filters.plausibility !== "all"
 
   return (
     <div className="space-y-3">
@@ -243,6 +303,70 @@ export default function LabCorrelations() {
         <Info className="h-4 w-4 shrink-0 mt-0.5" />
         <span>{CORR_DISCLAIMER}</span>
       </div>
+
+      {candidates.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {/* Anno */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-muted-foreground mr-1">Anno:</span>
+            <FilterChip active={filters.year === "all"} onClick={() => setFilters(f => ({ ...f, year: "all" }))}>
+              Tutti
+            </FilterChip>
+            {years.map(y => (
+              <FilterChip key={y} active={filters.year === y} onClick={() => setFilters(f => ({ ...f, year: y }))}>
+                {y}
+              </FilterChip>
+            ))}
+          </div>
+
+          {/* Plausibilità */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-muted-foreground mr-1">Plausibilità:</span>
+            {([["all", "Tutte"], ["high", "Alta"], ["medium", "Media"]] as const).map(([v, label]) => (
+              <FilterChip
+                key={v}
+                active={filters.plausibility === v}
+                onClick={() => setFilters(f => ({ ...f, plausibility: v }))}
+              >
+                {label}
+              </FilterChip>
+            ))}
+          </div>
+
+          {/* Analita */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-muted-foreground mr-1">Analita:</span>
+            <Select
+              value={filters.analyte}
+              onValueChange={v => setFilters(f => ({ ...f, analyte: v }))}
+            >
+              <SelectTrigger className="h-8 w-56 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tutti</SelectItem>
+                {analytes.map(a => (
+                  <SelectItem key={a.slug} value={a.slug}>{a.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {anyFilter && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => setFilters(EMPTY_CORR_FILTERS)}
+            >
+              Azzera filtri
+            </Button>
+          )}
+          <span className="text-xs text-muted-foreground ml-auto">
+            {filtered.length} di {candidates.length}
+          </span>
+        </div>
+      )}
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Caricamento…</p>
@@ -252,13 +376,42 @@ export default function LabCorrelations() {
           una variazione marcata di un analita in concomitanza con un evento di
           regime o nota di salute.
         </p>
+      ) : filtered.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Nessuna correlazione coi filtri attivi.
+        </p>
       ) : (
         <div className="space-y-3">
-          {candidates.map(c => (
+          {filtered.map(c => (
             <CorrelationCard key={c.signature} c={c} />
           ))}
         </div>
       )}
     </div>
+  )
+}
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-full px-2.5 py-0.5 text-xs border transition-colors",
+        active
+          ? "bg-primary text-primary-foreground border-primary"
+          : "bg-background text-muted-foreground border-input hover:bg-muted"
+      )}
+    >
+      {children}
+    </button>
   )
 }
