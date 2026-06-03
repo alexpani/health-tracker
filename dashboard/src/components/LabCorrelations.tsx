@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { Info, Loader2 } from "lucide-react"
+import { Check, Info, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useLabCorrelations, useLabTimeseries } from "@/lib/queries"
+import { useDismissCorrelation, useLabCorrelations, useLabTimeseries } from "@/lib/queries"
 import type {
   LabCorrelationCandidate,
   LabPlausibility,
@@ -186,8 +186,9 @@ function factorChangeShort(c: LabCorrelationCandidate): string {
 export function CorrelationCard({ c, showChart = true }: { c: LabCorrelationCandidate; showChart?: boolean }) {
   const ann = c.annotation
   const meta = plausibilityMeta(ann.status === "done" ? ann.plausibility : undefined)
+  const dismiss = useDismissCorrelation()
   return (
-    <div className="rounded-lg border p-3">
+    <div className={cn("rounded-lg border p-3", c.dismissed && "opacity-60")}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -216,7 +217,7 @@ export function CorrelationCard({ c, showChart = true }: { c: LabCorrelationCand
             <span className="text-xs text-muted-foreground"> · {formatDate(c.factor.event_date)}</span>
           </div>
         </div>
-        <div className="shrink-0 text-right">
+        <div className="shrink-0 text-right flex flex-col items-end gap-1.5">
           {ann.status === "pending" ? (
             <span className="text-xs text-muted-foreground italic">analisi in corso…</span>
           ) : ann.status === "failed" ? (
@@ -227,6 +228,23 @@ export function CorrelationCard({ c, showChart = true }: { c: LabCorrelationCand
               plausibilità {meta.label}
             </span>
           )}
+          <button
+            type="button"
+            onClick={() => dismiss.mutate({ signature: c.signature, dismissed: !c.dismissed })}
+            disabled={dismiss.isPending}
+            className={cn(
+              "inline-flex items-center gap-1 text-xs rounded-md border px-1.5 py-0.5 transition-colors",
+              c.dismissed
+                ? "border-emerald-300 text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300"
+                : "border-input text-muted-foreground hover:bg-muted"
+            )}
+            title={c.dismissed
+              ? "Vista: nascosta dal widget in home. Click per ripristinarla."
+              : "Segna come vista: la toglie dal widget in home"}
+          >
+            <Check className="h-3.5 w-3.5" />
+            {c.dismissed ? "vista" : "segna come vista"}
+          </button>
         </div>
       </div>
 

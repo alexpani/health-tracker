@@ -1,20 +1,22 @@
 import { Link } from "react-router-dom"
-import { GitCompareArrows } from "lucide-react"
+import { Check, GitCompareArrows } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { useLabCorrelations } from "@/lib/queries"
+import { useDismissCorrelation, useLabCorrelations } from "@/lib/queries"
 import { factorSummary, plausibilityMeta } from "@/components/LabCorrelations"
 import { formatDate, cn } from "@/lib/utils"
 
 const PLAUS_RANK: Record<string, number> = { none: 0, low: 1, medium: 2, high: 3 }
 
-/** Widget proattivo: top associazioni "da rivedere" (note o plausibilità >= media).
- * Si nasconde se non c'è niente di rilevante. */
+/** Widget proattivo: top associazioni rilevate (note o plausibilità >= media),
+ * escluse quelle già marcate come "viste". Si nasconde se non c'è nulla. */
 export default function LabCorrelationsCard() {
   const { data, isLoading } = useLabCorrelations()
+  const dismiss = useDismissCorrelation()
   if (isLoading) return null
 
   const items = (data?.candidates ?? [])
     .filter(c => {
+      if (c.dismissed) return false
       const a = c.annotation
       if (a.status !== "done") return false
       return a.is_known_association || PLAUS_RANK[a.plausibility ?? "none"] >= 2
@@ -28,7 +30,7 @@ export default function LabCorrelationsCard() {
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <GitCompareArrows className="h-4 w-4 text-indigo-600" />
-          Possibili associazioni da rivedere
+          Possibili associazioni rilevate
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -36,7 +38,7 @@ export default function LabCorrelationsCard() {
           {items.map(c => {
             const meta = plausibilityMeta(c.annotation.plausibility)
             return (
-              <li key={c.signature} className="flex items-center justify-between gap-3">
+              <li key={c.signature} className="flex items-center justify-between gap-2">
                 <Link
                   to={`/lab/panels/${c.cur_panel_id}/review`}
                   className="flex-1 hover:underline min-w-0"
@@ -53,6 +55,15 @@ export default function LabCorrelationsCard() {
                   className={cn("h-2 w-2 rounded-full shrink-0", meta.dot)}
                   title={`plausibilità ${meta.label}`}
                 />
+                <button
+                  type="button"
+                  onClick={() => dismiss.mutate({ signature: c.signature, dismissed: true })}
+                  disabled={dismiss.isPending}
+                  title="Segna come vista (la toglie da qui)"
+                  className="shrink-0 inline-flex items-center justify-center h-5 w-5 rounded-md border border-input text-muted-foreground hover:bg-muted hover:text-emerald-700"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </button>
               </li>
             )
           })}

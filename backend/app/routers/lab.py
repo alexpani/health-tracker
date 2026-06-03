@@ -1666,6 +1666,7 @@ async def get_correlations(
     annotate_budget = lab_correlations.TOP_N_ANNOTATE
     for c in candidates:
         a = existing.get(c["signature"])
+        c["dismissed"] = bool(a.dismissed) if a is not None else False
         if a is not None and not refresh and a.status != "failed":
             c["annotation"] = {
                 "plausibility": a.plausibility,
@@ -1724,3 +1725,26 @@ async def get_correlations(
             cell["max_plausibility"] = plaus
 
     return {"candidates": candidates, "by_cell": by_cell, "computed_at": datetime.now(timezone.utc).isoformat()}
+
+
+class DismissCorrelationIn(BaseModel):
+    signature: str
+    dismissed: bool = True
+
+
+@router.post("/correlations/dismiss")
+async def dismiss_correlation(
+    body: DismissCorrelationIn, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Marca/smarca una correlazione come 'vista' (nascosta dal widget home).
+    Upsert sulla riga annotazione per signature."""
+    await db.execute(
+        pg_insert(LabCorrelationAnnotation)
+        .values(signature=body.signature, dismissed=body.dismissed)
+        .on_conflict_do_update(
+            index_elements=["signature"],
+            set_={"dismissed": body.dismissed, "updated_at": func.now()},
+        )
+    )
+    await db.commit()
+    return {"ok": True, "signature": body.signature, "dismissed": body.dismissed}

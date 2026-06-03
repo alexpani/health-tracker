@@ -840,6 +840,7 @@ export interface LabCorrelationCandidate {
   factor: LabCorrelationFactor
   score: number
   annotation: LabCorrelationAnnotation
+  dismissed: boolean
 }
 
 export interface LabCorrelationCellInfo {

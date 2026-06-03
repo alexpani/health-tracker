@@ -1144,6 +1144,15 @@ export function useLabCorrelations(params?: { panel_id?: number; refresh?: boole
   })
 }
 
+export function useDismissCorrelation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ signature, dismissed }: { signature: string; dismissed: boolean }) =>
+      apiPost<{ ok: boolean }>("/api/v1/lab/correlations/dismiss", { signature, dismissed }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["labCorrelations"] }),
+  })
+}
+
 // ---------- HealthKit Clinical Records (FHIR) ----------
 
 export function useClinicalRecords(filters: ClinicalFilters = {}, enabled = true) {
