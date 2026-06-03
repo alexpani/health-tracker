@@ -110,6 +110,11 @@ export function RecoveryCard() {
                   Il <strong>baseline 60g</strong> e' il riferimento personale: ogni metrica viene
                   confrontata col tuo storico recente, non con valori "da popolazione".
                 </p>
+                <p>
+                  Il recupero <strong>riflette la notte appena trascorsa</strong> (HRV e FC a riposo
+                  della finestra notturna ~22:00–10:00): e' <strong>pronto la mattina</strong>, dopo
+                  che l'Apple Watch ha sincronizzato i dati del sonno.
+                </p>
               </div>
             </details>
 
