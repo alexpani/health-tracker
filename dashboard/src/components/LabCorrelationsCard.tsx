@@ -21,6 +21,8 @@ export default function LabCorrelationsCard() {
       if (a.status !== "done") return false
       return a.is_known_association || PLAUS_RANK[a.plausibility ?? "none"] >= 2
     })
+    // Ordine cronologico discendente (più recenti in cima); score come spareggio.
+    .sort((a, b) => b.cur_date.localeCompare(a.cur_date) || b.score - a.score)
     .slice(0, 5)
 
   if (items.length === 0) return null
