@@ -22,9 +22,9 @@ export function SampleTable({ type, samples, onDelete }: Props) {
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Data/ora</TableHead>
-          <TableHead className="text-right">Valore</TableHead>
-          <TableHead>Sorgente</TableHead>
+          <TableHead className="whitespace-nowrap">Data/ora</TableHead>
+          <TableHead className="text-right whitespace-nowrap">Valore</TableHead>
+          <TableHead className="whitespace-nowrap">Sorgente</TableHead>
           <TableHead className="hidden md:table-cell">Dispositivo</TableHead>
           {onDelete && <TableHead className="w-[40px]"></TableHead>}
         </TableRow>
@@ -37,8 +37,8 @@ export function SampleTable({ type, samples, onDelete }: Props) {
             : displayValue.toLocaleString("it-IT", { maximumFractionDigits: 2 })
           return (
             <TableRow key={s.uuid}>
-              <TableCell>{formatDateTime(s.start_date)}</TableCell>
-              <TableCell className="text-right tabular-nums font-medium">
+              <TableCell className="whitespace-nowrap">{formatDateTime(s.start_date)}</TableCell>
+              <TableCell className="text-right tabular-nums font-medium whitespace-nowrap">
                 {formattedValue} <span className="text-muted-foreground text-xs">{meta.displayUnit}</span>
               </TableCell>
               <TableCell className="text-muted-foreground">{s.source_name ?? "-"}</TableCell>

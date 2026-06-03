@@ -97,7 +97,7 @@ export function RegimenTimeline({ regimens, isLoading, onRegimensChange }: Regim
       {/* Controls */}
       <div className="flex flex-wrap gap-2 items-center">
         {/* Preset buttons */}
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {presets.map(preset => {
             // Quando ci sono anni selezionati, i preset diventano "secondari"
             // (il range e' override dagli anni). Il click sul preset svuota

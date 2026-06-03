@@ -12,6 +12,7 @@ import { workoutDisplayTitle, workoutName } from "@/lib/healthkit"
 import { deriveEffectiveType } from "@/lib/compareUtils"
 import { formatDateTime, formatNumber, formatDate, formatDateShort, formatMonthYearLong } from "@/lib/utils"
 import type { Workout, WorkoutFilters } from "@/lib/types"
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock"
 
 type ChartAggregation = "day" | "week" | "month" | "all"
 
@@ -111,6 +112,7 @@ export default function Workouts() {
   const [filters, setFilters] = useState<WorkoutFilters>(saved.filters ?? {})
   const [chartAgg, setChartAgg] = useState<ChartAggregation>(saved.chartAgg ?? "week")
   const [showMobileFilters, setShowMobileFilters] = useState(false)
+  useBodyScrollLock(showMobileFilters)
   const [sortKey, setSortKey] = useState<SortKey>(saved.sortKey ?? "start_date")
   const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir ?? "desc")
 
@@ -269,13 +271,13 @@ export default function Workouts() {
   ].filter(Boolean).length
 
   return (
-    <div className="flex gap-6 -m-6 p-0 min-h-[calc(100vh-0px)]">
+    <div className="flex gap-6 -m-3 sm:-m-6 p-0 min-h-[calc(100vh-0px)]">
       {/* Sidebar desktop a SINISTRA */}
       <aside className="hidden lg:block w-[320px] shrink-0 border-r bg-card/30 sticky top-0 h-screen overflow-hidden">
         <WorkoutFiltersSidebar value={filters} onChange={setFilters} />
       </aside>
 
-      <div className="flex-1 space-y-6 min-w-0 p-6">
+      <div className="flex-1 space-y-6 min-w-0 p-3 sm:p-6">
         <div className="flex items-center justify-between gap-2">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Workout</h1>
@@ -405,9 +407,9 @@ export default function Workouts() {
                 <TableHeader>
                   <TableRow>
                     {compareMode && <TableHead className="w-[40px]"></TableHead>}
-                    <TableHead><SortHeader k="start_date">Data</SortHeader></TableHead>
-                    <TableHead><SortHeader k="title">Titolo</SortHeader></TableHead>
-                    <TableHead><SortHeader k="activity">Attivita</SortHeader></TableHead>
+                    <TableHead className="whitespace-nowrap"><SortHeader k="start_date">Data</SortHeader></TableHead>
+                    <TableHead className="whitespace-nowrap"><SortHeader k="title">Titolo</SortHeader></TableHead>
+                    <TableHead className="whitespace-nowrap"><SortHeader k="activity">Attivita</SortHeader></TableHead>
                     <TableHead className="text-right"><SortHeader k="duration" align="right">Durata</SortHeader></TableHead>
                     <TableHead className="text-right"><SortHeader k="distance" align="right">Distanza</SortHeader></TableHead>
                     <TableHead className="text-right"><SortHeader k="pace" align="right">Ritmo</SortHeader></TableHead>
@@ -447,24 +449,24 @@ export default function Workouts() {
                           />
                         </TableCell>
                       )}
-                      <TableCell>{formatDateTime(w.start_date)}</TableCell>
+                      <TableCell className="whitespace-nowrap">{formatDateTime(w.start_date)}</TableCell>
                       <TableCell
                         className="max-w-[220px] truncate font-medium"
                         title={w.title ?? ""}
                       >
                         {w.title ?? <span className="text-muted-foreground font-normal">—</span>}
                       </TableCell>
-                      <TableCell>{workoutName(w.activity_type, w.metadata)}</TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell className="whitespace-nowrap">{workoutName(w.activity_type, w.metadata)}</TableCell>
+                      <TableCell className="text-right tabular-nums whitespace-nowrap">
                         {w.duration ? `${Math.round(w.duration / 60)} min` : "-"}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell className="text-right tabular-nums whitespace-nowrap">
                         {w.total_distance ? `${(w.total_distance / 1000).toFixed(2)} km` : "-"}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell className="text-right tabular-nums whitespace-nowrap">
                         {formatPace(w.duration, w.total_distance)}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell className="text-right tabular-nums whitespace-nowrap">
                         {w.total_energy_burned ? `${formatNumber(w.total_energy_burned)} kcal` : "-"}
                       </TableCell>
                       <TableCell className="text-muted-foreground hidden md:table-cell">{w.source_name ?? "-"}</TableCell>

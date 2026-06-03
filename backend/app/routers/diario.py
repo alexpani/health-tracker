@@ -53,6 +53,25 @@ async def active_plan():
     return r.json()
 
 
+@router.get("/plan-history")
+async def plan_history():
+    """Forward to `GET /api/external/plan-history`. Returns the full history of
+    nutrition plans as dated segments (collapsed daily snapshots). Returns `[]`
+    if the diario doesn't expose the endpoint yet (404) so the dashboard can
+    gracefully fall back to the single active plan."""
+    url = f"{DIARIO_BASE_URL}/api/external/plan-history"
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            r = await client.get(url)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"diario-alimentare unreachable: {e}")
+    if r.status_code == 404:
+        return []
+    if r.status_code >= 400:
+        raise HTTPException(502, f"diario-alimentare error {r.status_code}")
+    return r.json()
+
+
 @router.get("/daily-totals")
 async def daily_totals(
     from_: str = Query(..., alias="from", description="YYYY-MM-DD"),

@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useCreateRegimen, useDeleteRegimen, useRegimens, useUpdateRegimen } from "@/lib/queries"
 import type { Regimen, RegimenKind } from "@/lib/types"
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock"
 
 const KIND_LABELS: Record<RegimenKind, string> = {
   medication: "Farmaco",
@@ -30,6 +31,7 @@ interface Props {
 }
 
 export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: Props) {
+  useBodyScrollLock()
   const isEdit = !!regimen
   const initialKind: RegimenKind = (() => {
     const k = regimen?.kind ?? defaults?.kind ?? "medication"
@@ -154,7 +156,7 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/40 p-4 sm:p-8"
       onClick={onClose}
     >
       <Card

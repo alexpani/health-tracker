@@ -104,7 +104,7 @@ export default function HealthNotes() {
   }
 
   return (
-    <div className="flex gap-6 -m-6 p-0 min-h-[calc(100vh-0px)]">
+    <div className="flex gap-6 -m-3 sm:-m-6 p-0 min-h-[calc(100vh-0px)]">
       {/* Sidebar filtri */}
       <aside className="hidden lg:block w-[300px] shrink-0 border-r bg-card/30 sticky top-0 h-screen overflow-y-auto p-4 space-y-5">
         <div>
@@ -203,7 +203,7 @@ export default function HealthNotes() {
       </aside>
 
       {/* Body */}
-      <div className="flex-1 space-y-6 min-w-0 p-6">
+      <div className="flex-1 space-y-6 min-w-0 p-3 sm:p-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Note di salute</h1>

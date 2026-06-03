@@ -53,6 +53,13 @@
   * { @apply border-border; }
   body { @apply bg-background text-foreground; }
   html, body, #root { @apply h-full; }
+  /* Mobile: evita il pan orizzontale dell'intero frame e il rubber-band
+     overscroll quando si trascina il dito sullo schermo. */
+  html, body {
+    overflow-x: hidden;
+    overscroll-behavior: none;
+  }
+  #root { overflow-x: hidden; }
 }
 
 /* Tiptap / ProseMirror styling for the JournalEditor and read-only renders. */

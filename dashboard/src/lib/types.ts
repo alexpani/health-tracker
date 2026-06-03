@@ -513,6 +513,12 @@ export interface DiarioPlan {
   updated_at: string | null
 }
 
+export interface DiarioPlanSegment extends DiarioPlan {
+  start_date: string
+  end_date: string | null
+  is_active: boolean
+}
+
 export interface DiarioDailyTotal {
   date: string
   kcal: number

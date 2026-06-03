@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { QuickJournalProvider, useQuickJournal } from "@/components/QuickJournalProvider"
 import { SyncButton } from "@/components/SyncButton"
 import { LastSyncIndicator } from "@/components/LastSyncIndicator"
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock"
 
 function QuickJournalButton() {
   const { openOnToday } = useQuickJournal()
@@ -25,6 +26,7 @@ function QuickJournalButton() {
 
 export default function Layout() {
   const [open, setOpen] = useState(false)
+  useBodyScrollLock(open)
 
   return (
     <QuickJournalProvider>
@@ -62,9 +64,9 @@ export default function Layout() {
       {/* Main content — boxed: max-w 1680px + bg-background + ombra, su
           sfondo esterno bg-slate-100. Padding orizzontale solo su schermi
           larghi così il box "respira" visibilmente. */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain min-w-0">
         <div className="max-w-[1680px] mx-auto px-2 sm:px-4 py-4">
-          <div className="bg-background rounded-lg shadow-sm border p-6 min-h-[calc(100vh-7rem)]">
+          <div className="bg-background rounded-lg shadow-sm border p-3 sm:p-6 min-h-[calc(100vh-7rem)]">
             <Outlet />
           </div>
         </div>

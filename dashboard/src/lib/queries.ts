@@ -21,6 +21,7 @@ import type {
   DaySnapshot,
   DiarioDailyTotal,
   DiarioPlan,
+  DiarioPlanSegment,
   HealthNote,
   HealthNoteCategory,
   HealthNoteFilters,
@@ -708,6 +709,15 @@ export function useDiarioActivePlan() {
   return useQuery({
     queryKey: ["diarioPlan"],
     queryFn: () => apiGet<DiarioPlan>("/api/v1/diario/active-plan"),
+    staleTime: 5 * 60_000,
+    retry: 0,
+  })
+}
+
+export function useDiarioPlanHistory() {
+  return useQuery({
+    queryKey: ["diarioPlanHistory"],
+    queryFn: () => apiGet<DiarioPlanSegment[]>("/api/v1/diario/plan-history"),
     staleTime: 5 * 60_000,
     retry: 0,
   })

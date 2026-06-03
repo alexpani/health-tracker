@@ -64,7 +64,7 @@ export function RegimenGanttGrid({
     <div className="space-y-4">
       <div className="border border-border rounded-lg flex bg-card overflow-hidden">
         {/* Y-axis labels — colonna FISSA, fuori dallo scroll */}
-        <div className="w-48 flex-shrink-0 border-r border-border bg-muted/30 flex flex-col">
+        <div className="w-32 sm:w-48 flex-shrink-0 border-r border-border bg-muted/30 flex flex-col">
           <div className="h-12 flex items-center px-3 border-b border-border text-xs font-semibold text-muted-foreground">
             Regimen
           </div>
@@ -98,7 +98,7 @@ export function RegimenGanttGrid({
         </div>
 
         {/* Timeline scrollabile orizzontalmente */}
-        <div className="flex-1 overflow-x-auto">
+        <div className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain">
           <div className="min-w-[600px] flex flex-col relative">
             {/* Linee verticali separatrici anno solare (1 gen di ogni anno
                 tra rangeStart e rangeEnd). Spanno tutta l'altezza

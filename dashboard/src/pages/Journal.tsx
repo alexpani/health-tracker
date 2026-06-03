@@ -196,7 +196,7 @@ export default function Journal() {
   }
 
   return (
-    <div className="flex gap-6 -m-6 p-0 min-h-[calc(100vh-0px)]">
+    <div className="flex gap-6 -m-3 sm:-m-6 p-0 min-h-[calc(100vh-0px)]">
       {/* Sidebar filtri */}
       <aside className="hidden lg:block w-[280px] shrink-0 border-r bg-card/30 sticky top-0 h-screen overflow-y-auto p-4 space-y-5 text-sm">
         <h2 className="text-base font-semibold">Filtri</h2>
@@ -311,7 +311,7 @@ export default function Journal() {
         </div>
       </aside>
 
-      <div className="flex-1 space-y-4 min-w-0 p-6">
+      <div className="flex-1 space-y-4 min-w-0 p-3 sm:p-6">
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-2xl font-bold tracking-tight">Diario</h1>
           <Button onClick={() => navigate(`/day/${todayLocalISO()}`)}>

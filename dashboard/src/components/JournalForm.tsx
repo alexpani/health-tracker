@@ -12,6 +12,7 @@ import {
   useUpdateJournal,
 } from "@/lib/queries"
 import type { JournalEntry } from "@/lib/types"
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock"
 
 interface Props {
   /** Data iniziale (per nuova nota). In edit, viene da `entry.date`. */
@@ -24,6 +25,7 @@ interface Props {
 const AUTO_SAVE_MS = 1500
 
 export function JournalForm({ date: initialDate, entry, onClose }: Props) {
+  useBodyScrollLock()
   const [entryId, setEntryId] = useState<number | null>(entry?.id ?? null)
   const [html, setHtml] = useState(entry?.content_html ?? "")
   const [tags, setTags] = useState<string[]>(entry?.tags ?? [])
@@ -184,7 +186,7 @@ export function JournalForm({ date: initialDate, entry, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/40 p-4 sm:p-8"
       onClick={onClose}
     >
       <Card className="w-full max-w-2xl shadow-2xl" onClick={e => e.stopPropagation()}>

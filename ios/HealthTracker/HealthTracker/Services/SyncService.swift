@@ -131,6 +131,18 @@ final class SyncService {
     // 90-day chunks keep peak memory reasonable
     private let fetchWindowDays = 90
 
+    // Lookback overlap for the windowed quantity path (HeartRate + fitness
+    // metrics from workouts: running/cycling power/speed/cadence, run-form,
+    // walking-speed). The Apple Watch flushes a workout's high-frequency
+    // series to the paired iPhone minutes-to-hours AFTER the activity, with a
+    // startDate already behind our advanced bookmark. `.strictStartDate` would
+    // then skip them forever. We rewind the fetch start by this window each
+    // sync so late-arriving samples get re-scanned (idempotent via backend
+    // ON CONFLICT DO NOTHING). The low/medium-volume types prone to this are
+    // already on the anchored path; the windowed survivors are exactly the
+    // workout-dense types, where 48h is a safe margin and re-upload is cheap.
+    static let windowedLookback: TimeInterval = 48 * 3600
+
     // Types to sync LAST (after everything else has finished).
     private let deferredTypes: Set<String> = []
 
@@ -617,7 +629,14 @@ final class SyncService {
 
     @MainActor
     private func syncQuantityType(typeId: HKQuantityTypeIdentifier, unit: HKUnit) async {
-        let startDate = (await getSyncDate(for: typeId.rawValue)) ?? Date.distantPast
+        let bookmark = (await getSyncDate(for: typeId.rawValue)) ?? Date.distantPast
+        // Rewind the fetch start by a lookback so samples written retroactively
+        // by the Apple Watch (workout HR/power/cadence/… flushed to the iPhone
+        // after the bookmark already advanced past their startDate) are
+        // re-scanned instead of skipped forever. See `windowedLookback`.
+        let startDate = bookmark == Date.distantPast
+            ? Date.distantPast
+            : bookmark.addingTimeInterval(-Self.windowedLookback)
         let endDate = Date()
         var totalInserted = 0
 

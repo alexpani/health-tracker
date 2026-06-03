@@ -3,8 +3,8 @@ import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { useDiarioActivePlan, useRegimens } from "@/lib/queries"
-import type { Regimen, RegimenKind } from "@/lib/types"
+import { useDiarioActivePlan, useDiarioPlanHistory, useRegimens } from "@/lib/queries"
+import type { DiarioPlan, DiarioPlanSegment, Regimen, RegimenKind } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
 import { RegimenTimeline } from "@/components/RegimenTimeline"
 import { formatPeriodDuration } from "@/lib/duration"
@@ -29,6 +29,44 @@ function isOngoing(r: Regimen): boolean {
 function fmtDate(iso: string | null): string {
   if (!iso) return "—"
   return formatDate(iso)
+}
+
+/** Stringa dose "<kcal> kcal/die · P..g · F..g · C..g" da un piano del diario. */
+function planDose(p: Pick<DiarioPlan, "kcal_target" | "protein_g" | "fat_g" | "carbs_g">): string | null {
+  const parts: string[] = []
+  if (p.kcal_target != null) parts.push(`${Math.round(p.kcal_target)} kcal/die`)
+  if (p.protein_g != null) parts.push(`P ${Math.round(p.protein_g)}g`)
+  if (p.fat_g != null) parts.push(`F ${Math.round(p.fat_g)}g`)
+  if (p.carbs_g != null) parts.push(`C ${Math.round(p.carbs_g)}g`)
+  return parts.join(" · ") || null
+}
+
+/** Regimen sintetico read-only "dal diario". */
+function diarioRegimen(o: { id: number; name: string; dose: string | null; start_date: string | null; end_date: string | null; updated_at: string }): Regimen {
+  return {
+    id: o.id,
+    kind: "diet",
+    name: o.name,
+    start_date: o.start_date,
+    end_date: o.end_date,
+    dose: o.dose,
+    notes: "Sincronizzato dal diario alimentare. Modifica nel diario.",
+    source: "diario",
+    metadata: null,
+    created_at: o.updated_at,
+    updated_at: o.updated_at,
+  }
+}
+
+function segmentToRegimen(seg: DiarioPlanSegment, id: number): Regimen {
+  return diarioRegimen({
+    id,
+    name: seg.name,
+    dose: planDose(seg),
+    start_date: seg.start_date,
+    end_date: seg.end_date,
+    updated_at: seg.updated_at ?? seg.start_date,
+  })
 }
 
 export default function Regimens() {
@@ -66,34 +104,33 @@ export default function Regimens() {
     })
   }
 
-  // Piano alimentare attivo dal diario, iniettato come Regimen sintetico nella
-  // tab Alimentazione (read-only — editing avviene nel diario).
-  const dietQ = useDiarioActivePlan()
-  const dietPlanRegimen = useMemo<Regimen | null>(() => {
-    if (!dietQ.data) return null
-    const p = dietQ.data
-    const dose: string[] = []
-    if (p.kcal_target != null) dose.push(`${Math.round(p.kcal_target)} kcal/die`)
-    if (p.protein_g != null) dose.push(`P ${Math.round(p.protein_g)}g`)
-    if (p.fat_g != null) dose.push(`F ${Math.round(p.fat_g)}g`)
-    if (p.carbs_g != null) dose.push(`C ${Math.round(p.carbs_g)}g`)
-    // Il diario non espone una data di inizio piano; `updated_at` e' la data
-    // in cui il piano e' stato impostato/modificato — la usiamo come "attivo da".
-    const startDate = p.updated_at ? p.updated_at.slice(0, 10) : null
-    return {
-      id: -1,
-      kind: "diet",
-      name: p.name,
-      start_date: startDate,
-      end_date: null,
-      dose: dose.join(" · ") || null,
-      notes: "Sincronizzato dal diario alimentare. Modifica nel diario.",
-      source: "diario",
-      metadata: null,
-      created_at: p.updated_at ?? "",
-      updated_at: p.updated_at ?? "",
+  // Piani alimentari dal diario, iniettati come Regimen sintetici read-only nella
+  // tab Alimentazione (editing avviene nel diario). Sorgente preferita: lo storico
+  // segmentato (`plan-history`) — attivo "in corso" + passati tra i "Terminati" col
+  // nome reale. Fallback al solo piano attivo se il diario non espone lo storico.
+  const dietHistoryQ = useDiarioPlanHistory()
+  const dietActiveQ = useDiarioActivePlan()
+  const dietPlanRegimens = useMemo<Regimen[]>(() => {
+    const history = dietHistoryQ.data
+    if (history && history.length > 0) {
+      // Recenti (terminati) in cima alla sezione "Terminati": ordina per
+      // end_date desc, con l'attivo (end_date null) sempre primo.
+      const sorted = [...history].sort((a, b) => {
+        if (a.end_date == null) return -1
+        if (b.end_date == null) return 1
+        return b.end_date.localeCompare(a.end_date)
+      })
+      return sorted.map((seg, i) => segmentToRegimen(seg, -1 - i))
     }
-  }, [dietQ.data])
+    if (dietActiveQ.data) {
+      // Fallback: il diario non espone lo storico → mostra solo l'attivo
+      // (come prima), con `updated_at` come "attivo da".
+      const p = dietActiveQ.data
+      const startDate = p.updated_at ? p.updated_at.slice(0, 10) : null
+      return [diarioRegimen({ id: -1, name: p.name, dose: planDose(p), start_date: startDate, end_date: null, updated_at: p.updated_at ?? "" })]
+    }
+    return []
+  }, [dietHistoryQ.data, dietActiveQ.data])
 
   // Subset Salute (medication + supplement) filtrato per chip kind.
   const saluteRegimens = useMemo(() => {
@@ -115,11 +152,10 @@ export default function Regimens() {
     () => (q.data ?? []).filter(r => r.kind === "diet"),
     [q.data]
   )
-  const foodGrouped = useMemo(() => {
-    const grouped = groupByStatus(foodRegimens)
-    if (dietPlanRegimen) grouped.ongoing.unshift(dietPlanRegimen)
-    return grouped
-  }, [foodRegimens, dietPlanRegimen])
+  const foodGrouped = useMemo(
+    () => groupByStatus([...dietPlanRegimens, ...foodRegimens]),
+    [foodRegimens, dietPlanRegimens]
+  )
 
   // Subset Equipaggiamento (gear).
   const gearRegimens = useMemo(
@@ -140,18 +176,18 @@ export default function Regimens() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Regimi</h1>
-          <p className="text-muted-foreground">Farmaci, integratori, allenamento, alimentazione, equipaggiamento</p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Regimi</h1>
+          <p className="text-sm sm:text-base text-muted-foreground">Farmaci, integratori, allenamento, alimentazione, equipaggiamento</p>
         </div>
-        <Button onClick={() => { setEditing(null); setShowAdd(true) }}>
+        <Button className="shrink-0" onClick={() => { setEditing(null); setShowAdd(true) }}>
           <Plus className="h-4 w-4 mr-1" /> Nuovo
         </Button>
       </div>
 
       <Tabs value={activeTab} onValueChange={v => setActiveTab(v as TabId)}>
-        <TabsList>
+        <TabsList className="max-w-full overflow-x-auto justify-start">
           <TabsTrigger value="salute">Salute</TabsTrigger>
           <TabsTrigger value="sport">Sport</TabsTrigger>
           <TabsTrigger value="alimentazione">Alimentazione</TabsTrigger>
@@ -204,7 +240,7 @@ export default function Regimens() {
             })}
             {effectiveViewMode === 'table' && (
               <>
-                <div className="flex-1" />
+                <div className="hidden sm:block flex-1" />
                 <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={includeEnded} onChange={e => setIncludeEnded(e.target.checked)} />
                   Mostra terminati
@@ -334,9 +370,9 @@ function TabBody({
   onEdit: (r: Regimen) => void
   onRegimensChange: () => void
 }) {
-  // Per Timeline: includiamo dietPlanRegimen synth? No — Timeline lo filtra
-  // gia' a monte e qui passiamo solo `regimens` "veri". Per Tabella usiamo
-  // `grouped` che puo' includere il synth diet in cima.
+  // Per Timeline passiamo solo `regimens` "veri" (la Timeline filtra i diet a
+  // monte). Per Tabella usiamo `grouped`, che puo' includere i piani sintetici
+  // dal diario (attivo + storico).
   const isEmpty = dataReady && regimens.length === 0 && grouped.ongoing.length === 0
   return (
     <>
@@ -447,37 +483,21 @@ function Section({
                       </td>
                       {kind !== "training" && <td className="p-3 hidden md:table-cell">{r.dose ?? "—"}</td>}
                       <td className="p-3 tabular-nums whitespace-nowrap">
-                        {fromDiario
-                          ? (
-                              <>
-                                <div>
-                                  {fmtDate(r.start_date)} → <em className="text-emerald-600">in corso</em>
+                        {(() => {
+                          const duration = formatPeriodDuration(r.start_date, r.end_date)
+                          return (
+                            <>
+                              <div>
+                                {fmtDate(r.start_date)} → {r.end_date ? fmtDate(r.end_date) : <em className="text-emerald-600">in corso</em>}
+                              </div>
+                              {duration && (
+                                <div className="text-xs text-muted-foreground whitespace-normal max-w-[24rem]" title={duration}>
+                                  {r.end_date ? duration : <>da {duration}</>}
                                 </div>
-                                {(() => {
-                                  const duration = formatPeriodDuration(r.start_date, r.end_date)
-                                  return duration ? (
-                                    <div className="text-xs text-muted-foreground whitespace-normal max-w-[24rem]" title={duration}>
-                                      da {duration}
-                                    </div>
-                                  ) : null
-                                })()}
-                              </>
-                            )
-                          : (() => {
-                              const duration = formatPeriodDuration(r.start_date, r.end_date)
-                              return (
-                                <>
-                                  <div>
-                                    {fmtDate(r.start_date)} → {r.end_date ? fmtDate(r.end_date) : <em className="text-emerald-600">in corso</em>}
-                                  </div>
-                                  {duration && (
-                                    <div className="text-xs text-muted-foreground whitespace-normal max-w-[24rem]" title={duration}>
-                                      {r.end_date ? duration : <>da {duration}</>}
-                                    </div>
-                                  )}
-                                </>
-                              )
-                            })()}
+                              )}
+                            </>
+                          )
+                        })()}
                       </td>
                       <td className="p-3 hidden lg:table-cell text-muted-foreground line-clamp-2 max-w-xs">
                         {r.notes ?? ""}

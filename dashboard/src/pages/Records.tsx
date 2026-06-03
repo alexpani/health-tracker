@@ -268,12 +268,12 @@ export default function Records() {
   ].filter(Boolean).length
 
   return (
-    <div className="flex gap-6 -m-6 p-0 min-h-[calc(100vh-0px)]">
+    <div className="flex gap-6 -m-3 sm:-m-6 p-0 min-h-[calc(100vh-0px)]">
       <aside className="hidden lg:block w-[320px] shrink-0 border-r bg-card/30 sticky top-0 h-screen overflow-hidden">
         <RecordsSidebar filters={filters} onChange={setFilters} />
       </aside>
 
-      <div className="flex-1 space-y-6 min-w-0 p-6">
+      <div className="flex-1 space-y-6 min-w-0 p-3 sm:p-6">
         <div className="flex items-center justify-between gap-2">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Record</h1>

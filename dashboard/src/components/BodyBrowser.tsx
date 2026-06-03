@@ -19,6 +19,7 @@ import { fetchCorrelated, useBulkDeleteSamples, useSampleFacets, useSamples } fr
 import { CATEGORIES, getMeta } from "@/lib/healthkit"
 import { formatDateTime, formatDateShortYear, formatDateShort, formatDateLong, formatMonthYear } from "@/lib/utils"
 import type { BodyFilters, CorrelatedSample, Sample } from "@/lib/types"
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock"
 
 const BODY_TYPES = CATEGORIES.body.types
 const STORAGE_KEY = "body_filters_v3"
@@ -315,6 +316,7 @@ export default function BodyBrowser() {
 
   // Delete flow
   const [deleteTarget, setDeleteTarget] = useState<MergedRow | null>(null)
+  useBodyScrollLock(showMobileFilters || deleteTarget !== null)
   const [correlated, setCorrelated] = useState<CorrelatedSample[] | null>(null)
   const [loadingCorrelated, setLoadingCorrelated] = useState(false)
   const bulkDelete = useBulkDeleteSamples()
@@ -455,12 +457,12 @@ export default function BodyBrowser() {
       q.BodyMass.data, q.BodyMassIndex.data, q.BodyFatPercentage.data, q.LeanBodyMass.data, q.Height.data, q.Waist.data])
 
   return (
-    <div className="flex gap-6 -m-6 p-0 min-h-[calc(100vh-0px)]">
+    <div className="flex gap-6 -m-3 sm:-m-6 p-0 min-h-[calc(100vh-0px)]">
       <aside className="hidden lg:block w-[320px] shrink-0 border-r bg-card/30 sticky top-0 h-screen overflow-hidden">
         <BodyFiltersSidebar value={filters} onChange={setFilters} availableSources={availableSources} availableYears={availableYears} />
       </aside>
 
-      <div className="flex-1 space-y-6 min-w-0 p-6">
+      <div className="flex-1 space-y-6 min-w-0 p-3 sm:p-6">
         <div className="flex items-center justify-between gap-2">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Corpo</h1>
@@ -697,10 +699,10 @@ export default function BodyBrowser() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Data</TableHead>
-                      <TableHead>Metrica</TableHead>
-                      <TableHead className="text-right">Valore</TableHead>
-                      <TableHead>Sorgente</TableHead>
+                      <TableHead className="whitespace-nowrap">Data</TableHead>
+                      <TableHead className="whitespace-nowrap">Metrica</TableHead>
+                      <TableHead className="text-right whitespace-nowrap">Valore</TableHead>
+                      <TableHead className="whitespace-nowrap">Sorgente</TableHead>
                       <TableHead className="w-[40px]"></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -711,17 +713,17 @@ export default function BodyBrowser() {
                       const formatted = meta.formatValue ? meta.formatValue(v) : v.toLocaleString("it-IT", { maximumFractionDigits: 2 })
                       return (
                         <TableRow key={`${r.uuid}-${r.type}`}>
-                          <TableCell className="tabular-nums">{formatDateTime(r.start_date)}</TableCell>
-                          <TableCell>
+                          <TableCell className="tabular-nums whitespace-nowrap">{formatDateTime(r.start_date)}</TableCell>
+                          <TableCell className="whitespace-nowrap">
                             <span className="inline-flex items-center gap-1.5">
                               <span className="inline-block w-2 h-2 rounded-full" style={{ background: meta.color }} />
                               {meta.label}
                             </span>
                           </TableCell>
-                          <TableCell className="text-right tabular-nums font-medium">
+                          <TableCell className="text-right tabular-nums font-medium whitespace-nowrap">
                             {formatted} <span className="text-muted-foreground text-xs font-normal">{meta.displayUnit}</span>
                           </TableCell>
-                          <TableCell className="text-muted-foreground">{r.source_name ?? "-"}</TableCell>
+                          <TableCell className="text-muted-foreground whitespace-nowrap">{r.source_name ?? "-"}</TableCell>
                           <TableCell>
                             {r.id !== undefined && (
                               <Button

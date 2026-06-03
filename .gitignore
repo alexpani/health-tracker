@@ -40,3 +40,7 @@ ios/HealthTracker/build/
 # Node deps
 node_modules/
 dashboard/tsconfig.tsbuildinfo
+
+# Claude Code tooling locale (worktrees, settings, lock)
+.claude/
+dashboard/.claude/
