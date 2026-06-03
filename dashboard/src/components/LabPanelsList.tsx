@@ -60,7 +60,7 @@ function PanelsTable({
           const unmapped = p.unmapped_count ?? 0
           return (
             <TableRow key={p.id}>
-              <TableCell>
+              <TableCell className="whitespace-nowrap">
                 <Link to={`/lab/panels/${p.id}/review`} className="text-primary hover:underline">
                   {formatDate(p.test_date)}
                 </Link>
