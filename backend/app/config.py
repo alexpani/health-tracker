@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # --- Lab module ---
     anthropic_api_key: str | None = None
-    anthropic_model: str = "claude-opus-4-7"
+    anthropic_model: str = "claude-opus-4-8"
     lab_documents_dir: Path = Path("/app/data/lab_documents")
     # Archivio PDF per Visite / Referti / Documentazione (dominio medical_docs).
     medical_documents_dir: Path = Path("/app/data/medical_documents")

@@ -25,7 +25,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://health:health@db:5432/health_tracker
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-7}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-4-8}
       LAB_DOCUMENTS_DIR: /app/data/lab_documents
       MEDICAL_DOCUMENTS_DIR: /app/data/medical_documents
       # --- APNs silent push ---

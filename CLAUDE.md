@@ -477,7 +477,7 @@ Dominio separato dal mondo HealthKit: referti di laboratorio. Spec completa in `
 
 ### Policy
 - App single-user self-hosted: dati medici reali **possono** vivere in repo (fixture test, commenti, esempi). Nessun obbligo di anonimizzazione. I PDF operativi stanno comunque nel volume `backend/data/lab_documents/` (in `.gitignore`) per non gonfiare la history.
-- `ANTHROPIC_API_KEY` letta solo dal backend via pydantic-settings (`app/config.py`); mai dalla dashboard. Default modello: `claude-opus-4-7` (override via env `ANTHROPIC_MODEL`).
+- `ANTHROPIC_API_KEY` letta solo dal backend via pydantic-settings (`app/config.py`); mai dalla dashboard. Default modello: `claude-opus-4-8` (override via env `ANTHROPIC_MODEL`).
 - Review umana obbligatoria prima del commit di un panel: i `lab_results` con `analyte_id IS NULL` bloccheranno il confirm (logica in PR #2b).
 
 ### Ingest pipeline (PR #2a)
