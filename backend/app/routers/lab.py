@@ -1568,13 +1568,20 @@ async def get_correlations(
     background_tasks: BackgroundTasks,
     panel_id: int | None = None,
     refresh: bool = False,
+    include_weak: bool = False,
     limit: int = Query(200, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Candidate di associazione esame ↔ regime/nota, ordinate per rilevanza.
     Il motore deterministico gira a ogni chiamata (cheap); le annotazioni IA
     sono cacheate per signature e riempite in background. Senza ANTHROPIC_API_KEY
-    le candidate restano comunque (annotazioni `failed`)."""
+    le candidate restano comunque (annotazioni `failed`).
+
+    Di default le candidate gia' giudicate dall'IA con plausibilita' `none`/`low`
+    NON vengono restituite (rumore): l'annotazione resta in cache cosi' non si
+    ri-chiama mai l'IA su di esse e restano soppresse per sempre. Le candidate
+    `pending` (non ancora giudicate) passano finche' non vengono valutate, poi
+    spariscono da sole se deboli. Passare `include_weak=true` per vederle tutte."""
     # 1. Serie per-analita (solo panel confermati, analita mappato).
     rows = (await db.execute(
         select(LabResult, LabPanel.test_date, LabPanel.id.label("pid"), LabAnalyte)
@@ -1685,6 +1692,19 @@ async def get_correlations(
     if to_annotate:
         await db.commit()
         background_tasks.add_task(_annotate_correlations, to_annotate)
+
+    # 4b. Filtro rumore: scarta le candidate gia' giudicate deboli (none/low).
+    #     Le pending restano (saranno giudicate); l'annotazione cacheata evita
+    #     di ri-chiamare l'IA, quindi le deboli restano soppresse per sempre.
+    if not include_weak:
+        _WEAK = {"none", "low"}
+        candidates = [
+            c for c in candidates
+            if not (
+                c["annotation"].get("status") == "done"
+                and c["annotation"].get("plausibility") in _WEAK
+            )
+        ]
 
     # 5. Lookup per la Matrice: by_cell[analyte_id][cur_panel_id].
     by_cell: dict[str, dict[str, Any]] = {}
