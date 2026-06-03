@@ -170,8 +170,11 @@ async def _analyze_document(doc_id: int, data: bytes, section: str) -> None:
             cat_names = [c.name for c in cat_rows]
             cat_by_lower = {c.name.lower(): c.id for c in cat_rows}
 
+            # Per le Visite chiediamo anche un riassunto dei contenuti salienti,
+            # con cui popoliamo le note SOLO se l'utente non le ha gia' scritte.
+            want_summary = section == "visit"
             payload = await anyio.to_thread.run_sync(
-                medical_docs_ingest.call_llm, data, section, cat_names
+                medical_docs_ingest.call_llm, data, section, cat_names, want_summary
             )
             meta = medical_docs_ingest.parse_extracted_meta(payload)
 
@@ -182,6 +185,8 @@ async def _analyze_document(doc_id: int, data: bytes, section: str) -> None:
             doc.doctor_name = meta.doctor_name
             if meta.suggested_category:
                 doc.category_id = cat_by_lower.get(meta.suggested_category.lower())
+            if want_summary and meta.summary and not (doc.notes and doc.notes.strip()):
+                doc.notes = meta.summary
             doc.parsing_failed = False
             doc.analysis_status = "done"
         except Exception:

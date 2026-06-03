@@ -36,9 +36,21 @@ SECTION_LABELS: dict[str, str] = {
 }
 
 
-def build_system_prompt(section: str, categories: list[str]) -> str:
+def build_system_prompt(
+    section: str, categories: list[str], include_summary: bool = False
+) -> str:
     label = SECTION_LABELS.get(section, "documento medico")
     cat_str = ", ".join(categories) if categories else "(nessuna categoria definita)"
+    summary_field = ""
+    summary_rule = ""
+    if include_summary:
+        summary_field = """- summary: un riassunto in italiano dei contenuti salienti del documento
+  (motivo della visita, esito/diagnosi, terapie o prescrizioni indicate,
+  controlli o follow-up consigliati). Massimo ~6 righe, conciso e fattuale,
+  oppure null se il documento non e' leggibile / non contiene contenuti utili
+"""
+        summary_rule = ("- `summary` deve riportare solo cio' che e' scritto nel documento, "
+                        "senza interpretazioni o diagnosi inventate.\n")
     return f"""Sei un parser di documenti medici italiani. Ricevi un {label}
 (PDF testuale o scannerizzato, fai OCR se serve).
 
@@ -51,12 +63,12 @@ Estrai SOLO i metadati essenziali e rispondi con questo JSON:
   di controllo", "RMN ginocchio destro", "Certificato vaccinale antinfluenzale")
 - facility_name: nome della struttura / ambulatorio / laboratorio, oppure null
 - doctor_name: nome del medico refertante / specialista, oppure null
-
+{summary_field}
 Regole:
 - Non inventare dati: se un campo manca, usa null.
 - `suggested_category` deve essere una stringa identica a una voce dell'elenco
   fornito (rispetta maiuscole/minuscole), oppure null.
-- Rispondi SOLO con JSON valido, niente testo prima o dopo, niente markdown."""
+{summary_rule}- Rispondi SOLO con JSON valido, niente testo prima o dopo, niente markdown."""
 
 
 @dataclass
@@ -66,6 +78,7 @@ class ExtractedMeta:
     title: str | None
     facility_name: str | None
     doctor_name: str | None
+    summary: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +159,12 @@ def ocr_pdf(pdf_bytes: bytes) -> bytes | None:
 # 3. Chiamata LLM
 # ---------------------------------------------------------------------------
 
-def call_llm(pdf_bytes: bytes, section: str, categories: list[str]) -> dict[str, Any]:
+def call_llm(
+    pdf_bytes: bytes,
+    section: str,
+    categories: list[str],
+    include_summary: bool = False,
+) -> dict[str, Any]:
     """Chiama Anthropic passando il PDF come blocco `document` e parsa la
     risposta JSON di soli metadati. Solleva `RuntimeError` su fallimento."""
     if not settings.anthropic_api_key:
@@ -157,8 +175,8 @@ def call_llm(pdf_bytes: bytes, section: str, categories: list[str]) -> dict[str,
     pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("ascii")
     resp = client.messages.create(
         model=settings.anthropic_model,
-        max_tokens=MAX_LLM_TOKENS,
-        system=build_system_prompt(section, categories),
+        max_tokens=MAX_LLM_TOKENS * 2 if include_summary else MAX_LLM_TOKENS,
+        system=build_system_prompt(section, categories, include_summary=include_summary),
         messages=[{
             "role": "user",
             "content": [
@@ -206,6 +224,7 @@ def parse_extracted_meta(payload: dict[str, Any]) -> ExtractedMeta:
         title=_clean_str(payload.get("title")),
         facility_name=_clean_str(payload.get("facility_name")),
         doctor_name=_clean_str(payload.get("doctor_name")),
+        summary=_clean_str(payload.get("summary")),
     )
 
 
