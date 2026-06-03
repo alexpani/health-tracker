@@ -28,6 +28,7 @@ import {
   useLabAddResult,
   useLabAnalytes,
   useLabConfirmPanel,
+  useLabCorrelations,
   useLabCreateAlias,
   useLabCreateAnalyte,
   useLabDeleteResult,
@@ -36,6 +37,7 @@ import {
   useLabPatchResult,
   useLatestWeightBefore,
 } from "@/lib/queries"
+import { CorrelationCard, CORR_DISCLAIMER } from "@/components/LabCorrelations"
 import { HealthNoteForm } from "@/components/HealthNoteForm"
 import { JournalForm } from "@/components/JournalForm"
 import type {
@@ -164,6 +166,8 @@ export default function LabReview() {
         onOpenNote={(id) => setQuickModal({ kind: "note", id })}
         onOpenJournal={(id) => setQuickModal({ kind: "journal", id })}
       />
+
+      <PanelCorrelations panelId={panelId} />
 
       {quickModal && (
         <QuickEntryModal
@@ -753,6 +757,27 @@ function PanelHeader({
         Annulla
       </Button>
     </div>
+  )
+}
+
+function PanelCorrelations({ panelId }: { panelId: number }) {
+  const { data } = useLabCorrelations({ panel_id: panelId })
+  const candidates = data?.candidates ?? []
+  if (candidates.length === 0) return null
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">
+          Possibili associazioni con regimi / note ({candidates.length})
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">{CORR_DISCLAIMER}</p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {candidates.map(c => (
+          <CorrelationCard key={c.signature} c={c} showChart={false} />
+        ))}
+      </CardContent>
+    </Card>
   )
 }
 

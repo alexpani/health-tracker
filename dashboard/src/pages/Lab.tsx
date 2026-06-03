@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import LabCorrelations from "@/components/LabCorrelations"
 import LabMatrix from "@/components/LabMatrix"
 import LabPanelsList from "@/components/LabPanelsList"
 import LabTrends from "@/components/LabTrends"
@@ -34,6 +35,7 @@ export default function Lab() {
           <TabsTrigger value="referti">Referti</TabsTrigger>
           <TabsTrigger value="matrice">Matrice</TabsTrigger>
           <TabsTrigger value="andamenti">Andamenti</TabsTrigger>
+          <TabsTrigger value="correlazioni">Correlazioni</TabsTrigger>
         </TabsList>
 
         <TabsContent value="referti" className="mt-4">
@@ -69,6 +71,21 @@ export default function Lab() {
             </CardHeader>
             <CardContent>
               <LabTrends initialSlug={trendsSlug} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="correlazioni" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Possibili associazioni esame ↔ terapia/nota</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Variazioni marcate di un analita fra due prelievi in concomitanza
+                con un evento di regime o nota di salute, ordinate per rilevanza.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <LabCorrelations />
             </CardContent>
           </Card>
         </TabsContent>

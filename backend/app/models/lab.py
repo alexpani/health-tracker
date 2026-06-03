@@ -135,3 +135,33 @@ class LabResult(Base):
         Index("ix_lab_results_panel", "panel_id"),
         Index("ix_lab_results_analyte", "analyte_id"),
     )
+
+
+class LabCorrelationAnnotation(Base):
+    """Cache dell'annotazione IA per una candidata di correlazione esame ↔
+    regime/nota. Chiave = `signature` deterministica prodotta dal motore
+    (`lab_correlations.compute_candidates`). Il fill avviene in background
+    (1 chiamata per signature unica) per non rifare la chiamata IA a ogni
+    pageload e per non bloccare il request-handler (LXC 1GB RAM)."""
+    __tablename__ = "lab_correlation_annotations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    signature: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    plausibility: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="none"
+    )  # none | low | medium | high
+    mechanism_text: Mapped[str | None] = mapped_column(Text)
+    is_known_association: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    model: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="pending"
+    )  # pending | done | failed
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+        nullable=False,
+    )

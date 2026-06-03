@@ -33,6 +33,7 @@ import { DayCalendarSidebar } from "@/components/DayCalendarSidebar"
 import { Hypnogram } from "@/components/charts/Hypnogram"
 import { SleepScoreCard } from "@/components/charts/SleepScoreCard"
 import { RecoveryWidget } from "@/components/RecoveryWidget"
+import LabCorrelationsCard from "@/components/LabCorrelationsCard"
 
 function todayLocal(): string {
   const d = new Date()
@@ -178,6 +179,8 @@ export default function Day() {
               onAdd={() => setJournalModal({ entryId: null })}
               onEdit={id => setJournalModal({ entryId: id })}
             />
+
+            {date === today && <LabCorrelationsCard />}
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {date === today && (

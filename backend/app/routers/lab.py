@@ -17,24 +17,35 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+import anyio
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    UploadFile,
+    File,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
+from app.database import async_session, get_db
 from app.models import HealthSample, Workout, Regimen, HealthNote, JournalEntry
 from app.models.lab import (
     LabAnalyte,
     LabAnalyteAlias,
+    LabCorrelationAnnotation,
     LabDocument,
     LabPanel,
     LabResult,
 )
-from app.services import lab_ingest, lab_units
+from app.services import lab_correlations, lab_correlations_llm, lab_ingest, lab_units
 
 DIARIO_BASE_URL = os.environ.get("DIARIO_BASE_URL", "http://192.168.68.173:3000")
 
@@ -1515,3 +1526,181 @@ async def recent_out_of_range(
         }
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# GET /correlations — ipotesi di associazione esame ↔ regime/nota
+# ---------------------------------------------------------------------------
+
+_PLAUS_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
+
+
+async def _annotate_correlations(candidates: list[dict[str, Any]]) -> None:
+    """Background fill: per ogni candidata con annotazione ancora `pending`
+    chiama l'IA (sequenziale, LXC 1GB) e aggiorna la riga a done/failed."""
+    async with async_session() as db:
+        for c in candidates:
+            sig = c["signature"]
+            row = (await db.execute(
+                select(LabCorrelationAnnotation)
+                .where(LabCorrelationAnnotation.signature == sig)
+            )).scalar_one_or_none()
+            if row is None or row.status != "pending":
+                continue
+            try:
+                payload = await anyio.to_thread.run_sync(
+                    lab_correlations_llm.call_llm, c
+                )
+                ann = lab_correlations_llm.parse_annotation(payload)
+                row.plausibility = ann.plausibility
+                row.is_known_association = ann.is_known_association
+                row.mechanism_text = ann.mechanism_text
+                row.model = settings.anthropic_model
+                row.status = "done"
+            except Exception:
+                logger.exception("lab-correlations: annotazione IA fallita per %s", sig)
+                row.status = "failed"
+            await db.commit()
+
+
+@router.get("/correlations")
+async def get_correlations(
+    background_tasks: BackgroundTasks,
+    panel_id: int | None = None,
+    refresh: bool = False,
+    limit: int = Query(200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Candidate di associazione esame ↔ regime/nota, ordinate per rilevanza.
+    Il motore deterministico gira a ogni chiamata (cheap); le annotazioni IA
+    sono cacheate per signature e riempite in background. Senza ANTHROPIC_API_KEY
+    le candidate restano comunque (annotazioni `failed`)."""
+    # 1. Serie per-analita (solo panel confermati, analita mappato).
+    rows = (await db.execute(
+        select(LabResult, LabPanel.test_date, LabPanel.id.label("pid"), LabAnalyte)
+        .join(LabPanel, LabResult.panel_id == LabPanel.id)
+        .join(LabAnalyte, LabResult.analyte_id == LabAnalyte.id)
+        .where(LabPanel.status == "confirmed", LabResult.analyte_id.isnot(None))
+        .order_by(LabAnalyte.id, LabPanel.test_date.asc(), LabPanel.id.asc())
+    )).all()
+
+    series_by_id: dict[int, lab_correlations.AnalyteSeries] = {}
+    dates: list[date] = []
+    for r, test_date, pid, analyte in rows:
+        dates.append(test_date)
+        s = series_by_id.get(analyte.id)
+        if s is None:
+            s = lab_correlations.AnalyteSeries(
+                id=analyte.id, slug=analyte.slug, name=analyte.display_name_it,
+                category=analyte.category,
+                ref_low=float(analyte.ref_low) if analyte.ref_low is not None else None,
+                ref_high=float(analyte.ref_high) if analyte.ref_high is not None else None,
+                points=[],
+            )
+            series_by_id[analyte.id] = s
+        s.points.append(lab_correlations.Point(
+            panel_id=pid, test_date=test_date,
+            value=float(r.value_numeric) if r.value_numeric is not None else None,
+            out_of_range=r.out_of_range,
+            unit=r.unit_normalized or r.unit_raw,
+        ))
+
+    if not dates:
+        return {"candidates": [], "by_cell": {}, "computed_at": datetime.now(timezone.utc).isoformat()}
+    lo, hi = min(dates), max(dates)
+
+    # 2. Regimi + note salute sul range globale.
+    regimen_rows = (await db.execute(
+        select(Regimen).where(
+            Regimen.kind.in_(lab_correlations.REGIMEN_KINDS),
+            (Regimen.start_date.is_(None)) | (Regimen.start_date <= hi),
+            (Regimen.end_date.is_(None)) | (Regimen.end_date >= lo),
+        )
+    )).scalars().all()
+    regimens = [
+        lab_correlations.RegimenRow(
+            id=r.id, kind=r.kind, name=r.name,
+            start_date=r.start_date, end_date=r.end_date, dose=r.dose,
+        )
+        for r in regimen_rows
+    ]
+    note_rows = (await db.execute(
+        select(HealthNote).where(
+            HealthNote.start_date <= hi, HealthNote.end_date >= lo
+        )
+    )).scalars().all()
+    notes = [
+        lab_correlations.NoteRow(
+            id=n.id, category=n.category, body_zone=n.body_zone, text=n.text,
+            start_date=n.start_date, end_date=n.end_date,
+        )
+        for n in note_rows
+    ]
+
+    # 3. Candidate deterministiche.
+    candidates = lab_correlations.compute_candidates(
+        list(series_by_id.values()), regimens, notes
+    )
+    if panel_id is not None:
+        candidates = [c for c in candidates if c["cur_panel_id"] == panel_id]
+    candidates = candidates[:limit]
+
+    # 4. Annotazioni cacheate + enqueue delle mancanti.
+    sigs = [c["signature"] for c in candidates]
+    existing: dict[str, LabCorrelationAnnotation] = {}
+    if sigs:
+        for a in (await db.execute(
+            select(LabCorrelationAnnotation)
+            .where(LabCorrelationAnnotation.signature.in_(sigs))
+        )).scalars().all():
+            existing[a.signature] = a
+
+    to_annotate: list[dict[str, Any]] = []
+    annotate_budget = lab_correlations.TOP_N_ANNOTATE
+    for c in candidates:
+        a = existing.get(c["signature"])
+        if a is not None and not refresh and a.status != "failed":
+            c["annotation"] = {
+                "plausibility": a.plausibility,
+                "is_known_association": a.is_known_association,
+                "mechanism_text": a.mechanism_text,
+                "status": a.status,
+            }
+            continue
+        # Da (ri)annotare: inserisci/azzera la riga a pending (cap budget).
+        if annotate_budget > 0:
+            await db.execute(
+                pg_insert(LabCorrelationAnnotation)
+                .values(signature=c["signature"], status="pending")
+                .on_conflict_do_update(
+                    index_elements=["signature"],
+                    set_={"status": "pending", "updated_at": func.now()},
+                )
+            )
+            to_annotate.append(c)
+            annotate_budget -= 1
+            c["annotation"] = {"status": "pending"}
+        else:
+            c["annotation"] = {"status": "pending"}
+    if to_annotate:
+        await db.commit()
+        background_tasks.add_task(_annotate_correlations, to_annotate)
+
+    # 5. Lookup per la Matrice: by_cell[analyte_id][cur_panel_id].
+    by_cell: dict[str, dict[str, Any]] = {}
+    for c in candidates:
+        ak = str(c["analyte_id"])
+        pk = str(c["cur_panel_id"])
+        cell = by_cell.setdefault(ak, {}).setdefault(
+            pk, {"count": 0, "max_plausibility": None, "signatures": []}
+        )
+        cell["count"] += 1
+        cell["signatures"].append(c["signature"])
+        plaus = c.get("annotation", {}).get("plausibility")
+        if plaus and (
+            cell["max_plausibility"] is None
+            or _PLAUS_ORDER.get(plaus, 0) > _PLAUS_ORDER.get(cell["max_plausibility"], 0)
+        ):
+            cell["max_plausibility"] = plaus
+
+    return {"candidates": candidates, "by_cell": by_cell, "computed_at": datetime.now(timezone.utc).isoformat()}

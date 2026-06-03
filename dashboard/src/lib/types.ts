@@ -795,6 +795,65 @@ export interface LabRecentOutOfRange {
   ref_high: number | null
 }
 
+// --- Lab correlations (ipotesi esame ↔ regime/nota) ---
+
+export type LabPlausibility = "none" | "low" | "medium" | "high"
+
+export interface LabCorrelationFactor {
+  source: "regimen" | "health_note"
+  kind: string
+  name: string
+  change_type: string // started|stopped|dose_increase|dose_decrease|dose_changed|note_started|note_resolved
+  old_dose: string | null
+  new_dose: string | null
+  ref_id: number
+  event_date: string
+}
+
+export interface LabCorrelationAnnotation {
+  plausibility?: LabPlausibility
+  is_known_association?: boolean
+  mechanism_text?: string | null
+  status: "pending" | "done" | "failed"
+}
+
+export interface LabCorrelationCandidate {
+  signature: string
+  analyte_id: number
+  analyte_slug: string
+  analyte_name: string
+  analyte_category: string
+  ref_low: number | null
+  ref_high: number | null
+  prev_panel_id: number
+  cur_panel_id: number
+  prev_date: string
+  cur_date: string
+  prev_value: number
+  cur_value: number
+  unit: string | null
+  abs_delta: number
+  rel_delta: number | null
+  direction: "up" | "down" | "flat"
+  oor_transition: "crossed_in" | "left" | "stayed_oor" | "stayed_in"
+  interval_days: number
+  factor: LabCorrelationFactor
+  score: number
+  annotation: LabCorrelationAnnotation
+}
+
+export interface LabCorrelationCellInfo {
+  count: number
+  max_plausibility: LabPlausibility | null
+  signatures: string[]
+}
+
+export interface LabCorrelationsResponse {
+  candidates: LabCorrelationCandidate[]
+  by_cell: Record<string, Record<string, LabCorrelationCellInfo>>
+  computed_at: string
+}
+
 // --- HealthKit Clinical Records (FHIR) ---
 
 export interface ClinicalRecord {

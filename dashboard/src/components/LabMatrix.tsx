@@ -15,6 +15,7 @@ import {
   useHealthNotes,
   useJournalEntries,
   useLabAnalytes,
+  useLabCorrelations,
   useLabMatrix,
 } from "@/lib/queries"
 import { HealthNoteForm } from "@/components/HealthNoteForm"
@@ -23,6 +24,7 @@ import type {
   LabAnalyte,
   LabAutoContext,
   LabAutoContextItem,
+  LabCorrelationsResponse,
   LabMatrixCell,
   LabMatrixResponse,
 } from "@/lib/types"
@@ -185,6 +187,8 @@ export default function LabMatrix({
     [filters.start, filters.end, filters.specimen]
   )
   const { data: categoryPool } = useLabMatrix(noCategoryParams)
+  const { data: corrData } = useLabCorrelations()
+  const byCell = corrData?.by_cell
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [collapsedInitialized, setCollapsedInitialized] = useState(false)
@@ -494,6 +498,7 @@ export default function LabMatrix({
                   analytes={group.analytes}
                   panels={data.panels}
                   cells={data.cells}
+                  byCell={byCell}
                   collapsed={isCollapsed}
                   onToggle={() => toggleCategory(group.category)}
                   onJumpToTrends={onJumpToTrends}
@@ -652,11 +657,25 @@ function LabQuickEntryModal({
   )
 }
 
+function corrDotClass(p: string | null | undefined): string {
+  switch (p) {
+    case "high":
+      return "bg-red-500"
+    case "medium":
+      return "bg-amber-500"
+    case "low":
+      return "bg-slate-400"
+    default:
+      return "bg-indigo-400" // pending / nessuna plausibilità ancora nota
+  }
+}
+
 function CategoryGroup({
   category,
   analytes,
   panels,
   cells,
+  byCell,
   collapsed,
   onToggle,
   onJumpToTrends,
@@ -668,6 +687,7 @@ function CategoryGroup({
   analytes: LabAnalyte[]
   panels: LabMatrixResponse["panels"]
   cells: LabMatrixResponse["cells"]
+  byCell?: LabCorrelationsResponse["by_cell"]
   collapsed: boolean
   onToggle: () => void
   onJumpToTrends?: (slug: string) => void
@@ -744,24 +764,37 @@ function CategoryGroup({
               </td>
               {panels.map(p => {
                 const cell = byPanel[String(p.id)]
+                const corr = byCell?.[String(a.id)]?.[String(p.id)]
+                const baseTitle = cell
+                  ? `${cellDisplay(cell)}${cell.unit ? " " + cell.unit : ""}${
+                      a.ref_low != null || a.ref_high != null
+                        ? ` (rif ${a.ref_low ?? "-"}–${a.ref_high ?? "-"} ${a.unit_canonical ?? ""})`
+                        : ""
+                    }`
+                  : ""
+                const corrTitle = corr
+                  ? `\n${corr.count} ipotesi di correlazione${
+                      corr.max_plausibility ? ` (max: ${corr.max_plausibility})` : ""
+                    }`
+                  : ""
                 return (
                   <td
                     key={p.id}
                     className={cn(
-                      "px-2 py-1.5 text-center whitespace-nowrap border-b border-border/50",
+                      "relative px-2 py-1.5 text-center whitespace-nowrap border-b border-border/50",
                       cellClassName(cell)
                     )}
-                    title={
-                      cell
-                        ? `${cellDisplay(cell)}${cell.unit ? " " + cell.unit : ""}${
-                            a.ref_low != null || a.ref_high != null
-                              ? ` (rif ${a.ref_low ?? "-"}–${a.ref_high ?? "-"} ${a.unit_canonical ?? ""})`
-                              : ""
-                          }`
-                        : ""
-                    }
+                    title={(baseTitle + corrTitle) || undefined}
                   >
                     {cellDisplay(cell)}
+                    {corr && (
+                      <span
+                        className={cn(
+                          "absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full",
+                          corrDotClass(corr.max_plausibility)
+                        )}
+                      />
+                    )}
                   </td>
                 )
               })}

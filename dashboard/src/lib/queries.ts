@@ -30,6 +30,7 @@ import type {
   LabAliasIn,
   LabAnalyte,
   LabConfirmResponse,
+  LabCorrelationsResponse,
   LabIngestResponse,
   LabMatrixResponse,
   LabPanelDetail,
@@ -138,6 +139,7 @@ export function useCreateRegimen() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["regimens"] })
       qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+      qc.invalidateQueries({ queryKey: ["labCorrelations"] })
     },
   })
 }
@@ -150,6 +152,7 @@ export function useUpdateRegimen() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["regimens"] })
       qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+      qc.invalidateQueries({ queryKey: ["labCorrelations"] })
     },
   })
 }
@@ -161,6 +164,7 @@ export function useDeleteRegimen() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["regimens"] })
       qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+      qc.invalidateQueries({ queryKey: ["labCorrelations"] })
     },
   })
 }
@@ -231,6 +235,7 @@ export function useCreateHealthNote() {
       qc.invalidateQueries({ queryKey: ["healthNoteDays"] })
       qc.invalidateQueries({ queryKey: ["healthNoteZones"] })
       qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+      qc.invalidateQueries({ queryKey: ["labCorrelations"] })
     },
   })
 }
@@ -245,6 +250,7 @@ export function useUpdateHealthNote() {
       qc.invalidateQueries({ queryKey: ["healthNoteDays"] })
       qc.invalidateQueries({ queryKey: ["healthNoteZones"] })
       qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+      qc.invalidateQueries({ queryKey: ["labCorrelations"] })
     },
   })
 }
@@ -258,6 +264,7 @@ export function useDeleteHealthNote() {
       qc.invalidateQueries({ queryKey: ["healthNoteDays"] })
       qc.invalidateQueries({ queryKey: ["healthNoteZones"] })
       qc.invalidateQueries({ queryKey: ["daySnapshot"] })
+      qc.invalidateQueries({ queryKey: ["labCorrelations"] })
     },
   })
 }
@@ -940,6 +947,7 @@ export function useLabPatchResult() {
       await qc.invalidateQueries({ queryKey: ["labMatrix"] })
       await qc.invalidateQueries({ queryKey: ["labTimeseries"] })
       await qc.invalidateQueries({ queryKey: ["labRecentOor"] })
+      await qc.invalidateQueries({ queryKey: ["labCorrelations"] })
     },
   })
 }
@@ -954,6 +962,7 @@ export function useLabDeleteResult() {
       await qc.invalidateQueries({ queryKey: ["labMatrix"] })
       await qc.invalidateQueries({ queryKey: ["labTimeseries"] })
       await qc.invalidateQueries({ queryKey: ["labRecentOor"] })
+      await qc.invalidateQueries({ queryKey: ["labCorrelations"] })
     },
   })
 }
@@ -1007,6 +1016,7 @@ export function useLabConfirmPanel() {
     onSuccess: (_data, panelId) => {
       qc.invalidateQueries({ queryKey: ["labPanel", panelId] })
       qc.invalidateQueries({ queryKey: ["labPanels"] })
+      qc.invalidateQueries({ queryKey: ["labCorrelations"] })
     },
   })
 }
@@ -1034,6 +1044,7 @@ export function useLabCreateAlias() {
       await qc.invalidateQueries({ queryKey: ["labMatrix"] })
       await qc.invalidateQueries({ queryKey: ["labTimeseries"] })
       await qc.invalidateQueries({ queryKey: ["labRecentOor"] })
+      await qc.invalidateQueries({ queryKey: ["labCorrelations"] })
     },
   })
 }
@@ -1071,6 +1082,7 @@ export function useLabCreateAnalyte() {
       await qc.invalidateQueries({ queryKey: ["labMatrix"] })
       await qc.invalidateQueries({ queryKey: ["labTimeseries"] })
       await qc.invalidateQueries({ queryKey: ["labRecentOor"] })
+      await qc.invalidateQueries({ queryKey: ["labCorrelations"] })
     },
   })
 }
@@ -1108,6 +1120,27 @@ export function useLabRecentOutOfRange(limit = 10) {
     queryKey: ["labRecentOor", limit],
     queryFn: () => apiGet<LabRecentOutOfRange[]>("/api/v1/lab/recent-out-of-range", { limit }),
     staleTime: 60_000,
+  })
+}
+
+export function useLabCorrelations(params?: { panel_id?: number; refresh?: boolean }) {
+  const query: Record<string, string | number | undefined> = {
+    panel_id: params?.panel_id,
+    refresh: params?.refresh ? "true" : undefined,
+  }
+  return useQuery({
+    queryKey: ["labCorrelations", params],
+    queryFn: () =>
+      apiGet<LabCorrelationsResponse>("/api/v1/lab/correlations", query),
+    staleTime: 60_000,
+    // Polla finché qualche annotazione IA è ancora in elaborazione, poi stop.
+    refetchInterval: (query) => {
+      const data = query.state.data as LabCorrelationsResponse | undefined
+      const pending = data?.candidates?.some(
+        c => c.annotation?.status === "pending"
+      )
+      return pending ? 5_000 : false
+    },
   })
 }
 
