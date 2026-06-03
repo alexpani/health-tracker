@@ -301,15 +301,19 @@ export default function LabCorrelations() {
   }, [candidates])
 
   const filtered = useMemo(() => {
-    return candidates.filter(c => {
-      if (filters.year !== "all" && c.cur_date.slice(0, 4) !== filters.year) return false
-      if (filters.analyte !== "all" && c.analyte_slug !== filters.analyte) return false
-      if (filters.plausibility !== "all") {
-        if (c.annotation.status !== "done") return false
-        if (c.annotation.plausibility !== filters.plausibility) return false
-      }
-      return true
-    })
+    return candidates
+      .filter(c => {
+        if (filters.year !== "all" && c.cur_date.slice(0, 4) !== filters.year) return false
+        if (filters.analyte !== "all" && c.analyte_slug !== filters.analyte) return false
+        if (filters.plausibility !== "all") {
+          if (c.annotation.status !== "done") return false
+          if (c.annotation.plausibility !== filters.plausibility) return false
+        }
+        return true
+      })
+      // Ordine cronologico discendente (più recenti in cima); a parità di data
+      // il punteggio di rilevanza fa da spareggio.
+      .sort((a, b) => b.cur_date.localeCompare(a.cur_date) || b.score - a.score)
   }, [candidates, filters])
 
   const anyFilter =
