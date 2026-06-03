@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { Info } from "lucide-react"
+import { Info, Loader2 } from "lucide-react"
 import { useLabCorrelations, useLabTimeseries } from "@/lib/queries"
 import type {
   LabCorrelationCandidate,
@@ -21,6 +21,26 @@ import { formatDate, cn } from "@/lib/utils"
 
 export const CORR_DISCLAIMER =
   "Ipotesi generate automaticamente per coincidenza temporale, da verificare con un medico — non sono diagnosi né consigli medici."
+
+/** Indicatore di attività IA in corso nella sezione Laboratorio: si accende
+ * quando ci sono annotazioni di correlazione ancora in elaborazione
+ * (`status: "pending"`). Riusa il polling già attivo di useLabCorrelations. */
+export function LabAiActivityBadge() {
+  const { data } = useLabCorrelations()
+  const pending = (data?.candidates ?? []).filter(
+    c => c.annotation?.status === "pending"
+  ).length
+  if (pending === 0) return null
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-200 px-2.5 py-1 text-xs"
+      title={`L'IA sta analizzando ${pending} possibili correlazioni`}
+    >
+      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      IA: analisi di {pending} correlazion{pending === 1 ? "e" : "i"} in corso…
+    </span>
+  )
+}
 
 // --- helper condivisi (riusati da home widget + card review) ---------------
 

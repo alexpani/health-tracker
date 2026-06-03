@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import LabCorrelations from "@/components/LabCorrelations"
+import LabCorrelations, { LabAiActivityBadge } from "@/components/LabCorrelations"
 import LabMatrix from "@/components/LabMatrix"
 import LabPanelsList from "@/components/LabPanelsList"
 import LabTrends from "@/components/LabTrends"
@@ -20,7 +20,10 @@ export default function Lab() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Laboratorio</h1>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-semibold">Laboratorio</h1>
+            <LabAiActivityBadge />
+          </div>
           <p className="text-sm text-muted-foreground">
             Referti di analisi sangue e urine. Carica un PDF → review → conferma.
           </p>
