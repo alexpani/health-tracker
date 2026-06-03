@@ -170,9 +170,10 @@ async def _analyze_document(doc_id: int, data: bytes, section: str) -> None:
             cat_names = [c.name for c in cat_rows]
             cat_by_lower = {c.name.lower(): c.id for c in cat_rows}
 
-            # Per le Visite chiediamo anche un riassunto dei contenuti salienti,
-            # con cui popoliamo le note SOLO se l'utente non le ha gia' scritte.
-            want_summary = section == "visit"
+            # Per tutte le sezioni chiediamo anche un riassunto dei contenuti
+            # salienti, con cui popoliamo le note SOLO se l'utente non le ha
+            # gia' scritte. Il taglio del riassunto si adatta alla sezione.
+            want_summary = True
             payload = await anyio.to_thread.run_sync(
                 medical_docs_ingest.call_llm, data, section, cat_names, want_summary
             )

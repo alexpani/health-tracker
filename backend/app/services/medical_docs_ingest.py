@@ -35,6 +35,18 @@ SECTION_LABELS: dict[str, str] = {
     "document": "documento sanitario (attestato vaccinale, esenzione, certificato, ...)",
 }
 
+# Cosa deve contenere il `summary` per ciascuna sezione.
+SUMMARY_HINTS: dict[str, str] = {
+    "visit": ("il motivo della visita, l'esito/diagnosi, le terapie o "
+              "prescrizioni indicate, i controlli o follow-up consigliati"),
+    "imaging": ("il tipo di esame e il distretto indagato, i reperti "
+                "principali e le conclusioni/diagnosi del referto, eventuali "
+                "raccomandazioni o approfondimenti suggeriti"),
+    "document": ("il tipo di documento e a cosa serve, i dati salienti che "
+                 "contiene (es. esito, validita'/scadenza, prescrizioni, "
+                 "enti o medici coinvolti)"),
+}
+
 
 def build_system_prompt(
     section: str, categories: list[str], include_summary: bool = False
@@ -44,9 +56,10 @@ def build_system_prompt(
     summary_field = ""
     summary_rule = ""
     if include_summary:
-        summary_field = """- summary: un riassunto in italiano dei contenuti salienti del documento
-  (motivo della visita, esito/diagnosi, terapie o prescrizioni indicate,
-  controlli o follow-up consigliati). Massimo ~6 righe, conciso e fattuale,
+        hint = SUMMARY_HINTS.get(
+            section, "i contenuti salienti del documento")
+        summary_field = f"""- summary: un riassunto in italiano dei contenuti salienti del documento
+  ({hint}). Massimo ~6 righe, conciso e fattuale,
   oppure null se il documento non e' leggibile / non contiene contenuti utili
 """
         summary_rule = ("- `summary` deve riportare solo cio' che e' scritto nel documento, "
