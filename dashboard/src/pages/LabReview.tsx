@@ -173,28 +173,34 @@ export default function LabReview() {
         />
       )}
 
-      {!isConfirmed && (
-        <div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowNewAnalyteForm(v => !v)}
-          >
-            <FlaskConical className="h-4 w-4 mr-1" />
-            {showNewAnalyteForm ? "Chiudi" : "Nuovo analita (generico)"}
-          </Button>
-          {showNewAnalyteForm && (
-            <div className="mt-3">
-              <NewAnalyteForm
-                defaultSpecimen={panel.specimen_types[0] === "urine" ? "urine" : "blood"}
-                defaultDisplayName=""
-                defaultAlias={null}
-                onCreated={() => setShowNewAnalyteForm(false)}
-              />
-            </div>
-          )}
+      {isConfirmed && (
+        <div className="rounded-md bg-blue-50 border border-blue-200 text-blue-900 px-3 py-2 text-sm dark:bg-blue-950/40 dark:border-blue-900 dark:text-blue-200">
+          Referto confermato. Puoi comunque correggere le mappature, i valori e i
+          range: le modifiche vengono applicate <strong>subito</strong> e
+          aggiornano Matrice e Andamenti (non serve riconfermare).
         </div>
       )}
+
+      <div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowNewAnalyteForm(v => !v)}
+        >
+          <FlaskConical className="h-4 w-4 mr-1" />
+          {showNewAnalyteForm ? "Chiudi" : "Nuovo analita (generico)"}
+        </Button>
+        {showNewAnalyteForm && (
+          <div className="mt-3">
+            <NewAnalyteForm
+              defaultSpecimen={panel.specimen_types[0] === "urine" ? "urine" : "blood"}
+              defaultDisplayName=""
+              defaultAlias={null}
+              onCreated={() => setShowNewAnalyteForm(false)}
+            />
+          </div>
+        )}
+      </div>
 
       <Card>
         <CardHeader>
@@ -526,24 +532,27 @@ function ResultRow({
             placeholder="Cerca analita…"
             className="h-8 text-sm"
           />
-          {result.analyte_id == null && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onMouseDown={e => e.preventDefault()}
-              onClick={onCreateFromRow}
-              title={`Crea un nuovo analita a partire da "${result.raw_name}"`}
-              className={`shrink-0 border-amber-400 ${
-                creatingFromRow
-                  ? "bg-amber-200 text-amber-900"
-                  : "text-amber-700 hover:bg-amber-50"
-              }`}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              {creatingFromRow ? "chiudi" : "crea"}
-            </Button>
-          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onMouseDown={e => e.preventDefault()}
+            onClick={onCreateFromRow}
+            title={`Crea un nuovo analita a partire da "${result.raw_name}"`}
+            className={cn(
+              "shrink-0",
+              result.analyte_id == null
+                ? creatingFromRow
+                  ? "border-amber-400 bg-amber-200 text-amber-900"
+                  : "border-amber-400 text-amber-700 hover:bg-amber-50"
+                : creatingFromRow
+                ? "bg-muted"
+                : "text-muted-foreground",
+            )}
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            {creatingFromRow ? "chiudi" : "crea"}
+          </Button>
         </div>
       </TableCell>
       <TableCell>

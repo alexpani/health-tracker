@@ -1025,7 +1025,16 @@ export function useLabCreateAlias() {
   return useMutation({
     mutationFn: (body: LabAliasIn) =>
       apiPost<{ id: number; analyte_id: number; alias: string }>("/api/v1/lab/aliases", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["labAnalytes"] }),
+    onSuccess: async () => {
+      // Il backend fa backfill dell'analita sui result non mappati che
+      // combaciano col nuovo alias, anche in panel confermati (con ricalcolo
+      // out_of_range): invalidiamo anche panel/matrice/andamenti.
+      await qc.invalidateQueries({ queryKey: ["labAnalytes"] })
+      await qc.invalidateQueries({ queryKey: ["labPanel"] })
+      await qc.invalidateQueries({ queryKey: ["labMatrix"] })
+      await qc.invalidateQueries({ queryKey: ["labTimeseries"] })
+      await qc.invalidateQueries({ queryKey: ["labRecentOor"] })
+    },
   })
 }
 
