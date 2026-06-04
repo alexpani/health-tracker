@@ -249,6 +249,30 @@ export default function MedicalDocPreview({ section, doc }: Props) {
             <Trash2 className="mr-1 h-4 w-4" /> Elimina
           </Button>
         </div>
+
+        {/* Azioni sul PDF originale: condividi / stampa / salva. */}
+        {fileUrl && (
+          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+            {canNativeShare && (
+              <Button size="sm" variant="outline" onClick={shareFile}>
+                <Share2 className="mr-1 h-4 w-4" /> Condividi
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={downloadFile}>
+              <Download className="mr-1 h-4 w-4" /> Scarica
+            </Button>
+            <Button size="sm" variant="outline" asChild>
+              <a
+                href={fileSrc ?? fileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Apri il PDF in una nuova scheda (per stampare da desktop)"
+              >
+                <ExternalLink className="mr-1 h-4 w-4" /> Apri
+              </a>
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className={fullscreen ? "fixed inset-0 z-50 bg-background p-4" : "rounded-lg border"}>
@@ -265,38 +289,9 @@ export default function MedicalDocPreview({ section, doc }: Props) {
               {k}
             </button>
           ))}
-          {fileUrl && (
-            <div className="ml-auto flex items-center gap-1">
-              {canNativeShare && (
-                <button
-                  onClick={shareFile}
-                  className="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-accent"
-                  title="Condividi / Stampa / Salva il PDF"
-                >
-                  <Share2 className="h-3.5 w-3.5" /> Condividi
-                </button>
-              )}
-              <button
-                onClick={downloadFile}
-                className="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-accent"
-                title="Scarica il PDF"
-              >
-                <Download className="h-3.5 w-3.5" /> Scarica
-              </button>
-              <a
-                href={fileSrc ?? fileUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-accent"
-                title="Apri il PDF in una nuova scheda (per stampare da desktop)"
-              >
-                <ExternalLink className="h-3.5 w-3.5" /> Apri
-              </a>
-            </div>
-          )}
           <button
             onClick={() => setFullscreen(f => !f)}
-            className={(fileUrl ? "" : "ml-auto ") + "rounded p-1 hover:bg-accent"}
+            className="ml-auto rounded p-1 hover:bg-accent"
             title={fullscreen ? "Riduci" : "Schermo intero"}
           >
             {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
