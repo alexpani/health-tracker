@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { CheckCircle2, ExternalLink, Loader2, Maximize2, Minimize2, Save, Trash2 } from "lucide-react"
+import { CheckCircle2, Download, ExternalLink, Loader2, Maximize2, Minimize2, Save, Share2, Trash2 } from "lucide-react"
 import { API_URL } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -89,11 +89,65 @@ export default function MedicalDocPreview({ section, doc }: Props) {
     await del.mutateAsync(doc.id)
   }
 
+  // URL grezzo del PDF (per download/share) e variante per l'iframe:
   // `#navpanes=0&pagemode=none` nasconde la barra laterale con le miniature
   // delle pagine nel viewer PDF nativo del browser.
-  const fileSrc = doc.file_id != null
-    ? `${API_URL}/api/v1/medical-docs/files/${doc.file_id}#navpanes=0&pagemode=none`
+  const fileUrl = doc.file_id != null
+    ? `${API_URL}/api/v1/medical-docs/files/${doc.file_id}`
     : null
+  const fileSrc = fileUrl ? `${fileUrl}#navpanes=0&pagemode=none` : null
+
+  // Nome file leggibile, ripulito dai caratteri non validi per il filesystem.
+  const downloadName =
+    ((form.title || doc.title || "documento").trim().replace(/[/\\?%*:|"<>]/g, "-") || "documento") +
+    ".pdf"
+
+  function triggerDownload(blob: Blob) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = downloadName
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Condivisione nativa: su iOS/Android apre il foglio di condivisione del
+  // sistema (Stampa, Salva su File, AirDrop, Mail, …). Fallback a download.
+  async function shareFile() {
+    if (!fileUrl) return
+    try {
+      const resp = await fetch(fileUrl)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const blob = await resp.blob()
+      const file = new File([blob], downloadName, { type: "application/pdf" })
+      const nav = navigator as Navigator & {
+        canShare?: (data?: ShareData) => boolean
+      }
+      if (nav.canShare?.({ files: [file] }) && nav.share) {
+        await nav.share({ files: [file], title: downloadName })
+        return
+      }
+      triggerDownload(blob) // fallback se la condivisione file non è supportata
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return // condivisione annullata
+      alert(`Impossibile condividere il documento: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  // Download diretto del PDF (sempre, indipendente dalla condivisione nativa).
+  async function downloadFile() {
+    if (!fileUrl) return
+    try {
+      const resp = await fetch(fileUrl)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      triggerDownload(await resp.blob())
+    } catch (e) {
+      alert(`Impossibile scaricare il documento: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const canNativeShare =
+    typeof navigator !== "undefined" && typeof (navigator as Navigator).share === "function"
 
   return (
     <div className="space-y-3">
@@ -211,20 +265,38 @@ export default function MedicalDocPreview({ section, doc }: Props) {
               {k}
             </button>
           ))}
-          {fileSrc && (
-            <a
-              href={fileSrc}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-accent"
-              title="Apri il PDF in una nuova scheda"
-            >
-              <ExternalLink className="h-3.5 w-3.5" /> Apri PDF
-            </a>
+          {fileUrl && (
+            <div className="ml-auto flex items-center gap-1">
+              {canNativeShare && (
+                <button
+                  onClick={shareFile}
+                  className="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-accent"
+                  title="Condividi / Stampa / Salva il PDF"
+                >
+                  <Share2 className="h-3.5 w-3.5" /> Condividi
+                </button>
+              )}
+              <button
+                onClick={downloadFile}
+                className="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-accent"
+                title="Scarica il PDF"
+              >
+                <Download className="h-3.5 w-3.5" /> Scarica
+              </button>
+              <a
+                href={fileSrc ?? fileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-accent"
+                title="Apri il PDF in una nuova scheda (per stampare da desktop)"
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> Apri
+              </a>
+            </div>
           )}
           <button
             onClick={() => setFullscreen(f => !f)}
-            className={(fileSrc ? "" : "ml-auto ") + "rounded p-1 hover:bg-accent"}
+            className={(fileUrl ? "" : "ml-auto ") + "rounded p-1 hover:bg-accent"}
             title={fullscreen ? "Riduci" : "Schermo intero"}
           >
             {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
