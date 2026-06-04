@@ -1,5 +1,7 @@
 import { useState } from "react"
+import { ChevronLeft } from "lucide-react"
 import { useMedicalDocs } from "@/lib/queries"
+import { Button } from "@/components/ui/button"
 import type { MedicalDocFilters, MedicalDocSection as Section } from "@/lib/types"
 import MedicalDocsFilters from "@/components/MedicalDocsFilters"
 import MedicalDocsList from "@/components/MedicalDocsList"
@@ -57,8 +59,30 @@ export default function MedicalDocsSection({ section, title, description }: Prop
           selectedId={selectedId}
           onSelect={setSelectedId}
         />
-        <MedicalDocPreview section={section} doc={selected} />
+        {/* Anteprima come terza colonna solo su desktop. */}
+        <div className="hidden lg:block">
+          <MedicalDocPreview section={section} doc={selected} />
+        </div>
       </div>
+
+      {/* Su mobile l'anteprima è un overlay a tutto schermo: la griglia
+          impilata la spingerebbe in fondo, sotto la lista scrollabile, e
+          toccando un documento non si vedrebbe nessun cambiamento. */}
+      {selected && (
+        <div className="fixed inset-0 z-40 overflow-y-auto bg-background lg:hidden">
+          <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background px-3 py-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelectedId(null)}>
+              <ChevronLeft className="mr-1 h-4 w-4" /> Indietro
+            </Button>
+            <span className="truncate text-sm font-medium">
+              {selected.title ?? "Documento"}
+            </span>
+          </div>
+          <div className="p-3">
+            <MedicalDocPreview section={section} doc={selected} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

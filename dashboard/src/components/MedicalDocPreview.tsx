@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { CheckCircle2, Loader2, Maximize2, Minimize2, Save, Trash2 } from "lucide-react"
+import { CheckCircle2, ExternalLink, Loader2, Maximize2, Minimize2, Save, Trash2 } from "lucide-react"
 import { API_URL } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -211,9 +211,20 @@ export default function MedicalDocPreview({ section, doc }: Props) {
               {k}
             </button>
           ))}
+          {fileSrc && (
+            <a
+              href={fileSrc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-auto flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-accent"
+              title="Apri il PDF in una nuova scheda"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> Apri PDF
+            </a>
+          )}
           <button
             onClick={() => setFullscreen(f => !f)}
-            className="ml-auto rounded p-1 hover:bg-accent"
+            className={(fileSrc ? "" : "ml-auto ") + "rounded p-1 hover:bg-accent"}
             title={fullscreen ? "Riduci" : "Schermo intero"}
           >
             {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
