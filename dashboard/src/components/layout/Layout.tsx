@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { QuickJournalProvider, useQuickJournal } from "@/components/QuickJournalProvider"
 import { SyncButton } from "@/components/SyncButton"
 import { LastSyncIndicator } from "@/components/LastSyncIndicator"
+import { RegimenAlerts } from "@/components/RegimenAlerts"
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock"
 
 function QuickJournalButton() {
@@ -30,6 +31,7 @@ export default function Layout() {
 
   return (
     <QuickJournalProvider>
+    <RegimenAlerts />
     <div className="flex flex-col h-full bg-slate-100 dark:bg-slate-900">
       {/* Top bar:
           - mobile/tablet (<lg): hamburger + titolo, drawer al click
