@@ -51,11 +51,9 @@ export default function MedicalDocsCategoryManager({ section, onClose }: Props) 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
     >
       <div
         className="w-full max-w-md rounded-lg bg-background shadow-lg"
-        onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h2 className="text-sm font-semibold">Gestisci categorie</h2>

@@ -466,9 +466,8 @@ export default function Journal() {
       {bulkTagDialog && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setBulkTagDialog(null)}
         >
-          <div className="bg-card rounded-lg p-5 shadow-2xl w-full max-w-md space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-card rounded-lg p-5 shadow-2xl w-full max-w-md space-y-4">
             <h3 className="text-base font-semibold">
               {bulkTagDialog.action === "add_tag" ? "Aggiungi tag" : "Rimuovi tag"}
               <span className="ml-2 text-sm font-normal text-muted-foreground">{selected.size} voci</span>
@@ -497,9 +496,8 @@ export default function Journal() {
       {renameDialog && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setRenameDialog(null)}
         >
-          <div className="bg-card rounded-lg p-5 shadow-2xl w-full max-w-md space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-card rounded-lg p-5 shadow-2xl w-full max-w-md space-y-4">
             <h3 className="text-base font-semibold">Rinomina tag</h3>
             <p className="text-sm text-muted-foreground">
               Sostituisci <code className="rounded bg-muted px-1.5 py-0.5">{renameDialog.from}</code> con un nuovo nome in tutte le voci.

@@ -157,11 +157,9 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/40 p-4 sm:p-8"
-      onClick={onClose}
     >
       <Card
         className="w-full max-w-lg shadow-2xl"
-        onClick={e => e.stopPropagation()}
       >
       <CardHeader>
         <CardTitle>{isEdit ? "Modifica regime" : "Nuovo regime"}</CardTitle>
