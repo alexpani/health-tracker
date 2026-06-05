@@ -8,12 +8,15 @@ import type { Regimen } from "@/lib/types"
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock"
 
 const ACK_KEY = "regimen_alerts_ack_v1"
+const EPOCH_KEY = "regimen_alerts_epoch_v1"
 
 type AlertType = "start" | "end"
 interface RegimenAlert {
   regimen: Regimen
   type: AlertType
-  /** Chiave stabile per il giorno: id:type:YYYY-MM-DD */
+  /** Data dell'evento (start_date o end_date), ISO YYYY-MM-DD */
+  date: string
+  /** Chiave di conferma stabile: id:type:data-evento (permanente) */
   key: string
 }
 
@@ -22,18 +25,16 @@ function todayLocalISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
-/** Legge le chiavi gia' confermate dal localStorage, scartando quelle
- * di giorni diversi da oggi (cosi' la lista non cresce all'infinito). */
-function loadAck(today: string): Set<string> {
+function formatIT(iso: string): string {
+  const [y, m, d] = iso.split("-")
+  return `${d}/${m}/${y}`
+}
+
+function loadAck(): Set<string> {
   try {
     const raw = localStorage.getItem(ACK_KEY)
     if (!raw) return new Set()
-    const arr: string[] = JSON.parse(raw)
-    const kept = arr.filter(k => k.endsWith(`:${today}`))
-    if (kept.length !== arr.length) {
-      localStorage.setItem(ACK_KEY, JSON.stringify(kept))
-    }
-    return new Set(kept)
+    return new Set<string>(JSON.parse(raw))
   } catch {
     return new Set()
   }
@@ -47,36 +48,58 @@ function persistAck(acked: Set<string>) {
   }
 }
 
+/** "Epoca" della feature: il giorno in cui questa logica e' stata vista per
+ * la prima volta su questo browser. Solo gli eventi (inizio/fine) con data
+ * >= epoca generano avvisi, cosi' al primo caricamento NON esplodono popup
+ * per tutti i regimi storici gia' iniziati/terminati. I regimi futuri hanno
+ * sempre data >= epoca, quindi funzionano sempre. */
+function ensureEpoch(): string {
+  try {
+    let e = localStorage.getItem(EPOCH_KEY)
+    if (!e) {
+      e = todayLocalISO()
+      localStorage.setItem(EPOCH_KEY, e)
+    }
+    return e
+  } catch {
+    return todayLocalISO()
+  }
+}
+
 /**
- * Mostra un popup quando un regime INIZIA oggi o e' al suo ULTIMO giorno
- * (end_date === oggi). Gli avvisi compaiono uno alla volta a ogni accesso
- * alla dashboard finche' non si clicca la spunta; ogni avviso richiede la
- * propria conferma. Lo stato "visto" e' persistito in localStorage per
- * giorno, quindi sopravvive ai reload ma riparte ogni nuovo giorno.
+ * Mostra un popup quando un regime INIZIA (start_date raggiunto) o e' arrivato
+ * al suo ULTIMO giorno previsto (end_date raggiunto). A differenza di un avviso
+ * "una tantum", l'avviso **persiste anche nei giorni successivi** finche' non
+ * viene spuntato UNA volta (conferma permanente in localStorage). Si risolve da
+ * solo anche se il regime viene prolungato (end_date spostato nel futuro) o
+ * eliminato. Gli avvisi compaiono uno alla volta, in coda.
  */
 export function RegimenAlerts() {
   const today = useMemo(() => todayLocalISO(), [])
-  // Regimi attivi oggi (start <= oggi <= end): include sia chi inizia oggi
-  // sia chi finisce oggi (l'ultimo giorno e' ancora "attivo").
-  const { data: regimens } = useRegimens({ active_on: today, include_ended: true })
+  const [epoch] = useState(ensureEpoch)
+  // Tutti i regimi (anche terminati): serve per avvisare di fine anche DOPO
+  // la scadenza, che `active_on=oggi` escluderebbe.
+  const { data: regimens } = useRegimens({ include_ended: true })
 
-  const [acked, setAcked] = useState<Set<string>>(() => loadAck(today))
+  const [acked, setAcked] = useState<Set<string>>(loadAck)
 
   const alerts = useMemo<RegimenAlert[]>(() => {
     if (!regimens) return []
     const out: RegimenAlert[] = []
     for (const r of regimens) {
-      // I piani sintetici dal diario (id negativi) non vanno avvisati.
+      // Piani sintetici dal diario (id negativi): niente avvisi.
       if (r.id < 0) continue
-      if (r.start_date === today) {
-        out.push({ regimen: r, type: "start", key: `${r.id}:start:${today}` })
+      // Inizio raggiunto: epoca <= start_date <= oggi
+      if (r.start_date && r.start_date >= epoch && r.start_date <= today) {
+        out.push({ regimen: r, type: "start", date: r.start_date, key: `${r.id}:start:${r.start_date}` })
       }
-      if (r.end_date === today) {
-        out.push({ regimen: r, type: "end", key: `${r.id}:end:${today}` })
+      // Ultimo giorno raggiunto o passato: epoca <= end_date <= oggi
+      if (r.end_date && r.end_date >= epoch && r.end_date <= today) {
+        out.push({ regimen: r, type: "end", date: r.end_date, key: `${r.id}:end:${r.end_date}` })
       }
     }
     return out
-  }, [regimens, today])
+  }, [regimens, today, epoch])
 
   // Primo avviso non ancora confermato.
   const current = alerts.find(a => !acked.has(a.key)) ?? null
@@ -85,6 +108,7 @@ export function RegimenAlerts() {
   return (
     <RegimenAlertDialog
       alert={current}
+      today={today}
       onAck={() => {
         setAcked(prev => {
           const next = new Set(prev)
@@ -97,12 +121,32 @@ export function RegimenAlerts() {
   )
 }
 
-function RegimenAlertDialog({ alert, onAck }: { alert: RegimenAlert; onAck: () => void }) {
+function RegimenAlertDialog({
+  alert,
+  today,
+  onAck,
+}: {
+  alert: RegimenAlert
+  today: string
+  onAck: () => void
+}) {
   useBodyScrollLock()
   const navigate = useNavigate()
-  const { regimen, type } = alert
+  const { regimen, type, date } = alert
   const isStart = type === "start"
+  const isToday = date === today
   const kindLabel = KIND_LABELS[regimen.kind] ?? regimen.kind
+
+  let message: string
+  if (isStart) {
+    message = isToday
+      ? "Oggi è il primo giorno previsto per questo regime."
+      : `Avrebbe dovuto iniziare il ${formatIT(date)}.`
+  } else {
+    message = isToday
+      ? "Oggi è l'ultimo giorno previsto: ricordati di interromperlo o di prolungarlo."
+      : `L'ultimo giorno previsto era il ${formatIT(date)}: ricordati di interromperlo o di prolungarlo.`
+  }
 
   // Ack via spunta: appena selezionata, conferma e passa al prossimo.
   const [checked, setChecked] = useState(false)
@@ -121,7 +165,7 @@ function RegimenAlertDialog({ alert, onAck }: { alert: RegimenAlert; onAck: () =
             <span
               className={`inline-block h-2.5 w-2.5 rounded-full ${isStart ? "bg-emerald-500" : "bg-amber-500"}`}
             />
-            {isStart ? "Un regime inizia oggi" : "Ultimo giorno di un regime"}
+            {isStart ? "Un regime è iniziato" : "Ultimo giorno di un regime"}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -131,11 +175,7 @@ function RegimenAlertDialog({ alert, onAck }: { alert: RegimenAlert; onAck: () =
             {regimen.dose && (
               <div className="text-sm text-muted-foreground">{regimen.dose}</div>
             )}
-            <div className="mt-1 text-sm">
-              {isStart
-                ? "Oggi è il primo giorno previsto per questo regime."
-                : "Oggi è l'ultimo giorno previsto: ricordati di interromperlo o di prolungarlo."}
-            </div>
+            <div className="mt-1 text-sm">{message}</div>
             {regimen.notes && (
               <div className="mt-1 text-sm text-muted-foreground italic">{regimen.notes}</div>
             )}
@@ -148,7 +188,7 @@ function RegimenAlertDialog({ alert, onAck }: { alert: RegimenAlert; onAck: () =
               checked={checked}
               onChange={e => setChecked(e.target.checked)}
             />
-            Ho letto l'avviso, non mostrarlo più oggi
+            Ho letto l'avviso, non mostrarlo più
           </label>
 
           <div className="flex justify-end gap-2">
