@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -252,6 +252,21 @@ export default function Sleep() {
     })
     .sort((a, b) => (a.day < b.day ? -1 : 1))
 
+  // Default: mostra l'ultima notte registrata appena i dati arrivano,
+  // senza forzare la selezione se l'utente l'ha gia' cambiata o chiusa.
+  const lastNightYmd = useMemo(() => {
+    if (chartData.length === 0) return null
+    const d = new Date(String(chartData[chartData.length - 1].day))
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+  }, [chartData])
+  const didInitSelection = useRef(false)
+  useEffect(() => {
+    if (!didInitSelection.current && lastNightYmd) {
+      didInitSelection.current = true
+      setSelectedYmd(lastNightYmd)
+    }
+  }, [lastNightYmd])
+
   // Stage 0 ("A letto") e 1 ("Addormentato non specificato") sono
   // wrapper che coprono l'intera notte: Apple Salute li sovrascrive coi
   // sample dettagliati Core/Deep/REM/Sveglio. Sommarli nel chart e' un
@@ -326,7 +341,9 @@ export default function Sleep() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-base">
-              Andamento notte · {formatDate(selectedYmd)}
+              <span className="block sm:inline">Andamento notte</span>
+              <span className="hidden sm:inline"> · </span>
+              <span className="block sm:inline">{formatDate(selectedYmd)}</span>
             </CardTitle>
             <div className="flex items-center gap-2">
               <Link
