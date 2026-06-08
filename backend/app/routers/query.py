@@ -425,6 +425,30 @@ async def workouts_missing_routes(
     }
 
 
+def _dedup_distance_rows(dist_rows):
+    """Drop overlapping/duplicate distance samples before computing splits.
+
+    Some workouts (notably older Apple Watch runs) have the same distance
+    recorded twice in HealthKit as two overlapping series at different bin
+    granularities (e.g. one ~5-min-binned, one ~10-min-binned). Summing both
+    inflates the total (~2x) and, since the intervals interleave in time,
+    produces negative split durations and absurd paces.
+
+    Rows must be ordered by start_date. We greedily keep a single
+    non-overlapping chain: a sample is dropped if it starts before the end of
+    the last accepted sample (i.e. its time window is already covered). On a
+    clean single-series workout nothing is dropped.
+    """
+    kept = []
+    frontier = None  # end_date of the last accepted sample
+    for r in dist_rows:
+        if frontier is not None and r.start_date < frontier:
+            continue
+        kept.append(r)
+        frontier = r.end_date
+    return kept
+
+
 @router.get("/workouts/by-uuid/{workout_uuid}/splits")
 async def workout_splits(workout_uuid: str, distance_km: float = 1.0, db: AsyncSession = Depends(get_db)):
     """
@@ -448,6 +472,7 @@ async def workout_splits(workout_uuid: str, distance_km: float = 1.0, db: AsyncS
     dist_rows = (await db.execute(dist_stmt)).all()
     if not dist_rows:
         return {"splits": [], "total_distance": 0, "note": "no distance samples in range"}
+    dist_rows = _dedup_distance_rows(dist_rows)
 
     # Get heart rate samples in range
     hr_stmt = (
@@ -477,11 +502,14 @@ async def workout_splits(workout_uuid: str, distance_km: float = 1.0, db: AsyncS
             # Average HR during this split
             hr_in_split = [h.value for h in hr_rows if split_start <= h.start_date <= split_end]
             avg_hr = sum(hr_in_split) / len(hr_in_split) if hr_in_split else None
-            # Pace in sec/km
-            pace_sec_per_km = duration / distance_km if duration > 0 else None
+            # Pace in sec/km — divide by the distance actually covered in this
+            # split, not the nominal 1 km: with coarse samples (older workouts)
+            # a split can overshoot to ~1.3-1.7 km and pace/1km would overstate.
+            covered_km = (cumulative - split_start_distance) / 1000
+            pace_sec_per_km = duration / covered_km if duration > 0 and covered_km > 0 else None
             splits.append({
                 "n": split_num,
-                "distance_km": round((cumulative - split_start_distance) / 1000, 3),
+                "distance_km": round(covered_km, 3),
                 "duration_seconds": duration,
                 "pace_sec_per_km": pace_sec_per_km,
                 "avg_heart_rate": round(avg_hr, 1) if avg_hr else None,
@@ -661,6 +689,7 @@ async def _splits_for_range(db: AsyncSession, workout_start, workout_end) -> lis
     dist_rows = (await db.execute(dist_stmt)).all()
     if not dist_rows:
         return []
+    dist_rows = _dedup_distance_rows(dist_rows)
     hr_stmt = (
         select(HealthSample.start_date, HealthSample.value)
         .where(HealthSample.type == "HKQuantityTypeIdentifierHeartRate")
@@ -684,7 +713,8 @@ async def _splits_for_range(db: AsyncSession, workout_start, workout_end) -> lis
             duration = (split_end - split_start).total_seconds()
             hr_in_split = [h.value for h in hr_rows if split_start <= h.start_date <= split_end]
             avg_hr = sum(hr_in_split) / len(hr_in_split) if hr_in_split else None
-            pace_sec_per_km = duration if duration > 0 else None
+            covered_km = (cumulative - split_start_distance) / 1000
+            pace_sec_per_km = duration / covered_km if duration > 0 and covered_km > 0 else None
             splits.append({
                 "n": split_num,
                 "pace_sec_per_km": pace_sec_per_km,
