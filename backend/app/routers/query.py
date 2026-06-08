@@ -428,17 +428,29 @@ async def workouts_missing_routes(
 def _dedup_distance_rows(dist_rows):
     """Drop overlapping/duplicate distance samples before computing splits.
 
-    Some workouts (notably older Apple Watch runs) have the same distance
-    recorded twice in HealthKit as two overlapping series at different bin
-    granularities (e.g. one ~5-min-binned, one ~10-min-binned). Summing both
-    inflates the total (~2x) and, since the intervals interleave in time,
-    produces negative split durations and absurd paces.
+    Many older runs (2015-2018) were recorded while carrying BOTH an Apple
+    Watch and an iPhone: each device wrote its own DistanceWalkingRunning
+    series for the same run (the Watch in ~5-min bins tied to the workout, the
+    iPhone pedometer in ~10-min bins). Summing both inflates the total (~2x)
+    and, since the intervals interleave in time, produces negative split
+    durations and absurd paces.
 
-    Rows must be ordered by start_date. We greedily keep a single
-    non-overlapping chain: a sample is dropped if it starts before the end of
-    the last accepted sample (i.e. its time window is already covered). On a
-    clean single-series workout nothing is dropped.
+    Resolution, in order:
+    1. If any sample comes from the Apple Watch, keep only Watch samples — it
+       is the authoritative workout source (the iPhone in-pocket pedometer is
+       less accurate). Otherwise keep all rows (run recorded on iPhone only).
+    2. Greedily keep a single non-overlapping chain: drop a sample that starts
+       before the end of the last accepted one (its window is already covered).
+
+    On a clean single-source workout, step 1 is a no-op and step 2 drops
+    nothing. Rows must be ordered by start_date.
     """
+    def is_watch(r):
+        return (r.source_name or "").lower().startswith("apple watch")
+
+    if any(is_watch(r) for r in dist_rows):
+        dist_rows = [r for r in dist_rows if is_watch(r)]
+
     kept = []
     frontier = None  # end_date of the last accepted sample
     for r in dist_rows:
@@ -463,7 +475,7 @@ async def workout_splits(workout_uuid: str, distance_km: float = 1.0, db: AsyncS
 
     # Get all distance samples within workout range, ordered
     dist_stmt = (
-        select(HealthSample.start_date, HealthSample.end_date, HealthSample.value)
+        select(HealthSample.start_date, HealthSample.end_date, HealthSample.value, HealthSample.source_name)
         .where(HealthSample.type == "HKQuantityTypeIdentifierDistanceWalkingRunning")
         .where(HealthSample.start_date >= workout.start_date)
         .where(HealthSample.end_date <= workout.end_date)
@@ -680,7 +692,7 @@ async def _splits_for_range(db: AsyncSession, workout_start, workout_end) -> lis
     for the records endpoint without going through the HTTP layer. Returns
     1-km splits; does not include total_distance (we don't need it here)."""
     dist_stmt = (
-        select(HealthSample.start_date, HealthSample.end_date, HealthSample.value)
+        select(HealthSample.start_date, HealthSample.end_date, HealthSample.value, HealthSample.source_name)
         .where(HealthSample.type == "HKQuantityTypeIdentifierDistanceWalkingRunning")
         .where(HealthSample.start_date >= workout_start)
         .where(HealthSample.end_date <= workout_end)
