@@ -102,6 +102,23 @@ function formatPaceMMSS(paceMinPerKm: number): string {
   return s === 60 ? `${m + 1}:00` : `${m}:${String(s).padStart(2, "0")}`
 }
 
+/** Distanza in metri fra due coordinate (Haversine). */
+function haversineM(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLon = toRad(lon2 - lon1)
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(a))
+}
+
+/** Formatta una distanza in metri come "850 m" / "1.05 km". */
+function formatDistanceM(m: number): string {
+  return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`
+}
+
 /** Intervallo X (epoch ms) selezionato trascinando su un grafico. */
 type ChartRange = { start: number; end: number }
 
@@ -577,10 +594,42 @@ export default function WorkoutDetail() {
     push("Oscillazione vert.", verticalOscChartData, "#86efac", v => `${v.toFixed(1)} cm`)
     push("Contatto col suolo", groundContactChartData, "#4ade80", v => `${Math.round(v)} ms`)
     push("Lunghezza falcata", strideLengthChartData, "#16a34a", v => `${v.toFixed(1)} cm`)
+
+    // Distanza percorsa nell'intervallo: dalla route GPS (Haversine sui punti
+    // nella finestra) se disponibile, altrimenti integrando la velocita'.
+    let distanceM: number | null = null
+    const pts = route?.points
+    if (pts && pts.length > 1) {
+      let d = 0
+      let prev: { lat: number; lon: number } | null = null
+      for (const p of pts) {
+        const t = new Date(p.ts).getTime()
+        if (t < selection.start || t > selection.end) {
+          if (t > selection.end) break
+          continue
+        }
+        if (prev) d += haversineM(prev.lat, prev.lon, p.lat, p.lon)
+        prev = { lat: p.lat, lon: p.lon }
+      }
+      if (prev) distanceM = d
+    }
+    if (distanceM === null && speedChartData.length > 1) {
+      let d = 0
+      for (let i = 1; i < speedChartData.length; i++) {
+        const a = speedChartData[i - 1]
+        const b = speedChartData[i]
+        if (a.t < selection.start || b.t > selection.end) continue
+        const dtS = (b.t - a.t) / 1000
+        d += ((a.value + b.value) / 2 / 3.6) * dtS // km/h -> m/s * s
+      }
+      distanceM = d
+    }
+
     return {
       durationS: Math.round((selection.end - selection.start) / 1000),
       startMs: selection.start,
       endMs: selection.end,
+      distanceM,
       items,
     }
   }, [
@@ -593,6 +642,7 @@ export default function WorkoutDetail() {
     verticalOscChartData,
     groundContactChartData,
     strideLengthChartData,
+    route,
   ])
 
   const hasAnyChart =
@@ -1238,6 +1288,9 @@ export default function WorkoutDetail() {
               <p className="text-xs text-muted-foreground tabular-nums">
                 {msAxisFmt(selectionStats.startMs)}–{msAxisFmt(selectionStats.endMs)} ·{" "}
                 {formatDuration(selectionStats.durationS)}
+                {selectionStats.distanceM !== null && (
+                  <> · {formatDistanceM(selectionStats.distanceM)}</>
+                )}
               </p>
             </div>
             <Button
