@@ -8,8 +8,12 @@ existing workout by start time, and backfills:
 
   - the GPS route       -> POST /api/v1/workouts/by-uuid/{uuid}/route   (idempotent UPSERT)
   - calories            -> PATCH /api/v1/workouts/by-uuid/{uuid}        (only if currently NULL/0)
-  - per-second HR        -> POST /api/v1/samples/batch (HKQuantityTypeIdentifierHeartRate,
-                            source_name='Garmin', deterministic uuid5 -> ON CONFLICT DO NOTHING)
+  - per-second HR        -> POST /api/v1/samples/batch (HKQuantityTypeIdentifierHeartRate)
+  - per-second speed     -> POST /api/v1/samples/batch (HKQuantityTypeIdentifierRunningSpeed,
+                            m/s, GPS spikes > 10 m/s dropped) so the workout-detail
+                            speed chart renders for these old runs too
+    (samples: source_name='Garmin', deterministic uuid5 -> ON CONFLICT DO NOTHING)
+  - source_name          -> PATCH to 'Endomondo (Garmin)' to mark the enriched workout
 
 Matching is by START TIME (median offset observed: ~2s); distance is only used
 to reject false-start FIT fragments (a short file recorded right before the real
@@ -48,6 +52,10 @@ SOURCE_BUNDLE_ID = "com.garmin.connect"
 ENRICHED_SOURCE = "Endomondo (Garmin)"
 UUID_PREFIX = "garmin-fit"
 HR_TYPE = "HKQuantityTypeIdentifierHeartRate"
+SPEED_TYPE = "HKQuantityTypeIdentifierRunningSpeed"
+# Drop per-second speed readings above this (m/s) as GPS spikes — 10 m/s = 36 km/h,
+# well beyond any sustained human running speed, so anything higher is noise.
+MAX_RUNNING_SPEED_MS = 10.0
 SEMICIRCLE_TO_DEG = 180.0 / 2**31
 
 # Inner zip inside the Garmin export holding the raw .fit uploads.
@@ -69,11 +77,13 @@ def parse_fit(raw: bytes, name: str) -> dict | None:
           "sport": str | None,
           "points": [{lat, lon, ts, alt?, speed?}, ...],   # GPS track
           "hr": [{ts, bpm}, ...],                          # per-second HR (may be empty)
+          "speed": [{ts, mps}, ...],                       # per-second running speed (m/s)
         }
     """
     session: dict = {}
     points: list[dict] = []
     hr: list[dict] = []
+    speed: list[dict] = []
     first_ts: datetime | None = None
 
     try:
@@ -112,6 +122,11 @@ def parse_fit(raw: bytes, name: str) -> dict | None:
                     bpm = d.get("heart_rate")
                     if bpm is not None:
                         hr.append({"ts": ts, "bpm": int(bpm)})
+                    mps = d.get("enhanced_speed")
+                    if mps is None:
+                        mps = d.get("speed")
+                    if mps is not None and float(mps) <= MAX_RUNNING_SPEED_MS:
+                        speed.append({"ts": ts, "mps": round(float(mps), 3)})
     except Exception as exc:  # noqa: BLE001 - corrupt/partial FIT, skip gracefully
         print(f"  ! skip {name}: parse error: {exc}", file=sys.stderr)
         return None
@@ -129,6 +144,7 @@ def parse_fit(raw: bytes, name: str) -> dict | None:
         "sport": session.get("sport"),
         "points": points,
         "hr": hr,
+        "speed": speed,
     }
 
 
@@ -254,16 +270,19 @@ def match_fits(fits: list[dict], workouts: list[dict], time_tol: float):
     return matches, unmatched
 
 
-def build_hr_samples(fit: dict, workout_uuid: str) -> list[dict]:
+def _build_samples(series: list[dict], val_key: str, kind: str, hk_type: str,
+                   unit: str, workout_uuid: str) -> list[dict]:
+    """Generic per-record quantity sample builder. `kind` namespaces the uuid5
+    so HR and speed samples on the same timestamp don't collide."""
     samples = []
-    for h in fit["hr"]:
-        ts = _iso(h["ts"])
-        sid = uuid.uuid5(uuid.NAMESPACE_URL, f"{UUID_PREFIX}:hr:{workout_uuid}:{ts}")
+    for s in series:
+        ts = _iso(s["ts"])
+        sid = uuid.uuid5(uuid.NAMESPACE_URL, f"{UUID_PREFIX}:{kind}:{workout_uuid}:{ts}")
         samples.append({
             "uuid": str(sid),
-            "type": HR_TYPE,
-            "value": float(h["bpm"]),
-            "unit": "count/min",
+            "type": hk_type,
+            "value": float(s[val_key]),
+            "unit": unit,
             "start_date": ts,
             "end_date": ts,
             "source_name": SOURCE_NAME,
@@ -271,6 +290,14 @@ def build_hr_samples(fit: dict, workout_uuid: str) -> list[dict]:
             "metadata": {"import": "garmin_fit_v1", "workout_uuid": workout_uuid},
         })
     return samples
+
+
+def build_hr_samples(fit: dict, workout_uuid: str) -> list[dict]:
+    return _build_samples(fit["hr"], "bpm", "hr", HR_TYPE, "count/min", workout_uuid)
+
+
+def build_speed_samples(fit: dict, workout_uuid: str) -> list[dict]:
+    return _build_samples(fit["speed"], "mps", "speed", SPEED_TYPE, "m/s", workout_uuid)
 
 
 # --------------------------------------------------------------------------- #
@@ -306,7 +333,7 @@ def patch_source(api: str, wuuid: str, source_name: str):
     return r.json()
 
 
-def post_hr(api: str, samples: list[dict], chunk: int = 1000) -> dict:
+def post_samples(api: str, samples: list[dict], chunk: int = 1000) -> dict:
     inserted = dups = 0
     for i in range(0, len(samples), chunk):
         batch = samples[i : i + chunk]
@@ -380,6 +407,8 @@ def main() -> int:
     ]
     hr_targets = [(fit, w) for fit, w in matches if fit["hr"]]
     total_hr_pts = sum(len(fit["hr"]) for fit, _ in hr_targets)
+    speed_targets = [(fit, w) for fit, w in matches if fit["speed"]]
+    total_speed_pts = sum(len(fit["speed"]) for fit, _ in speed_targets)
     src_targets = [
         (fit, w) for fit, w in matches
         if (w.get("source_name") or "") != ENRICHED_SOURCE
@@ -388,6 +417,7 @@ def main() -> int:
     print(f"\nRoutes to write:          {len(matches)}")
     print(f"Calories to backfill:     {len(cal_targets)} (where workout has none)")
     print(f"Workouts with HR series:  {len(hr_targets)}  ({total_hr_pts} HR samples)")
+    print(f"Workouts with speed series: {len(speed_targets)}  ({total_speed_pts} RunningSpeed samples)")
     print(f"Source -> '{ENRICHED_SOURCE}': {len(src_targets)} (already stamped: {len(matches) - len(src_targets)})")
 
     if not args.commit:
@@ -419,8 +449,16 @@ def main() -> int:
         all_hr: list[dict] = []
         for fit, w in hr_targets:
             all_hr.extend(build_hr_samples(fit, str(w["uuid"])))
-        res = post_hr(args.api, all_hr)
+        res = post_samples(args.api, all_hr)
         print(f"  HR samples: {res['inserted']} inserted, {res['duplicates']} duplicates")
+
+    if speed_targets:
+        print("Writing RunningSpeed samples...")
+        all_sp: list[dict] = []
+        for fit, w in speed_targets:
+            all_sp.extend(build_speed_samples(fit, str(w["uuid"])))
+        res = post_samples(args.api, all_sp)
+        print(f"  speed samples: {res['inserted']} inserted, {res['duplicates']} duplicates")
 
     print(f"Stamping source_name '{ENRICHED_SOURCE}'...")
     src_ok = 0
