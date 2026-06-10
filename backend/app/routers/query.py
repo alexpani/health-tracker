@@ -298,6 +298,7 @@ async def workout_by_uuid(workout_uuid: str, db: AsyncSession = Depends(get_db))
 class WorkoutUpdate(BaseModel):
     notes: str | None = None
     title: str | None = None
+    total_energy_burned: float | None = None
 
 
 @router.patch("/workouts/by-uuid/{workout_uuid}")
@@ -312,12 +313,19 @@ async def update_workout(workout_uuid: str, body: WorkoutUpdate, db: AsyncSessio
         row.notes = data["notes"] if data["notes"] else None
     if "title" in data:
         row.title = data["title"] if data["title"] else None
+    if "total_energy_burned" in data:
+        row.total_energy_burned = data["total_energy_burned"]
     await db.commit()
     await db.refresh(row)
     return {
         "uuid": str(row.uuid),
         "title": row.title,
         "notes": row.notes,
+        "total_energy_burned": (
+            float(row.total_energy_burned)
+            if row.total_energy_burned is not None
+            else None
+        ),
     }
 
 

@@ -192,7 +192,7 @@ Client APNs JWT-based via lib `aioapns`. Config: `apns_key_id`, `apns_team_id`, 
 - `GET /api/v1/workouts/by-uuid/{uuid}/splits?distance_km=1.0` — per-km splits with duration, pace, avg HR
 - `DELETE /api/v1/workouts/by-uuid/{uuid}` — returns full snapshot for undo
 - `POST /api/v1/workouts/bulk-delete` body `{uuids:[...]}` — bulk delete (used by iOS anchored sync to propagate HealthKit deletions; PG trigger auto-blacklists UUIDs)
-- `PATCH /api/v1/workouts/by-uuid/{uuid}` body `{title?:"...", notes?:"..."}` — update editable fields (title, notes). Empty string clears.
+- `PATCH /api/v1/workouts/by-uuid/{uuid}` body `{title?:"...", notes?:"...", total_energy_burned?:N}` — update editable fields. `title`/`notes` empty string clears; `total_energy_burned` for calorie backfill (es. import Garmin FIT su workout senza calorie).
 - `GET /api/v1/workouts/by-uuid/{uuid}/route` — return GPS route `{points:[…], point_count}`. 404 se non ancora ingestito; ritorna `{points: []}` se l'app iOS ha verificato che il workout non ha dati GPS (indoor / sorgente esterna).
 - `POST /api/v1/workouts/by-uuid/{uuid}/route` body `{points:[{lat,lon,ts,alt?,h_acc?,v_acc?,speed?,course?}, …]}` — ingest GPS route (idempotent UPSERT). Chiamato dall'app iOS sia per i workout appena sincronizzati (priority pass) sia dal backfill loop. Posting con `points: []` marca il workout come "checked, no GPS" così non viene ri-controllato.
 - `GET /api/v1/workouts/missing-routes?limit=N&before=<iso>` — lista UUID di workout senza entry in `workout_routes`, most-recent first. Cursor `before` per paginazione. Usato dal backfill loop iOS per crawlare i workout storici.
@@ -452,6 +452,14 @@ Esiste anche una variante compatta del recupero (`components/RecoveryWidget.tsx`
 - Source: `source_name="Endomondo"`, metadata includes `{"source":"Endomondo","endomondo_source": <TRACK_MOBILE|INPUT_MANUAL|IMPORT_GPX|IMPORT_GARMIN>}`
 - Timestamps in the CSV are UTC; stored as TIMESTAMPTZ (display converts to local)
 - 302 workouts imported (2011-10-08 → 2015-09-07) — the first Apple-recorded workout is 2015-09-17
+
+### Garmin Connect FIT import (route/calorie/HR backfill)
+
+- Script: `backend/scripts/import_garmin_routes.py` (dep `fitdecode`). Gira dal Mac contro l'API. Dry-run di default, `--commit` per scrivere.
+- Uso: `python -m scripts.import_garmin_routes --zip <garmin_export.zip> --api http://192.168.68.166:8000 [--start-year 2013 --end-year 2014] [--time-tol 300] [--commit]` (oppure `--fit-dir <dir>` con i `.fit` già estratti).
+- **Scopo**: i run 2013-2014 erano già in DB importati da Endomondo (distanza+durata) ma **senza GPS / calorie / HR**. L'export Garmin contiene gli stessi run con i FIT originali. Lo script li **arricchisce** (non duplica): legge ogni FIT (entra anche nel nested `DI-Connect-Uploaded-Files/UploadedFiles_*.zip`), e per ogni FIT con GPS lo matcha al workout esistente per **start time** (offset mediano ~2s), usando la distanza solo per scartare i FIT-frammento/false-start (`fit_dist < 40% workout_dist`). Match 1:1, niente riuso.
+- Scrive: route → `POST /workouts/by-uuid/{uuid}/route` (UPSERT idempotente); calorie → `PATCH /workouts/by-uuid/{uuid}` (`total_energy_burned`, **solo se mancante**); HR per-secondo → `POST /samples/batch` (`HKQuantityTypeIdentifierHeartRate`, `source_name='Garmin'`, uuid5 deterministico → `ON CONFLICT DO NOTHING`). Semicircles FIT → gradi; altitude/speed dal record (enhanced_* preferito).
+- Idempotente e ri-eseguibile. Risultato 2013-2014: **135 route** (~422 punti/ciascuna), **134 calorie** backfillate, **1897 sample HR** (3 run; il Forerunner dell'epoca quasi mai aveva la fascia). Restano fuori: 1 run **solo-Garmin** (2013-06-22, nessun workout Endomondo da arricchire) e i frammenti/tracce parziali (es. 2014-06-13, 1865m su 5805m reali).
 
 ---
 

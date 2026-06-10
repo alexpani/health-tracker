@@ -10,7 +10,7 @@ HealthKit is only accessible from native iOS apps. This project lets you:
 4. **Write** body measurements and nutrition data from web apps back to Apple Health
 5. **Delete** samples both locally and on Apple Health from the dashboard
 6. **Filter spurious data** at ingest via DB-configurable rules + UUID blacklist (auto-populated by PG trigger on delete)
-7. **Bulk import** historical data from legacy apps (e.g., Endomondo)
+7. **Bulk import** historical data from legacy apps (e.g., Endomondo) and enrich it with GPS routes/calories/HR from a Garmin Connect export (`backend/scripts/import_garmin_routes.py`)
 8. **Edit workout notes** persistently
 9. **Chat with Claude about your health data** via a dedicated MCP server (read-only) accessible from Claude Desktop, Claude Code and claude.ai connector
 
