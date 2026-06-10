@@ -299,11 +299,13 @@ class WorkoutUpdate(BaseModel):
     notes: str | None = None
     title: str | None = None
     total_energy_burned: float | None = None
+    source_name: str | None = None
 
 
 @router.patch("/workouts/by-uuid/{workout_uuid}")
 async def update_workout(workout_uuid: str, body: WorkoutUpdate, db: AsyncSession = Depends(get_db)):
-    """Update editable fields of a workout (title, notes). Empty string clears the field."""
+    """Update editable fields of a workout (title, notes, total_energy_burned,
+    source_name). Empty string clears title/notes."""
     stmt = select(Workout).where(Workout.uuid == workout_uuid)
     row = (await db.execute(stmt)).scalar_one_or_none()
     if not row:
@@ -315,12 +317,15 @@ async def update_workout(workout_uuid: str, body: WorkoutUpdate, db: AsyncSessio
         row.title = data["title"] if data["title"] else None
     if "total_energy_burned" in data:
         row.total_energy_burned = data["total_energy_burned"]
+    if "source_name" in data and data["source_name"]:
+        row.source_name = data["source_name"]
     await db.commit()
     await db.refresh(row)
     return {
         "uuid": str(row.uuid),
         "title": row.title,
         "notes": row.notes,
+        "source_name": row.source_name,
         "total_energy_burned": (
             float(row.total_energy_burned)
             if row.total_energy_burned is not None

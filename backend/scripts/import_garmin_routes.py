@@ -44,6 +44,8 @@ import requests
 
 SOURCE_NAME = "Garmin"
 SOURCE_BUNDLE_ID = "com.garmin.connect"
+# source_name stamped on enriched workouts so they stay filterable/re-selectable.
+ENRICHED_SOURCE = "Endomondo (Garmin)"
 UUID_PREFIX = "garmin-fit"
 HR_TYPE = "HKQuantityTypeIdentifierHeartRate"
 SEMICIRCLE_TO_DEG = 180.0 / 2**31
@@ -294,6 +296,16 @@ def patch_calories(api: str, wuuid: str, calories: float):
     return r.json()
 
 
+def patch_source(api: str, wuuid: str, source_name: str):
+    r = requests.patch(
+        f"{api}/api/v1/workouts/by-uuid/{wuuid}",
+        json={"source_name": source_name},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
 def post_hr(api: str, samples: list[dict], chunk: int = 1000) -> dict:
     inserted = dups = 0
     for i in range(0, len(samples), chunk):
@@ -368,10 +380,15 @@ def main() -> int:
     ]
     hr_targets = [(fit, w) for fit, w in matches if fit["hr"]]
     total_hr_pts = sum(len(fit["hr"]) for fit, _ in hr_targets)
+    src_targets = [
+        (fit, w) for fit, w in matches
+        if (w.get("source_name") or "") != ENRICHED_SOURCE
+    ]
 
     print(f"\nRoutes to write:          {len(matches)}")
     print(f"Calories to backfill:     {len(cal_targets)} (where workout has none)")
     print(f"Workouts with HR series:  {len(hr_targets)}  ({total_hr_pts} HR samples)")
+    print(f"Source -> '{ENRICHED_SOURCE}': {len(src_targets)} (already stamped: {len(matches) - len(src_targets)})")
 
     if not args.commit:
         print("\n(dry-run) Re-run with --commit to actually write.")
@@ -404,6 +421,16 @@ def main() -> int:
             all_hr.extend(build_hr_samples(fit, str(w["uuid"])))
         res = post_hr(args.api, all_hr)
         print(f"  HR samples: {res['inserted']} inserted, {res['duplicates']} duplicates")
+
+    print(f"Stamping source_name '{ENRICHED_SOURCE}'...")
+    src_ok = 0
+    for fit, w in src_targets:
+        try:
+            patch_source(args.api, str(w["uuid"]), ENRICHED_SOURCE)
+            src_ok += 1
+        except requests.RequestException as e:
+            print(f"  ! source update failed for {w['uuid']}: {e}", file=sys.stderr)
+    print(f"  source updated: {src_ok}/{len(src_targets)}")
 
     print("\nDone.")
     return 0
