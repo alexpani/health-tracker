@@ -95,6 +95,13 @@ function syncByNearestTime(
   return best
 }
 
+/** Formatta un passo (minuti/km, valore float) come "m:ss". */
+function formatPaceMMSS(paceMinPerKm: number): string {
+  const m = Math.floor(paceMinPerKm)
+  const s = Math.round((paceMinPerKm - m) * 60)
+  return s === 60 ? `${m + 1}:00` : `${m}:${String(s).padStart(2, "0")}`
+}
+
 /** Intervallo X (epoch ms) selezionato trascinando su un grafico. */
 type ChartRange = { start: number; end: number }
 
@@ -128,6 +135,7 @@ function MetricChart({
   height = 220,
   yDomain,
   yTickFormatter,
+  yReversed = false,
   tooltipFormatter,
   xAxisProps,
   msAxisFmt,
@@ -139,6 +147,7 @@ function MetricChart({
   height?: number
   yDomain?: [string | number, string | number]
   yTickFormatter?: (v: number) => string
+  yReversed?: boolean
   tooltipFormatter: (v: number) => [string, string]
   xAxisProps: object
   msAxisFmt: (ms: number) => string
@@ -158,7 +167,7 @@ function MetricChart({
       >
         <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
         <XAxis {...xAxisProps} />
-        <YAxis tick={{ fontSize: 12 }} domain={yDomain} tickFormatter={yTickFormatter} />
+        <YAxis tick={{ fontSize: 12 }} domain={yDomain} tickFormatter={yTickFormatter} reversed={yReversed} />
         <Tooltip labelFormatter={msAxisFmt} formatter={tooltipFormatter} />
         {activeRange && (
           <ReferenceArea
@@ -461,6 +470,17 @@ export default function WorkoutDetail() {
       .sort((a, b) => a.t - b.t)
   }, [runningSpeed.data])
 
+  // Passo (min/km) derivato dalla velocità: per la corsa il passo e' piu'
+  // leggibile della velocita'. I punti fermi (km/h <= 0) producono passo
+  // infinito → esclusi (gap nella linea).
+  const paceChartData = useMemo(
+    () =>
+      speedChartData
+        .filter(p => p.value > 0)
+        .map(p => ({ time: p.time, t: p.t, value: 60 / p.value })),
+    [speedChartData],
+  )
+
   const powerChartData = useMemo(() => {
     const arr = (runningPower.data?.data as Sample[] | undefined) ?? []
     return arr
@@ -545,13 +565,11 @@ export default function WorkoutDetail() {
       if (a !== null) items.push({ label, value: fmt(a), color })
     }
     push("Battito", hrChartData, "#ef4444", v => `${Math.round(v)} bpm`)
-    push("Velocità", speedChartData, "#22c55e", v => {
-      if (v <= 0) return `${v.toFixed(2)} km/h`
-      const pace = 60 / v
-      const m = Math.floor(pace)
-      const s = Math.round((pace - m) * 60)
-      const paceStr = s === 60 ? `${m + 1}:00` : `${m}:${String(s).padStart(2, "0")}`
-      return `${v.toFixed(2)} km/h · ${paceStr}/km`
+    // Media calcolata sulla velocità (km/h) — mediare il passo darebbe un
+    // risultato sbagliato — e poi convertita in passo per la visualizzazione.
+    push("Passo", speedChartData, "#22c55e", v => {
+      if (v <= 0) return "—"
+      return `${formatPaceMMSS(60 / v)} /km · ${v.toFixed(2)} km/h`
     })
     push("Potenza", powerChartData, "#f97316", v => `${Math.round(v)} W`)
     push("Cadenza", cadenceChartData, "#38bdf8", v => `${Math.round(v)} rpm`)
@@ -1030,22 +1048,18 @@ export default function WorkoutDetail() {
         </Card>
       )}
 
-      {speedChartData.length > 0 && (
+      {paceChartData.length > 0 && (
         <Card>
-          <ChartCardHeader title="Velocita' corsa" data={speedChartData} format={v => `${v.toFixed(2)} km/h`} />
+          <ChartCardHeader title="Passo" data={paceChartData} format={v => `${formatPaceMMSS(v)}/km`} />
           <CardContent>
             <MetricChart
-              data={speedChartData}
+              data={paceChartData}
               color="#22c55e"
+              yReversed
+              yTickFormatter={(v: number) => formatPaceMMSS(v)}
               tooltipFormatter={(v: number) => {
-                if (!v || v <= 0) return [`${v.toFixed(2)} km/h`, "Velocita'"]
-                const paceMinTotal = 60 / v
-                const m = Math.floor(paceMinTotal)
-                const s = Math.round((paceMinTotal - m) * 60)
-                const sStr = s.toString().padStart(2, "0")
-                // Edge case: 60s rounding overflow (e.g. 59.7 → 60).
-                const paceStr = s === 60 ? `${m + 1}:00` : `${m}:${sStr}`
-                return [`${v.toFixed(2)} km/h · ${paceStr}/km`, "Velocita'"]
+                const kmh = v > 0 ? 60 / v : 0
+                return [`${formatPaceMMSS(v)} /km · ${kmh.toFixed(2)} km/h`, "Passo"]
               }}
               xAxisProps={xAxisProps}
               msAxisFmt={msAxisFmt}
