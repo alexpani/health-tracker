@@ -474,17 +474,122 @@ def _dedup_distance_rows(dist_rows):
     return kept
 
 
+def _haversine_m(lat1, lon1, lat2, lon2):
+    """Great-circle distance between two lat/lon points, in meters."""
+    import math
+
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlmb = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _splits_from_route(points, hr_rows, split_meters):
+    """Reconstruct per-distance splits from a GPS route (Haversine cumulative
+    distance + point timestamps). Far more accurate than the in-pocket pedometer
+    for imported runs (Endomondo / Garmin), whose DistanceWalkingRunning series
+    is either missing or comes from a misaligned iPhone pedometer.
+
+    `points` = [{lat, lon, ts (iso str), ...}], ordered. Returns the same split
+    dict shape as the sample-based path, or None if the route is unusable.
+    """
+    pts = []
+    for p in points:
+        lat, lon, ts = p.get("lat"), p.get("lon"), p.get("ts")
+        if lat is None or lon is None or ts is None:
+            continue
+        try:
+            t = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        pts.append((float(lat), float(lon), t))
+    if len(pts) < 2:
+        return None
+
+    def avg_hr_between(t0, t1):
+        vals = [h.value for h in hr_rows if t0 <= h.start_date <= t1]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    splits = []
+    split_num = 1
+    cumulative = 0.0
+    split_start_distance = 0.0
+    split_start_t = pts[0][2]
+    total = 0.0
+
+    for i in range(1, len(pts)):
+        lat0, lon0, t0 = pts[i - 1]
+        lat1, lon1, t1 = pts[i]
+        cumulative += _haversine_m(lat0, lon0, lat1, lon1)
+        total = cumulative
+        while cumulative - split_start_distance >= split_meters:
+            covered_km = (cumulative - split_start_distance) / 1000
+            duration = (t1 - split_start_t).total_seconds()
+            pace = duration / covered_km if duration > 0 and covered_km > 0 else None
+            splits.append({
+                "n": split_num,
+                "distance_km": round(covered_km, 3),
+                "duration_seconds": duration,
+                "pace_sec_per_km": pace,
+                "avg_heart_rate": avg_hr_between(split_start_t, t1),
+            })
+            split_start_distance += split_meters
+            split_start_t = t1
+            split_num += 1
+
+    # Final partial split
+    partial_m = total - split_start_distance
+    if partial_m > 50:  # ignore sub-50m GPS jitter tails
+        partial_km = partial_m / 1000
+        duration = (pts[-1][2] - split_start_t).total_seconds()
+        pace = duration / partial_km if partial_km > 0 else None
+        splits.append({
+            "n": split_num,
+            "distance_km": round(partial_km, 3),
+            "duration_seconds": duration,
+            "pace_sec_per_km": pace,
+            "avg_heart_rate": avg_hr_between(split_start_t, pts[-1][2]),
+            "partial": True,
+        })
+    return {"splits": splits, "total_distance_meters": total, "source": "gps_route"}
+
+
 @router.get("/workouts/by-uuid/{workout_uuid}/splits")
 async def workout_splits(workout_uuid: str, distance_km: float = 1.0, db: AsyncSession = Depends(get_db)):
     """
     Calculate per-distance splits (default 1 km each) for a workout.
-    Uses DistanceWalkingRunning samples within the workout's time range.
+    Prefers the GPS route (Haversine cumulative distance) when present;
+    otherwise falls back to DistanceWalkingRunning samples in range.
     Returns: list of splits with duration, avg pace, avg heart rate.
     """
     wstmt = select(Workout).where(Workout.uuid == workout_uuid)
     workout = (await db.execute(wstmt)).scalar_one_or_none()
     if not workout:
         raise HTTPException(404, "Workout not found")
+
+    split_meters = distance_km * 1000
+
+    # Heart rate samples in range (shared by both the route and sample paths)
+    hr_stmt = (
+        select(HealthSample.start_date, HealthSample.value)
+        .where(HealthSample.type == "HKQuantityTypeIdentifierHeartRate")
+        .where(HealthSample.start_date >= workout.start_date)
+        .where(HealthSample.start_date <= workout.end_date)
+        .order_by(HealthSample.start_date)
+    )
+    hr_rows = (await db.execute(hr_stmt)).all()
+
+    # Prefer the GPS route when available: its Haversine distance is precise and
+    # immune to the misaligned iPhone pedometer that poisons imported workouts.
+    route = (
+        await db.execute(select(WorkoutRoute).where(WorkoutRoute.workout_uuid == workout_uuid))
+    ).scalar_one_or_none()
+    if route and route.points:
+        from_route = _splits_from_route(route.points, hr_rows, split_meters)
+        if from_route and from_route["splits"]:
+            return from_route
 
     # Get all distance samples within workout range, ordered
     dist_stmt = (
@@ -499,18 +604,7 @@ async def workout_splits(workout_uuid: str, distance_km: float = 1.0, db: AsyncS
         return {"splits": [], "total_distance": 0, "note": "no distance samples in range"}
     dist_rows = _dedup_distance_rows(dist_rows)
 
-    # Get heart rate samples in range
-    hr_stmt = (
-        select(HealthSample.start_date, HealthSample.value)
-        .where(HealthSample.type == "HKQuantityTypeIdentifierHeartRate")
-        .where(HealthSample.start_date >= workout.start_date)
-        .where(HealthSample.start_date <= workout.end_date)
-        .order_by(HealthSample.start_date)
-    )
-    hr_rows = (await db.execute(hr_stmt)).all()
-
     # Build splits: walk through distance samples accumulating distance
-    split_meters = distance_km * 1000
     splits = []
     cumulative = 0.0
     split_num = 1
