@@ -371,25 +371,37 @@ export default function WorkoutDetail() {
     limit: 2000,
   }, !!workout)
 
+  // I sample di serie collassate (HKQuantitySeries) sono salvati come pochi
+  // campioni a durata lunga (= la media). Dopo il backfill che aggiunge i punti
+  // densi (durata 0), questi "ombrelli" vanno scartati dai grafici: altrimenti
+  // disegnano un'impennata iniziale spuria. Se invece ci sono SOLO contenitori
+  // (workout non backfillato) li teniamo.
+  const dropContainers = (arr: Sample[]): Sample[] => {
+    const instant = arr.filter(
+      s => new Date(s.end_date).getTime() - new Date(s.start_date).getTime() < 30_000,
+    )
+    return instant.length > 0 ? instant : arr
+  }
+
   const avgHR = useMemo(() => {
-    const arr = (hr.data?.data as Sample[] | undefined) ?? []
+    const arr = dropContainers((hr.data?.data as Sample[] | undefined) ?? [])
     if (arr.length === 0) return null
     return arr.reduce((s, x) => s + x.value, 0) / arr.length
   }, [hr.data])
 
   const maxHR = useMemo(() => {
-    const arr = (hr.data?.data as Sample[] | undefined) ?? []
+    const arr = dropContainers((hr.data?.data as Sample[] | undefined) ?? [])
     return arr.length ? Math.max(...arr.map(s => s.value)) : null
   }, [hr.data])
 
   const avgPower = useMemo(() => {
-    const arr = (runningPower.data?.data as Sample[] | undefined) ?? []
+    const arr = dropContainers((runningPower.data?.data as Sample[] | undefined) ?? [])
     if (arr.length === 0) return null
     return arr.reduce((s, x) => s + x.value, 0) / arr.length
   }, [runningPower.data])
 
   const avgCadence = useMemo(() => {
-    const arr = (cadence.data?.data as Sample[] | undefined) ?? []
+    const arr = dropContainers((cadence.data?.data as Sample[] | undefined) ?? [])
     if (arr.length === 0) return null
     return arr.reduce((s, x) => s + x.value, 0) / arr.length
   }, [cadence.data])
@@ -401,7 +413,7 @@ export default function WorkoutDetail() {
   }, [workout])
 
   const hrChartData = useMemo(() => {
-    const arr = (hr.data?.data as Sample[] | undefined) ?? []
+    const arr = dropContainers((hr.data?.data as Sample[] | undefined) ?? [])
     return arr
       .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value }))
       .sort((a, b) => a.t - b.t)
@@ -481,7 +493,7 @@ export default function WorkoutDetail() {
   }, [highlight, kmTimeRanges, route, workout])
 
   const speedChartData = useMemo(() => {
-    const arr = (runningSpeed.data?.data as Sample[] | undefined) ?? []
+    const arr = dropContainers((runningSpeed.data?.data as Sample[] | undefined) ?? [])
     return arr
       .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value * 3.6 })) // m/s -> km/h
       .sort((a, b) => a.t - b.t)
@@ -499,35 +511,35 @@ export default function WorkoutDetail() {
   )
 
   const powerChartData = useMemo(() => {
-    const arr = (runningPower.data?.data as Sample[] | undefined) ?? []
+    const arr = dropContainers((runningPower.data?.data as Sample[] | undefined) ?? [])
     return arr
       .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value }))
       .sort((a, b) => a.t - b.t)
   }, [runningPower.data])
 
   const cadenceChartData = useMemo(() => {
-    const arr = (cadence.data?.data as Sample[] | undefined) ?? []
+    const arr = dropContainers((cadence.data?.data as Sample[] | undefined) ?? [])
     return arr
       .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value }))
       .sort((a, b) => a.t - b.t)
   }, [cadence.data])
 
   const verticalOscChartData = useMemo(() => {
-    const arr = (verticalOsc.data?.data as Sample[] | undefined) ?? []
+    const arr = dropContainers((verticalOsc.data?.data as Sample[] | undefined) ?? [])
     return arr
       .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value }))
       .sort((a, b) => a.t - b.t)
   }, [verticalOsc.data])
 
   const groundContactChartData = useMemo(() => {
-    const arr = (groundContact.data?.data as Sample[] | undefined) ?? []
+    const arr = dropContainers((groundContact.data?.data as Sample[] | undefined) ?? [])
     return arr
       .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value }))
       .sort((a, b) => a.t - b.t)
   }, [groundContact.data])
 
   const strideLengthChartData = useMemo(() => {
-    const arr = (strideLength.data?.data as Sample[] | undefined) ?? []
+    const arr = dropContainers((strideLength.data?.data as Sample[] | undefined) ?? [])
     return arr
       .map(s => ({ time: s.start_date, t: new Date(s.start_date).getTime(), value: s.value * 100 })) // m -> cm
       .sort((a, b) => a.t - b.t)
