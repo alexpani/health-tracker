@@ -2,30 +2,12 @@ import SwiftUI
 
 struct SettingsView: View {
     @AppStorage(Constants.serverURLKey) private var serverURL = Constants.defaultServerURL
-    @Environment(SyncService.self) private var syncService
     @State private var editingURL: String = ""
     @State private var showSaved = false
-    @State private var reimportStarted = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Manutenzione") {
-                    Button("Re-importa segmenti workout") {
-                        reimportStarted = true
-                        Task { await syncService.reimportWorkoutSegments() }
-                    }
-                    .disabled(syncService.isSyncing)
-
-                    if reimportStarted {
-                        Text(syncService.isSyncing
-                             ? "Re-import in corso… tieni l'app aperta"
-                             : "Avviato. Ri-scarica tutti i workout e i loro segmenti.")
-                            .foregroundStyle(.secondary)
-                            .font(.caption)
-                    }
-                }
-
                 Section("Server Configuration") {
                     TextField("Server URL", text: $editingURL)
                         .textInputAutocapitalization(.never)
