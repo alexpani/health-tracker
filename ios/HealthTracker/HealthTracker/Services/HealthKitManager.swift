@@ -960,14 +960,9 @@ actor HealthKitManager {
         return result
     }
 
-    /// Per-lap metrics for the window `[start, end)`.
-    /// - HR is instantaneous → average/max of the readings whose `startDate` falls in
-    ///   the window.
-    /// - Distance and energy are cumulative quantities measured over each sample's
-    ///   `[startDate, endDate]` interval → allocated **proportionally** to the time
-    ///   overlap with the window. This is critical for coarse series (e.g. old Apple
-    ///   Watch runs write distance in ~2-min chunks): a startDate-membership sum would
-    ///   dump a whole multi-minute chunk into a short lap, producing impossible paces.
+    /// avg/max HR (bpm), summed distance (m) and energy (kcal) for the samples whose
+    /// `startDate` falls in `[start, end)`. Cumulative distance/energy samples are
+    /// summed; instantaneous HR samples are averaged/maxed.
     private static func lapMetrics(
         start: Date, end: Date,
         hr: [HKQuantitySample], dist: [HKQuantitySample], energy: [HKQuantitySample]
@@ -978,30 +973,13 @@ actor HealthKitManager {
         let avgHr = hrVals.isEmpty ? nil : hrVals.reduce(0, +) / Double(hrVals.count)
         let maxHr = hrVals.max()
 
-        func overlapSum(_ samples: [HKQuantitySample], _ unit: HKUnit) -> Double? {
-            var total = 0.0
-            var any = false
-            for s in samples {
-                let sStart = s.startDate
-                let sEnd = max(s.endDate, sStart)
-                let ov = min(sEnd, end).timeIntervalSince(max(sStart, start))
-                guard ov > 0 else {
-                    // Zero-duration sample: count fully if its instant is in the window.
-                    if sStart == sEnd, sStart >= start, sStart < end {
-                        total += s.quantity.doubleValue(for: unit); any = true
-                    }
-                    continue
-                }
-                let dur = sEnd.timeIntervalSince(sStart)
-                let v = s.quantity.doubleValue(for: unit)
-                total += dur > 0 ? v * (ov / dur) : v
-                any = true
-            }
-            return any ? total : nil
-        }
+        let distVals = dist.filter { $0.startDate >= start && $0.startDate < end }
+            .map { $0.quantity.doubleValue(for: .meter()) }
+        let distanceM = distVals.isEmpty ? nil : distVals.reduce(0, +)
 
-        let distanceM = overlapSum(dist, .meter())
-        let kcal = overlapSum(energy, .kilocalorie())
+        let energyVals = energy.filter { $0.startDate >= start && $0.startDate < end }
+            .map { $0.quantity.doubleValue(for: .kilocalorie()) }
+        let kcal = energyVals.isEmpty ? nil : energyVals.reduce(0, +)
 
         return (avgHr, maxHr, distanceM, kcal)
     }
