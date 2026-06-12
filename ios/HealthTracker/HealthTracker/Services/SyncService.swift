@@ -171,7 +171,7 @@ final class SyncService {
     /// UserDefaults flag so it runs exactly once per device.
     @MainActor
     private func resetWorkoutAnchorIfNeeded() {
-        let flag = "workout_activities_backfill_v2_done"
+        let flag = "workout_activities_backfill_v3_done"
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: flag) else { return }
         defaults.removeObject(forKey: "hk_workout_anchor_v1")
