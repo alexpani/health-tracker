@@ -161,7 +161,21 @@ final class SyncService {
     @MainActor
     func setModelContainer(_ container: ModelContainer) {
         self.modelContainer = container
+        resetWorkoutAnchorIfNeeded()
         registerProtectedDataWakeUp()
+    }
+
+    /// One-shot: clears the workout anchor so the next sync re-pulls the full
+    /// workout history. Needed to backfill `activities` (lap/segment intervals)
+    /// onto workouts synced before the extraction fix. Idempotent — guarded by a
+    /// UserDefaults flag so it runs exactly once per device.
+    @MainActor
+    private func resetWorkoutAnchorIfNeeded() {
+        let flag = "workout_activities_backfill_v2_done"
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: flag) else { return }
+        defaults.removeObject(forKey: "hk_workout_anchor_v1")
+        defaults.set(true, forKey: flag)
     }
 
     /// Registra un osservatore per `UIApplication.protectedDataDidBecomeAvailable`:
