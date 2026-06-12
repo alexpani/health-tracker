@@ -731,7 +731,27 @@ async def query_workouts(
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Workout)
+    # Per-workout flags: does it have a GPS route, and any heart-rate sample in
+    # its time window? Correlated EXISTS subqueries — index-backed (workout_routes
+    # PK; health_samples (type, start_date)), each stops at the first matching row.
+    gps_exists = (
+        select(1)
+        .where(WorkoutRoute.workout_uuid == Workout.uuid)
+        .where(WorkoutRoute.point_count > 0)
+        .correlate(Workout)
+        .exists()
+        .label("has_gps")
+    )
+    hr_exists = (
+        select(1)
+        .where(HealthSample.type == "HKQuantityTypeIdentifierHeartRate")
+        .where(HealthSample.start_date >= Workout.start_date)
+        .where(HealthSample.start_date <= Workout.end_date)
+        .correlate(Workout)
+        .exists()
+        .label("has_hr")
+    )
+    stmt = select(Workout, gps_exists, hr_exists)
     if activity_type:
         stmt = stmt.where(Workout.activity_type.in_(activity_type))
     if effective_types:
@@ -769,7 +789,12 @@ async def query_workouts(
     stmt = stmt.order_by(Workout.start_date.desc()).offset(offset).limit(limit)
 
     result = await db.execute(stmt)
-    return result.scalars().all()
+    out = []
+    for w, has_gps, has_hr in result.all():
+        w.has_gps = bool(has_gps)
+        w.has_hr = bool(has_hr)
+        out.append(w)
+    return out
 
 
 _RUN_WALK_ACTIVITY_TYPES = {37, 52}

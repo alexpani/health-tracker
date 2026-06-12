@@ -126,6 +126,8 @@ class WorkoutOut(BaseModel):
     notes: str | None = None
     metadata: dict | None = Field(None, validation_alias="metadata_")
     activities: list[dict] | None = Field(None, validation_alias="activities_")
+    has_gps: bool | None = None
+    has_hr: bool | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 

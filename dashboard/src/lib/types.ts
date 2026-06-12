@@ -250,6 +250,8 @@ export interface Workout {
   metadata: Record<string, unknown> | null
   title: string | null
   notes: string | null
+  has_gps?: boolean | null
+  has_hr?: boolean | null
 }
 
 export interface TypeCount {

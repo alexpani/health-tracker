@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
-import { ArrowDown, ArrowUp, ArrowUpDown, Filter, GitCompare, Trash2, Undo2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Filter, GitCompare, Heart, MapPin, Trash2, Undo2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -414,6 +414,8 @@ export default function Workouts() {
                     <TableHead className="text-right"><SortHeader k="distance" align="right">Distanza</SortHeader></TableHead>
                     <TableHead className="text-right"><SortHeader k="pace" align="right">Ritmo</SortHeader></TableHead>
                     <TableHead className="text-right"><SortHeader k="calories" align="right">Calorie</SortHeader></TableHead>
+                    <TableHead className="text-center">GPS</TableHead>
+                    <TableHead className="text-center">HR</TableHead>
                     <TableHead className="hidden md:table-cell"><SortHeader k="source">Sorgente</SortHeader></TableHead>
                     <TableHead className="hidden lg:table-cell max-w-[280px]"><SortHeader k="notes">Note</SortHeader></TableHead>
                     <TableHead className="w-[40px]"></TableHead>
@@ -468,6 +470,16 @@ export default function Workouts() {
                       </TableCell>
                       <TableCell className="text-right tabular-nums whitespace-nowrap">
                         {w.total_energy_burned ? `${formatNumber(w.total_energy_burned)} kcal` : "-"}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {w.has_gps
+                          ? <MapPin className="h-4 w-4 mx-auto text-emerald-500" aria-label="con GPS" />
+                          : <MapPin className="h-4 w-4 mx-auto text-muted-foreground/25" aria-label="senza GPS" />}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {w.has_hr
+                          ? <Heart className="h-4 w-4 mx-auto text-rose-500 fill-rose-500" aria-label="con HR" />
+                          : <Heart className="h-4 w-4 mx-auto text-muted-foreground/25" aria-label="senza HR" />}
                       </TableCell>
                       <TableCell className="text-muted-foreground hidden md:table-cell">{w.source_name ?? "-"}</TableCell>
                       <TableCell
