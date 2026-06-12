@@ -178,6 +178,16 @@ final class SyncService {
         defaults.set(true, forKey: flag)
     }
 
+    /// User-triggered (Settings button): clears the workout anchor and runs a full
+    /// sync immediately, forcing a re-pull of the entire workout history and a
+    /// re-extraction of `activities` (lap/segment intervals with per-segment
+    /// metrics). Use when the automatic one-shot backfill didn't run.
+    @MainActor
+    func reimportWorkoutSegments() async {
+        UserDefaults.standard.removeObject(forKey: "hk_workout_anchor_v1")
+        await performQuickSync(minInterval: 0)
+    }
+
     /// Registra un osservatore per `UIApplication.protectedDataDidBecomeAvailable`:
     /// quando il device sblocca (o termina il post-boot first-unlock), HK
     /// torna leggibile e possiamo far partire un sync. NB: la notifica arriva
