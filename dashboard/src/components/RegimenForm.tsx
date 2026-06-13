@@ -23,34 +23,48 @@ const MANUAL_KINDS: RegimenKind[] = ["medication", "supplement", "diet", "traini
 interface Props {
   /** Quando passato, il form e' in modalita' edit */
   regimen?: Regimen | null
+  /** Quando passato (e regimen nullo), il form e' in CREATE pre-compilato dai
+   *  campi di questo regime (nome/dose/note/kind/metadata) ma con DATE VUOTE. */
+  duplicateFrom?: Regimen | null
   /** Defaults per la create (es. start_date = oggi). Ignorato in edit. */
   defaults?: { kind?: RegimenKind; start_date?: string }
   onClose: () => void
+  /** Callback "Duplica": il parent chiude questo modale e ne apre uno nuovo in
+   *  modalita' duplicateFrom. Mostrato solo per i regimi terminati. */
+  onDuplicate?: (source: Regimen) => void
   /** Mostra anche il pulsante di delete in edit mode */
   allowDelete?: boolean
 }
 
-export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: Props) {
+export function RegimenForm({ regimen, duplicateFrom, defaults, onClose, onDuplicate, allowDelete = true }: Props) {
   useBodyScrollLock()
   const isEdit = !!regimen
+  // Sorgente per i campi non-data: regime in edit, oppure quello da duplicare.
+  const src = regimen ?? duplicateFrom ?? null
   const initialKind: RegimenKind = (() => {
-    const k = regimen?.kind ?? defaults?.kind ?? "medication"
-    // Edit di un piano alimentare? lascia diet per visualizzazione.
-    if (regimen?.kind === "diet") return "diet"
+    const k = src?.kind ?? defaults?.kind ?? "medication"
+    // Edit/duplica di un piano alimentare? lascia diet per visualizzazione.
+    if (src?.kind === "diet") return "diet"
     return MANUAL_KINDS.includes(k) ? k : "medication"
   })()
   const [kind, setKind] = useState<RegimenKind>(initialKind)
-  const [name, setName] = useState(regimen?.name ?? "")
+  const [name, setName] = useState(src?.name ?? "")
+  // Date: SOLO da regimen (edit) o defaults (create). In duplica restano vuote.
   const [startDate, setStartDate] = useState(regimen?.start_date ?? defaults?.start_date ?? "")
   const [endDate, setEndDate] = useState(regimen?.end_date ?? "")
-  const [dose, setDose] = useState(regimen?.dose ?? "")
-  const [notes, setNotes] = useState(regimen?.notes ?? "")
-  const [kcalTarget, setKcalTarget] = useState(regimen?.metadata?.kcal_target ?? "")
-  const [proteinPct, setProteinPct] = useState(regimen?.metadata?.protein_pct ?? "")
-  const [fatPct, setFatPct] = useState(regimen?.metadata?.fat_pct ?? "")
-  const [carbsPct, setCarbsPct] = useState(regimen?.metadata?.carbs_pct ?? "")
-  const [showNutritionFields, setShowNutritionFields] = useState(kind === "diet" && !!regimen)
+  const [dose, setDose] = useState(src?.dose ?? "")
+  const [notes, setNotes] = useState(src?.notes ?? "")
+  const [kcalTarget, setKcalTarget] = useState(src?.metadata?.kcal_target ?? "")
+  const [proteinPct, setProteinPct] = useState(src?.metadata?.protein_pct ?? "")
+  const [fatPct, setFatPct] = useState(src?.metadata?.fat_pct ?? "")
+  const [carbsPct, setCarbsPct] = useState(src?.metadata?.carbs_pct ?? "")
+  const [showNutritionFields, setShowNutritionFields] = useState(initialKind === "diet" && !!src)
   const [error, setError] = useState<string | null>(null)
+
+  // Un regime e' "terminato" se ha una end_date passata. Usato per gate del
+  // pulsante Duplica (ha senso ripartire da un regime concluso).
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const isEnded = !!regimen?.end_date && regimen.end_date < todayIso
 
   const create = useCreateRegimen()
   const update = useUpdateRegimen()
@@ -162,7 +176,7 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
         className="w-full max-w-lg shadow-2xl"
       >
       <CardHeader>
-        <CardTitle>{isEdit ? "Modifica regime" : "Nuovo regime"}</CardTitle>
+        <CardTitle>{isEdit ? "Modifica regime" : duplicateFrom ? "Duplica regime" : "Nuovo regime"}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Errore in alto cosi' e' sempre visibile (la modal puo' essere
@@ -325,6 +339,11 @@ export function RegimenForm({ regimen, defaults, onClose, allowDelete = true }: 
             )}
           </div>
           <div className="flex gap-2">
+            {isEdit && onDuplicate && isEnded && (
+              <Button variant="outline" onClick={() => onDuplicate(regimen!)}>
+                Duplica
+              </Button>
+            )}
             <Button variant="outline" onClick={onClose}>Annulla</Button>
             <Button onClick={submit} disabled={create.isPending || update.isPending}>
               {create.isPending || update.isPending

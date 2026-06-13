@@ -54,6 +54,9 @@ export function RegimenGanttGrid({
     onSelectRegimen?.(regimen)
   }
 
+  // Oggi (ISO) per "ditherare" le barre dei regimi terminati.
+  const todayIso = new Date().toISOString().slice(0, 10)
+
   // Decimazione markers: max 7 visibili
   const MAX_MARKERS = 7
   const totalMarkers = dateMarkers.length
@@ -173,8 +176,16 @@ export function RegimenGanttGrid({
 
                     const tooNarrow = safeWidthPct < MIN_BAR_WIDTH_PCT
                     const anchorRight = barPos.right < 0.01
+                    // Terminato = end_date passata → barra "ditherata"
+                    // (opacità ridotta + tratteggio diagonale) per distinguerla
+                    // dai periodi attivi.
+                    const isEnded = !!regimen.end_date && regimen.end_date < todayIso
 
                     const barStyle: React.CSSProperties = {}
+                    if (isEnded) {
+                      barStyle.backgroundImage =
+                        'repeating-linear-gradient(45deg, rgba(255,255,255,0) 0, rgba(255,255,255,0) 4px, rgba(255,255,255,0.4) 4px, rgba(255,255,255,0.4) 7px)'
+                    }
                     if (tooNarrow) {
                       if (anchorRight) {
                         barStyle.right = `${barPos.right}%`
@@ -195,7 +206,7 @@ export function RegimenGanttGrid({
                         key={regimen.id}
                         className={`absolute h-10 ${barRounding} cursor-pointer transition-all ${color} ${
                           isHovered ? 'ring-2 ring-primary shadow-md' : 'shadow-sm'
-                        }`}
+                        } ${isEnded ? 'opacity-60' : ''}`}
                         style={barStyle}
                         onClick={() => handleBarClick(regimen)}
                         onMouseEnter={e => handleBarMouseEnter(regimen, e)}

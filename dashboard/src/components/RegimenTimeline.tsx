@@ -16,6 +16,8 @@ export function RegimenTimeline({ regimens, isLoading, onRegimensChange }: Regim
   const [showEnded, setShowEnded] = useState(true)
   const [hoverRegimenId, setHoverRegimenId] = useState<number | null>(null)
   const [editingRegimen, setEditingRegimen] = useState<Regimen | null>(null)
+  // Sorgente per la modalità "duplica" (create pre-compilata, date vuote).
+  const [duplicatingFrom, setDuplicatingFrom] = useState<Regimen | null>(null)
   // Anni selezionati come filtro multi-select. Vuoto = nessun filtro
   // (vince il preset temporale). Set non vuoto: il range viene override
   // dall'unione degli anni selezionati (1 gen min → 31 dic max).
@@ -80,6 +82,17 @@ export function RegimenTimeline({ regimens, isLoading, onRegimensChange }: Regim
 
   const handleFormClose = () => {
     setEditingRegimen(null)
+    onRegimensChange?.()
+  }
+
+  // Duplica: chiude il modale di edit e apre quello della copia (date vuote).
+  const handleDuplicate = (source: Regimen) => {
+    setEditingRegimen(null)
+    setDuplicatingFrom(source)
+  }
+
+  const handleDuplicateClose = () => {
+    setDuplicatingFrom(null)
     onRegimensChange?.()
   }
 
@@ -183,6 +196,15 @@ export function RegimenTimeline({ regimens, isLoading, onRegimensChange }: Regim
         <RegimenForm
           regimen={editingRegimen}
           onClose={handleFormClose}
+          onDuplicate={handleDuplicate}
+        />
+      )}
+
+      {/* Duplica modal: create pre-compilato dalla copia, date vuote */}
+      {duplicatingFrom && (
+        <RegimenForm
+          duplicateFrom={duplicatingFrom}
+          onClose={handleDuplicateClose}
         />
       )}
     </div>

@@ -85,6 +85,11 @@ export default function Regimens() {
   const [includeEnded, setIncludeEnded] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [editing, setEditing] = useState<Regimen | null>(null)
+  // Sorgente per la modalità "duplica" (create pre-compilata, date vuote).
+  const [duplicatingFrom, setDuplicatingFrom] = useState<Regimen | null>(null)
+
+  const handleEdit = (r: Regimen) => { setShowAdd(false); setDuplicatingFrom(null); setEditing(r) }
+  const handleDuplicate = (r: Regimen) => { setShowAdd(false); setEditing(null); setDuplicatingFrom(r) }
 
   // Alimentazione: la Timeline strippa i `kind='diet'` a monte
   // (RegimenTimeline.tsx) — sarebbe sempre vuota. Forziamo Tabella e
@@ -258,7 +263,8 @@ export default function Regimens() {
             kindsOrder={SALUTE_KINDS}
             includeEnded={includeEnded}
             emptyLabel="Nessun farmaco o integratore registrato."
-            onEdit={r => { setShowAdd(false); setEditing(r) }}
+            onEdit={handleEdit}
+            onDuplicate={handleDuplicate}
             onRegimensChange={() => q.refetch()}
           />
         </TabsContent>
@@ -282,7 +288,8 @@ export default function Regimens() {
             kindsOrder={SPORT_KINDS}
             includeEnded={includeEnded}
             emptyLabel="Nessun piano di allenamento registrato. I piani di allenamento si autodetettano dai workout sincronizzati."
-            onEdit={r => { setShowAdd(false); setEditing(r) }}
+            onEdit={handleEdit}
+            onDuplicate={handleDuplicate}
             onRegimensChange={() => q.refetch()}
           />
         </TabsContent>
@@ -306,7 +313,8 @@ export default function Regimens() {
             kindsOrder={FOOD_KINDS}
             includeEnded={includeEnded}
             emptyLabel="Nessun piano alimentare registrato. Il piano corrente arriva dal diario alimentare."
-            onEdit={r => { setShowAdd(false); setEditing(r) }}
+            onEdit={handleEdit}
+            onDuplicate={handleDuplicate}
             onRegimensChange={() => q.refetch()}
           />
         </TabsContent>
@@ -330,7 +338,8 @@ export default function Regimens() {
             kindsOrder={GEAR_KINDS}
             includeEnded={includeEnded}
             emptyLabel="Nessun equipaggiamento registrato. Premi Nuovo per aggiungere un paio di scarpe."
-            onEdit={r => { setShowAdd(false); setEditing(r) }}
+            onEdit={handleEdit}
+            onDuplicate={handleDuplicate}
             onRegimensChange={() => q.refetch()}
           />
         </TabsContent>
@@ -341,6 +350,14 @@ export default function Regimens() {
           regimen={editing}
           defaults={editing ? undefined : { kind: newDefaultKind }}
           onClose={() => { setShowAdd(false); setEditing(null) }}
+          onDuplicate={handleDuplicate}
+        />
+      )}
+
+      {duplicatingFrom && (
+        <RegimenForm
+          duplicateFrom={duplicatingFrom}
+          onClose={() => { setDuplicatingFrom(null); q.refetch() }}
         />
       )}
     </div>
@@ -357,7 +374,7 @@ function groupByStatus(items: Regimen[]): { ongoing: Regimen[]; ended: Regimen[]
 
 function TabBody({
   viewMode, isLoading, dataReady, regimens, grouped, kindsOrder, includeEnded,
-  emptyLabel, onEdit, onRegimensChange,
+  emptyLabel, onEdit, onDuplicate, onRegimensChange,
 }: {
   viewMode: 'timeline' | 'table'
   isLoading: boolean
@@ -368,6 +385,7 @@ function TabBody({
   includeEnded: boolean
   emptyLabel: string
   onEdit: (r: Regimen) => void
+  onDuplicate: (r: Regimen) => void
   onRegimensChange: () => void
 }) {
   // Per Timeline passiamo solo `regimens` "veri" (la Timeline filtra i diet a
@@ -408,6 +426,8 @@ function TabBody({
               items={grouped.ended}
               kindsOrder={kindsOrder}
               onEdit={onEdit}
+              onDuplicate={onDuplicate}
+              showDuplicate
             />
           )}
           {isLoading && <div className="h-32 animate-pulse bg-muted rounded" />}
@@ -429,11 +449,15 @@ function Section({
   items,
   kindsOrder,
   onEdit,
+  onDuplicate,
+  showDuplicate = false,
 }: {
   title: string
   items: Regimen[]
   kindsOrder: RegimenKind[]
   onEdit: (r: Regimen) => void
+  onDuplicate?: (r: Regimen) => void
+  showDuplicate?: boolean
 }) {
   if (items.length === 0) return null
   const byKind: Record<RegimenKind, Regimen[]> = { medication: [], supplement: [], diet: [], training: [], gear: [] }
@@ -455,7 +479,7 @@ function Section({
                   {kind !== "training" && <th className="text-left p-3 hidden md:table-cell">Dose</th>}
                   <th className="text-left p-3">Periodo</th>
                   <th className="text-left p-3 hidden lg:table-cell">Note</th>
-                  <th className="p-3 w-16"></th>
+                  <th className="p-3"></th>
                 </tr>
               </thead>
               <tbody>
@@ -506,9 +530,16 @@ function Section({
                         {fromDiario ? (
                           <span className="text-xs text-muted-foreground">solo lettura</span>
                         ) : (
-                          <Button variant="ghost" size="sm" onClick={() => onEdit(r)}>
-                            Modifica
-                          </Button>
+                          <div className="flex justify-end gap-1 whitespace-nowrap">
+                            {showDuplicate && onDuplicate && (
+                              <Button variant="ghost" size="sm" onClick={() => onDuplicate(r)}>
+                                Duplica
+                              </Button>
+                            )}
+                            <Button variant="ghost" size="sm" onClick={() => onEdit(r)}>
+                              Modifica
+                            </Button>
+                          </div>
                         )}
                       </td>
                     </tr>
