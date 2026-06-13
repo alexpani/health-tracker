@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DiarioHkSync, PendingDeletion, PendingWrite
+from app.models import DiarioHkSync, HealthSample, PendingDeletion, PendingWrite
 from app.services.apns import fire_and_forget_push_all
 
 DIARIO_BASE_URL = os.environ.get("DIARIO_BASE_URL", "http://192.168.68.173:3000")
@@ -33,6 +33,11 @@ _DIETARY_SYNC_MAP = [
     ("carbs_g",   "HKQuantityTypeIdentifierDietaryCarbohydrates",  "g"),
 ]
 _VALUE_TOLERANCE = 0.5  # don't enqueue delete+rewrite for rounding noise
+
+# Marker written into HK sample metadata for every diario→HK write (mirrors
+# PendingWrite.source_name). Used to recognise OUR diario-origin samples once
+# they re-ingest, so the orphan sweep never touches manual /insert entries.
+_DIARIO_EXTERNAL_SOURCE = "Diario Alimentare"
 
 
 @router.get("/active-plan")
@@ -176,6 +181,38 @@ async def reconcile_diario_to_hk(
                 track.hk_uuid = None
                 track.pending_write_id = pw.id
 
+    # --- Self-heal orphan diario samples ------------------------------------
+    # Reconcile/confirm races and iOS confirm-retry double-writes can leave
+    # behind superseded dietary HK samples that we wrote earlier in the day but
+    # never deleted (the tracking row only remembers ONE hk_uuid). Once they
+    # re-ingest from Apple Health they inflate the raw HK dietary totals shown
+    # on the dashboard. Sweep every cycle: any OUR diario-origin dietary sample
+    # whose uuid is not the currently-tracked one for its (day, type) is deleted
+    # from the DB (the PG trigger blacklists it so it won't re-ingest) and
+    # enqueued for deletion from Apple Health too. The external_source marker
+    # keeps this from ever touching manual /insert entries.
+    tracked_uuids = {
+        row.hk_uuid for row in tracked_rows if row.hk_uuid is not None
+    }
+    synced_types = [hk_type for _, hk_type, _ in _DIETARY_SYNC_MAP]
+    orphan_rows = (await db.execute(
+        select(HealthSample).where(
+            HealthSample.type.in_(synced_types),
+            HealthSample.metadata_["external_source"].astext == _DIARIO_EXTERNAL_SOURCE,
+        )
+    )).scalars().all()
+    swept = 0
+    for s in orphan_rows:
+        if s.uuid in tracked_uuids:
+            continue
+        db.add(PendingDeletion(
+            hk_uuid=s.uuid, type=s.type,
+            source_sample_id=None, status="pending",
+        ))
+        await db.delete(s)
+        swept += 1
+        queued_deletes += 1
+
     await db.commit()
 
     # Silent push solo se abbiamo accodato qualcosa: la reconcile gira
@@ -186,6 +223,7 @@ async def reconcile_diario_to_hk(
     return {
         "queued_writes": queued_writes,
         "queued_deletions": queued_deletes,
+        "swept_orphans": swept,
         "unchanged": unchanged,
         "days_considered": len(diary_rows),
     }
