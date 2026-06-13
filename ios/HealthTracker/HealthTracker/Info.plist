@@ -7,7 +7,7 @@
 		<string>com.healthtracker.sync</string>
 	</array>
 	<key>CFBundleDisplayName</key>
-	<string>Health Tracker</string>
+	<string>Health Sync</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

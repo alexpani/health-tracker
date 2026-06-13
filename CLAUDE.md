@@ -325,10 +325,11 @@ Current seed rules (applied once, can be edited from dashboard):
 
 **Note sui sync "wake-up" vuoti**: quando il telefono e' lockato l'`isProtectedDataInaccessible()` ritorna true e `performFullSync` fa early-abort prima di iterare i tipi. Risultato: NIENTE riga "0 campioni" sulla dashboard per tentativi BG-locked, NIENTE `lastSyncDate` bump che starva il sync foreground. I dati arretrati arrivano al prossimo sync con device sbloccato (foreground, BG con device unlocked, o trigger `protectedDataDidBecomeAvailable` + warm-up + eventuale retry). Le righe storiche con `total_samples=0` precedenti al fix restano in DB.
 
-### App Icon
+### App name & Icon
 
-- Generated with Python + Pillow: gradient blue→pink background + white heart + pink ECG line
-- `Assets.xcassets/AppIcon.appiconset/icon-1024.png` (1024×1024)
+- **Display name**: **Health Sync** (`CFBundleDisplayName` in `Info.plist`) — distingue l'app di sincronizzazione iOS dalla web **Health Dashboard** (che condivide il brand cuore+ECG come PWA/favicon).
+- Icona generata con Python + Pillow (`ios/HealthTracker/scripts/make_sync_icon.py`, dep Pillow): gradiente blu→rosa (`#3C81F5`→`#EA4899`), cuore bianco + tracciato ECG rosa, **incorniciato da due frecce circolari di sincronizzazione** bianche (il motivo "Sync") che lo differenziano dall'icona della dashboard (cuore liscio). Supersampling 4× + downscale LANCZOS per bordi lisci.
+- `Assets.xcassets/AppIcon.appiconset/icon-1024.png` (1024×1024). Rigenerare in-place: `python3 ios/HealthTracker/scripts/make_sync_icon.py` (scrive direttamente sull'asset).
 - xcodegen `project.yml` sets `ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon`
 
 ### Build
