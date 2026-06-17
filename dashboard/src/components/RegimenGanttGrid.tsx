@@ -170,6 +170,12 @@ export function RegimenGanttGrid({
               const groupHasUnknownStart = group.regimens.some(r => !r.start_date)
               const hasMultipleBlocks = group.regimens.length > 1
               const barRounding = hasMultipleBlocks ? 'rounded-xl' : 'rounded'
+              // Quando una barra in corso ha parte solida + coda futura,
+              // arrotondiamo solo l'estremita' esterna di ciascuna (solida a
+              // sinistra, coda a destra) cosi' al giunto su "oggi" leggono
+              // come un'unica barra spezzata, non come due pillole staccate.
+              const roundLeftOnly = hasMultipleBlocks ? 'rounded-l-xl' : 'rounded-l'
+              const roundRightOnly = hasMultipleBlocks ? 'rounded-r-xl' : 'rounded-r'
 
               return (
                 <div
@@ -235,7 +241,7 @@ export function RegimenGanttGrid({
                       <div key={regimen.id} className="contents">
                         {hasSolid && (
                           <div
-                            className={`absolute h-10 ${barRounding} cursor-pointer transition-all ${color} ${
+                            className={`absolute h-10 ${tailPos ? roundLeftOnly : barRounding} cursor-pointer transition-all ${color} ${
                               isHovered ? 'ring-2 ring-primary shadow-md' : 'shadow-sm'
                             } ${isEnded ? 'opacity-60' : ''}`}
                             style={barStyle}
@@ -250,7 +256,7 @@ export function RegimenGanttGrid({
                         )}
                         {tailPos && (
                           <div
-                            className={`absolute h-10 ${barRounding} cursor-pointer transition-all ${color} opacity-40 ${
+                            className={`absolute h-10 ${hasSolid ? roundRightOnly : barRounding} cursor-pointer transition-all ${color} opacity-40 ${
                               isHovered ? 'ring-2 ring-primary' : ''
                             }`}
                             style={{
