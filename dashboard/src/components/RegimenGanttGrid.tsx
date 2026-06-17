@@ -3,9 +3,11 @@ import { Regimen } from '@/lib/types'
 import { RegimenTimelineTooltip } from './RegimenTimelineTooltip'
 import {
   RegimenGroup,
-  calculateBarPosition,
+  calculateSolidBarPosition,
+  calculateFutureTailPosition,
   getRegimenBarColor,
   computeYearBoundaries,
+  computeTodayPct,
   formatDateMarkers,
   formatDateForDisplay,
 } from '@/hooks/useRegimenTimeline'
@@ -21,6 +23,11 @@ interface RegimenGanttGridProps {
 }
 
 const MIN_BAR_WIDTH_PCT = 0.6 // visibilita' minima per barre molto brevi
+
+// Tratteggio diagonale "ditherato" — usato per i regimi terminati e per
+// la coda futura (proiezione) dei regimi in corso.
+const DITHER_BG =
+  'repeating-linear-gradient(45deg, rgba(255,255,255,0) 0, rgba(255,255,255,0) 4px, rgba(255,255,255,0.4) 4px, rgba(255,255,255,0.4) 7px)'
 
 export function RegimenGanttGrid({
   groups,
@@ -117,6 +124,24 @@ export function RegimenGanttGrid({
                 </span>
               </div>
             ))}
+            {/* Linea verticale "oggi" — separa il passato (certo) dal
+                futuro (proiezione ditherata). Solo se oggi cade dentro
+                il range visibile. */}
+            {(() => {
+              const todayPct = computeTodayPct(rangeStart, rangeEnd)
+              if (todayPct === null) return null
+              return (
+                <div
+                  className="absolute top-0 bottom-0 w-px bg-primary/60 pointer-events-none z-10"
+                  style={{ left: `${todayPct}%` }}
+                >
+                  <span className="absolute top-0.5 left-1 text-[10px] font-medium text-primary/80 whitespace-nowrap">
+                    oggi
+                  </span>
+                </div>
+              )
+            })()}
+
             {/* Header con date markers */}
             <div className="h-12 border-b border-border flex items-end px-2 relative">
               {decimatedMarkers.map((marker, i) => {
@@ -161,17 +186,23 @@ export function RegimenGanttGrid({
 
                   {/* Una barra per ogni regimen del gruppo */}
                   {group.regimens.map(regimen => {
-                    const barPos = calculateBarPosition(regimen, rangeStart, rangeEnd)
+                    const barPos = calculateSolidBarPosition(regimen, rangeStart, rangeEnd, todayIso)
                     const isHovered = hoverRegimenId === regimen.id
                     const widthPct = 100 - barPos.left - barPos.right
+                    // Coda futura (proiezione) per i regimi in corso: ditherata.
+                    // null se il regimen ha una fine pianificata o se il range
+                    // non arriva nel futuro.
+                    const tailPos = calculateFutureTailPosition(regimen, rangeStart, rangeEnd, todayIso)
                     // Tolerance FP: per regimi con `start_date == end_date`
                     // (eventi puntuali, durata 0), `left + right` puo'
                     // essere ~100.0000001 in floating point e widthPct
                     // leggermente negativo. NON sono fuori range —
                     // `filterRegimensInRange` li ha gia' filtrati a monte,
                     // quindi qui ci arrivano solo se intersecano. Skip solo
-                    // se davvero fuori (> 1% di slack).
-                    if (widthPct < -1) return null
+                    // se davvero fuori (> 1% di slack). La barra solida puo'
+                    // anche mancare del tutto (regimen che inizia nel futuro):
+                    // in quel caso resta solo la coda ditherata.
+                    const hasSolid = widthPct >= -1
                     const safeWidthPct = Math.max(0, widthPct)
 
                     const tooNarrow = safeWidthPct < MIN_BAR_WIDTH_PCT
@@ -183,8 +214,7 @@ export function RegimenGanttGrid({
 
                     const barStyle: React.CSSProperties = {}
                     if (isEnded) {
-                      barStyle.backgroundImage =
-                        'repeating-linear-gradient(45deg, rgba(255,255,255,0) 0, rgba(255,255,255,0) 4px, rgba(255,255,255,0.4) 4px, rgba(255,255,255,0.4) 7px)'
+                      barStyle.backgroundImage = DITHER_BG
                     }
                     if (tooNarrow) {
                       if (anchorRight) {
@@ -202,20 +232,40 @@ export function RegimenGanttGrid({
                     }
 
                     return (
-                      <div
-                        key={regimen.id}
-                        className={`absolute h-10 ${barRounding} cursor-pointer transition-all ${color} ${
-                          isHovered ? 'ring-2 ring-primary shadow-md' : 'shadow-sm'
-                        } ${isEnded ? 'opacity-60' : ''}`}
-                        style={barStyle}
-                        onClick={() => handleBarClick(regimen)}
-                        onMouseEnter={e => handleBarMouseEnter(regimen, e)}
-                        onMouseLeave={handleBarMouseLeave}
-                        title={`${regimen.name} (${regimen.start_date || '?'} → ${regimen.end_date || 'oggi'})`}
-                        aria-label={`${regimen.name}: ${regimen.start_date || 'origin unknown'} to ${
-                          regimen.end_date || 'ongoing'
-                        }`}
-                      />
+                      <div key={regimen.id} className="contents">
+                        {hasSolid && (
+                          <div
+                            className={`absolute h-10 ${barRounding} cursor-pointer transition-all ${color} ${
+                              isHovered ? 'ring-2 ring-primary shadow-md' : 'shadow-sm'
+                            } ${isEnded ? 'opacity-60' : ''}`}
+                            style={barStyle}
+                            onClick={() => handleBarClick(regimen)}
+                            onMouseEnter={e => handleBarMouseEnter(regimen, e)}
+                            onMouseLeave={handleBarMouseLeave}
+                            title={`${regimen.name} (${regimen.start_date || '?'} → ${regimen.end_date || 'oggi'})`}
+                            aria-label={`${regimen.name}: ${regimen.start_date || 'origin unknown'} to ${
+                              regimen.end_date || 'ongoing'
+                            }`}
+                          />
+                        )}
+                        {tailPos && (
+                          <div
+                            className={`absolute h-10 ${barRounding} cursor-pointer transition-all ${color} opacity-40 ${
+                              isHovered ? 'ring-2 ring-primary' : ''
+                            }`}
+                            style={{
+                              left: `${tailPos.left}%`,
+                              right: `${tailPos.right}%`,
+                              backgroundImage: DITHER_BG,
+                            }}
+                            onClick={() => handleBarClick(regimen)}
+                            onMouseEnter={e => handleBarMouseEnter(regimen, e)}
+                            onMouseLeave={handleBarMouseLeave}
+                            title={`${regimen.name} — in corso (proiezione futura)`}
+                            aria-label={`${regimen.name}: proiezione futura (in corso, senza data di fine)`}
+                          />
+                        )}
+                      </div>
                     )
                   })}
                 </div>

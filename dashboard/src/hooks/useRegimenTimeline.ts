@@ -65,8 +65,11 @@ function addDays(date: Date, days: number): Date {
   return d
 }
 
+const MAX_YEAR_ISO = '2100-01-01'
+
 export function getDateRange(presetIdx: number, regimens?: Regimen[]): DateRange {
   const today = new Date()
+  const todayIso = dateToString(today)
   const preset = PRESETS[presetIdx] || PRESETS[0]
 
   let start: Date
@@ -78,7 +81,6 @@ export function getDateRange(presetIdx: number, regimens?: Regimen[]): DateRange
     // singolo record con anno 18 d.C. estende il range a ~2000 anni e
     // schiaccia tutte le barre reali in fondo.
     const MIN_YEAR_ISO = '2000-01-01'
-    const MAX_YEAR_ISO = '2100-01-01'
     const earliest = regimens
       ?.map(r => r.start_date)
       .filter((d): d is string => !!d && d >= MIN_YEAR_ISO && d <= MAX_YEAR_ISO)
@@ -93,9 +95,28 @@ export function getDateRange(presetIdx: number, regimens?: Regimen[]): DateRange
     start = addDays(today, -preset.days)
   }
 
+  // Estendi la fine del range nel FUTURO cosi' i regimi in corso mostrano
+  // una coda proiettata (ditherata, vedi grid) e i regimi con end_date
+  // pianificata nel futuro entrano per intero nella vista.
+  const spanDays = Math.max(1, (today.getTime() - start.getTime()) / 86_400_000)
+  const futurePad = Math.min(60, Math.max(7, Math.round(spanDays * 0.05)))
+  let end = addDays(today, futurePad)
+
+  // Se un regimen ha una data di fine pianificata oltre il padding,
+  // allarga il range fino a contenerla (con un piccolo margine a destra).
+  const maxFutureEnd = regimens
+    ?.map(r => r.end_date)
+    .filter((d): d is string => !!d && d > todayIso && d <= MAX_YEAR_ISO)
+    .sort()
+    .pop()
+  if (maxFutureEnd) {
+    const futureEndDate = addDays(stringToDate(maxFutureEnd), Math.max(7, Math.round(futurePad / 2)))
+    if (futureEndDate.getTime() > end.getTime()) end = futureEndDate
+  }
+
   return {
     start: dateToString(start),
-    end: dateToString(today),
+    end: dateToString(end),
   }
 }
 
@@ -249,22 +270,24 @@ export function isRegimenVisible(
   return true
 }
 
-export function calculateBarPosition(
-  regimen: Regimen,
+/** Posizione (left/right in %) di un intervallo [startIso, endIso]
+ * clampato a [rangeStart, rangeEnd]. startIso null = inizio sconosciuto
+ * → ancorato a sinistra del range. */
+function positionForInterval(
+  startIso: string | null,
+  endIso: string,
   rangeStart: string,
   rangeEnd: string
-): BarPosition {
+): { left: number; right: number } {
   const startDate = stringToDate(rangeStart)
   const endDate = stringToDate(rangeEnd)
   const totalMs = endDate.getTime() - startDate.getTime()
 
-  const isUnknownStart = !regimen.start_date
-  const effectiveStart = regimen.start_date ? stringToDate(regimen.start_date) : startDate
-  const effectiveEnd = regimen.end_date ? stringToDate(regimen.end_date) : endDate
+  const effStart = startIso ? stringToDate(startIso) : startDate
+  const effEnd = stringToDate(endIso)
 
-  // Clamp to range
-  const clampedStart = new Date(Math.max(effectiveStart.getTime(), startDate.getTime()))
-  const clampedEnd = new Date(Math.min(effectiveEnd.getTime(), endDate.getTime()))
+  const clampedStart = new Date(Math.max(effStart.getTime(), startDate.getTime()))
+  const clampedEnd = new Date(Math.min(effEnd.getTime(), endDate.getTime()))
 
   const leftMs = clampedStart.getTime() - startDate.getTime()
   const rightMs = endDate.getTime() - clampedEnd.getTime()
@@ -272,8 +295,69 @@ export function calculateBarPosition(
   return {
     left: totalMs > 0 ? (leftMs / totalMs) * 100 : 0,
     right: totalMs > 0 ? (rightMs / totalMs) * 100 : 0,
-    isUnknownStart,
   }
+}
+
+export function calculateBarPosition(
+  regimen: Regimen,
+  rangeStart: string,
+  rangeEnd: string
+): BarPosition {
+  const endIso = regimen.end_date || rangeEnd
+  return {
+    ...positionForInterval(regimen.start_date, endIso, rangeStart, rangeEnd),
+    isUnknownStart: !regimen.start_date,
+  }
+}
+
+/** Parte "solida" (certa) della barra. Per i regimi in corso (end_date
+ * null) la parte solida si ferma a OGGI: il periodo futuro non e'
+ * confermato, viene reso come coda ditherata (vedi calculateFutureTailPosition).
+ * I regimi con end_date pianificata restano solidi fino a quella data. */
+export function calculateSolidBarPosition(
+  regimen: Regimen,
+  rangeStart: string,
+  rangeEnd: string,
+  todayIso: string
+): BarPosition {
+  const cappedEnd = regimen.end_date
+    ? regimen.end_date
+    : todayIso < rangeEnd
+    ? todayIso
+    : rangeEnd
+  return {
+    ...positionForInterval(regimen.start_date, cappedEnd, rangeStart, rangeEnd),
+    isUnknownStart: !regimen.start_date,
+  }
+}
+
+/** Coda futura ditherata per i regimi in corso (da oggi a fine range).
+ * Ritorna null se non applicabile: regimen con end_date pianificata
+ * (in quel caso la barra resta solida, niente dither) o range che non
+ * arriva nel futuro. */
+export function calculateFutureTailPosition(
+  regimen: Regimen,
+  rangeStart: string,
+  rangeEnd: string,
+  todayIso: string
+): { left: number; right: number } | null {
+  if (regimen.end_date) return null // fine pianificata → niente dither
+  if (rangeEnd <= todayIso) return null // il range non mostra il futuro
+  // Se il regimen inizia nel futuro, la coda parte dal suo inizio.
+  const tailStart = regimen.start_date && regimen.start_date > todayIso ? regimen.start_date : todayIso
+  if (tailStart >= rangeEnd) return null
+  return positionForInterval(tailStart, rangeEnd, rangeStart, rangeEnd)
+}
+
+/** Posizione (%) di "oggi" dentro [rangeStart, rangeEnd], o null se
+ * oggi cade fuori dal range visibile (allora non si disegna la linea). */
+export function computeTodayPct(rangeStart: string, rangeEnd: string): number | null {
+  const start = stringToDate(rangeStart).getTime()
+  const end = stringToDate(rangeEnd).getTime()
+  const today = stringToDate(dateToString(new Date())).getTime()
+  if (end <= start) return null
+  if (today <= start || today >= end) return null
+  return ((today - start) / (end - start)) * 100
 }
 
 export function getKindColor(kind: RegimenKind): string {
