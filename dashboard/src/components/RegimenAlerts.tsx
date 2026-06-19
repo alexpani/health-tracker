@@ -1,14 +1,16 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useRegimens } from "@/lib/queries"
+import { useAppSetting } from "@/lib/appSettings"
 import { KIND_LABELS } from "@/components/RegimenForm"
 import type { Regimen } from "@/lib/types"
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock"
 
-const ACK_KEY = "regimen_alerts_ack_v1"
-const EPOCH_KEY = "regimen_alerts_epoch_v1"
+// Chiavi in app_settings (server-side, condivise tra dispositivi).
+const ACK_SETTING = "regimen_alerts_ack" // string[] di chiavi confermate
+const EPOCH_SETTING = "regimen_alerts_epoch" // ISO YYYY-MM-DD
 
 type AlertType = "start" | "end"
 interface RegimenAlert {
@@ -30,61 +32,47 @@ function formatIT(iso: string): string {
   return `${d}/${m}/${y}`
 }
 
-function loadAck(): Set<string> {
-  try {
-    const raw = localStorage.getItem(ACK_KEY)
-    if (!raw) return new Set()
-    return new Set<string>(JSON.parse(raw))
-  } catch {
-    return new Set()
-  }
-}
-
-function persistAck(acked: Set<string>) {
-  try {
-    localStorage.setItem(ACK_KEY, JSON.stringify([...acked]))
-  } catch {
-    /* no-op */
-  }
-}
-
-/** "Epoca" della feature: il giorno in cui questa logica e' stata vista per
- * la prima volta su questo browser. Solo gli eventi (inizio/fine) con data
- * >= epoca generano avvisi, cosi' al primo caricamento NON esplodono popup
- * per tutti i regimi storici gia' iniziati/terminati. I regimi futuri hanno
- * sempre data >= epoca, quindi funzionano sempre. */
-function ensureEpoch(): string {
-  try {
-    let e = localStorage.getItem(EPOCH_KEY)
-    if (!e) {
-      e = todayLocalISO()
-      localStorage.setItem(EPOCH_KEY, e)
-    }
-    return e
-  } catch {
-    return todayLocalISO()
-  }
-}
-
 /**
  * Mostra un popup quando un regime INIZIA (start_date raggiunto) o e' arrivato
  * al suo ULTIMO giorno previsto (end_date raggiunto). A differenza di un avviso
  * "una tantum", l'avviso **persiste anche nei giorni successivi** finche' non
- * viene spuntato UNA volta (conferma permanente in localStorage). Si risolve da
- * solo anche se il regime viene prolungato (end_date spostato nel futuro) o
- * eliminato. Gli avvisi compaiono uno alla volta, in coda.
+ * viene confermato UNA volta. Conferme ed "epoca" sono persistite **lato
+ * server** (`app_settings`), quindi condivise tra dispositivi: confermare un
+ * avviso su un browser lo zittisce ovunque. Si risolve da solo anche se il
+ * regime viene prolungato (end_date spostato nel futuro) o eliminato. Gli
+ * avvisi compaiono uno alla volta, in coda.
+ *
+ * "Epoca": il primo giorno in cui questa logica gira (impostata una volta sul
+ * server). Solo gli eventi con data >= epoca generano avvisi, cosi' al primo
+ * caricamento NON esplodono popup per tutti i regimi storici. I regimi futuri
+ * hanno sempre data >= epoca, quindi funzionano sempre.
  */
 export function RegimenAlerts() {
   const today = useMemo(() => todayLocalISO(), [])
-  const [epoch] = useState(ensureEpoch)
   // Tutti i regimi (anche terminati): serve per avvisare di fine anche DOPO
   // la scadenza, che `active_on=oggi` escluderebbe.
   const { data: regimens } = useRegimens({ include_ended: true })
 
-  const [acked, setAcked] = useState<Set<string>>(loadAck)
+  const { value: ackedList, isLoaded: ackLoaded, set: setAck } = useAppSetting<string[]>(ACK_SETTING, [])
+  const {
+    rawValue: epochRaw,
+    isLoaded: epochLoaded,
+    set: setEpoch,
+  } = useAppSetting<string>(EPOCH_SETTING, "")
+  const epoch = epochRaw // string | null
+
+  // Inizializza l'epoca lato server una sola volta (al primo giorno in cui la
+  // feature gira), se non e' mai stata impostata.
+  useEffect(() => {
+    if (epochLoaded && epochRaw == null) {
+      setEpoch(today)
+    }
+  }, [epochLoaded, epochRaw, today, setEpoch])
+
+  const acked = useMemo(() => new Set(ackedList), [ackedList])
 
   const alerts = useMemo<RegimenAlert[]>(() => {
-    if (!regimens) return []
+    if (!regimens || !epoch) return []
     const out: RegimenAlert[] = []
     for (const r of regimens) {
       // Piani sintetici dal diario (id negativi): niente avvisi.
@@ -101,8 +89,10 @@ export function RegimenAlerts() {
     return out
   }, [regimens, today, epoch])
 
-  // Primo avviso non ancora confermato.
-  const current = alerts.find(a => !acked.has(a.key)) ?? null
+  // Aspetta che ack + epoca siano caricati dal server: senza, mostreremmo
+  // popup gia' confermati o con epoca sbagliata.
+  const ready = ackLoaded && epochLoaded && epoch != null
+  const current = ready ? alerts.find(a => !acked.has(a.key)) ?? null : null
 
   if (!current) return null
   return (
@@ -110,12 +100,7 @@ export function RegimenAlerts() {
       alert={current}
       today={today}
       onAck={() => {
-        setAcked(prev => {
-          const next = new Set(prev)
-          next.add(current.key)
-          persistAck(next)
-          return next
-        })
+        setAck(Array.from(new Set([...ackedList, current.key])))
       }}
     />
   )
