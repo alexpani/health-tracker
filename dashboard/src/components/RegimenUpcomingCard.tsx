@@ -1,10 +1,9 @@
-import { useMemo } from "react"
-import { useNavigate } from "react-router-dom"
+import { useMemo, useState } from "react"
 import { BellRing } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useRegimens } from "@/lib/queries"
 import { useRegimenReminderSettings } from "@/lib/regimenReminderSettings"
-import { KIND_LABELS } from "@/components/RegimenForm"
+import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
 import type { Regimen } from "@/lib/types"
 
 type ReminderType = "start" | "end"
@@ -51,7 +50,7 @@ function whenLabel(days: number): string {
  * esclusi (non hanno una vera scadenza azionabile).
  */
 export function RegimenUpcomingCard() {
-  const navigate = useNavigate()
+  const [editId, setEditId] = useState<number | null>(null)
   const today = useMemo(() => todayLocalISO(), [])
   const [{ startDays, endDays }] = useRegimenReminderSettings()
   const startHorizon = useMemo(() => shiftISO(today, startDays), [today, startDays])
@@ -83,6 +82,11 @@ export function RegimenUpcomingCard() {
     return out
   }, [regimens, today, startHorizon, endHorizon])
 
+  const editRegimen = useMemo(
+    () => (editId == null ? null : regimens?.find(r => r.id === editId) ?? null),
+    [editId, regimens],
+  )
+
   if (reminders.length === 0) return null
 
   return (
@@ -100,7 +104,7 @@ export function RegimenUpcomingCard() {
             return (
               <li key={`${rm.regimen.id}:${rm.type}`}>
                 <button
-                  onClick={() => navigate("/regimens")}
+                  onClick={() => setEditId(rm.regimen.id)}
                   className="w-full text-left flex items-center gap-2 rounded-md border bg-card/40 px-2.5 py-1.5 hover:bg-accent transition-colors"
                 >
                   <span
@@ -125,6 +129,10 @@ export function RegimenUpcomingCard() {
           })}
         </ul>
       </CardContent>
+
+      {editRegimen && (
+        <RegimenForm regimen={editRegimen} onClose={() => setEditId(null)} />
+      )}
     </Card>
   )
 }
