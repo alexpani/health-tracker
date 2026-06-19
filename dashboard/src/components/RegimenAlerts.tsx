@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -148,14 +148,9 @@ function RegimenAlertDialog({
       : `L'ultimo giorno previsto era il ${formatIT(date)}: ricordati di interromperlo o di prolungarlo.`
   }
 
-  // Ack via spunta: appena selezionata, conferma e passa al prossimo.
+  // La spunta abilita solo il pulsante "Conferma": l'avviso si chiude SOLO
+  // quando l'utente clicca esplicitamente "Conferma" (o "Apri Regimi").
   const [checked, setChecked] = useState(false)
-  useEffect(() => {
-    if (checked) {
-      const t = setTimeout(onAck, 150)
-      return () => clearTimeout(t)
-    }
-  }, [checked, onAck])
 
   return (
     <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto overscroll-contain bg-black/50 p-4 sm:p-8">

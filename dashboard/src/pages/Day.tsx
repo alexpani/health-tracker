@@ -34,6 +34,7 @@ import { Hypnogram } from "@/components/charts/Hypnogram"
 import { SleepScoreCard } from "@/components/charts/SleepScoreCard"
 import { RecoveryWidget } from "@/components/RecoveryWidget"
 import LabCorrelationsCard from "@/components/LabCorrelationsCard"
+import { RegimenUpcomingCard } from "@/components/RegimenUpcomingCard"
 
 function todayLocal(): string {
   const d = new Date()
@@ -179,6 +180,8 @@ export default function Day() {
               onAdd={() => setJournalModal({ entryId: null })}
               onEdit={id => setJournalModal({ entryId: id })}
             />
+
+            {date === today && <RegimenUpcomingCard />}
 
             {date === today && <LabCorrelationsCard />}
 
