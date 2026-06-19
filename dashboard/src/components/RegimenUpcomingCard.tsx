@@ -3,11 +3,9 @@ import { useNavigate } from "react-router-dom"
 import { BellRing } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useRegimens } from "@/lib/queries"
+import { useRegimenReminderSettings } from "@/lib/regimenReminderSettings"
 import { KIND_LABELS } from "@/components/RegimenForm"
 import type { Regimen } from "@/lib/types"
-
-/** Quanti giorni in avanti guardare per i promemoria. */
-const HORIZON_DAYS = 7
 
 type ReminderType = "start" | "end"
 interface Reminder {
@@ -55,7 +53,9 @@ function whenLabel(days: number): string {
 export function RegimenUpcomingCard() {
   const navigate = useNavigate()
   const today = useMemo(() => todayLocalISO(), [])
-  const horizon = useMemo(() => shiftISO(today, HORIZON_DAYS), [today])
+  const [{ startDays, endDays }] = useRegimenReminderSettings()
+  const startHorizon = useMemo(() => shiftISO(today, startDays), [today, startDays])
+  const endHorizon = useMemo(() => shiftISO(today, endDays), [today, endDays])
   const { data: regimens } = useRegimens({ include_ended: true })
 
   const reminders = useMemo<Reminder[]>(() => {
@@ -64,15 +64,15 @@ export function RegimenUpcomingCard() {
     for (const r of regimens) {
       if (r.id < 0) continue // piani sintetici dal diario
       if (r.kind === "gear") continue // niente scadenza azionabile
-      // Sta per cominciare: oggi <= start_date <= orizzonte
-      if (r.start_date && r.start_date >= today && r.start_date <= horizon) {
+      // Sta per cominciare: oggi <= start_date <= orizzonte inizio
+      if (r.start_date && r.start_date >= today && r.start_date <= startHorizon) {
         out.push({ regimen: r, type: "start", date: r.start_date, daysUntil: daysBetween(today, r.start_date) })
       }
-      // Sta per finire: oggi <= end_date <= orizzonte (e gia' iniziato o senza inizio noto)
+      // Sta per finire: oggi <= end_date <= orizzonte fine (e gia' iniziato o senza inizio noto)
       if (
         r.end_date &&
         r.end_date >= today &&
-        r.end_date <= horizon &&
+        r.end_date <= endHorizon &&
         (!r.start_date || r.start_date <= today)
       ) {
         out.push({ regimen: r, type: "end", date: r.end_date, daysUntil: daysBetween(today, r.end_date) })
@@ -81,7 +81,7 @@ export function RegimenUpcomingCard() {
     // Ordina per imminenza, poi inizio prima di fine a parita' di giorno
     out.sort((a, b) => a.daysUntil - b.daysUntil || (a.type === b.type ? 0 : a.type === "start" ? -1 : 1))
     return out
-  }, [regimens, today, horizon])
+  }, [regimens, today, startHorizon, endHorizon])
 
   if (reminders.length === 0) return null
 

@@ -21,6 +21,58 @@ import { getMeta } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { IngestRule } from "@/lib/types"
 import { SyncOverview } from "@/components/SyncOverview"
+import {
+  useRegimenReminderSettings,
+  REMINDER_MIN_DAYS,
+  REMINDER_MAX_DAYS,
+} from "@/lib/regimenReminderSettings"
+
+const REMINDER_DAY_OPTIONS = Array.from(
+  { length: REMINDER_MAX_DAYS - REMINDER_MIN_DAYS + 1 },
+  (_, i) => REMINDER_MIN_DAYS + i,
+)
+
+/** Sezione impostazioni della pagina Regimi: orizzonte del promemoria in home. */
+function RegimenSettingsSection() {
+  const [settings, update] = useRegimenReminderSettings()
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Promemoria regimi</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 max-w-md">
+        <p className="text-sm text-muted-foreground">
+          Con quanti giorni di anticipo mostrare il promemoria nella home (pagina di oggi)
+          quando un regime sta per iniziare o per finire.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <Label className="text-xs">Preavviso inizio (giorni)</Label>
+            <Select value={String(settings.startDays)} onValueChange={v => update({ startDays: Number(v) })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {REMINDER_DAY_OPTIONS.map(d => (
+                  <SelectItem key={d} value={String(d)}>{d}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Preavviso fine (giorni)</Label>
+            <Select value={String(settings.endDays)} onValueChange={v => update({ endDays: Number(v) })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {REMINDER_DAY_OPTIONS.map(d => (
+                  <SelectItem key={d} value={String(d)}>{d}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 function RulesOverview() {
   const { data: summary } = useRulesSummary()
@@ -268,77 +320,90 @@ function BlacklistTab() {
   )
 }
 
-export default function Settings() {
+/** Sezione "Regole ingest": riepilogo + CRUD regole di filtraggio. */
+function IngestRulesSection() {
   const { data: rules } = useRules()
   const [showNewForm, setShowNewForm] = useState(false)
 
   return (
+    <div className="space-y-4">
+      <RulesOverview />
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Regole attive ({rules?.length ?? 0})</CardTitle>
+            <Button size="sm" onClick={() => setShowNewForm(!showNewForm)}>
+              <Plus className="h-4 w-4 mr-1" /> Nuova regola
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {showNewForm && (
+            <Card>
+              <CardContent className="p-4">
+                <NewRuleForm onCreated={() => setShowNewForm(false)} />
+              </CardContent>
+            </Card>
+          )}
+
+          {rules && rules.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Dato HealthKit</TableHead>
+                  <TableHead>Sorgente</TableHead>
+                  <TableHead>Range</TableHead>
+                  <TableHead>Motivo</TableHead>
+                  <TableHead className="text-right">Scarti</TableHead>
+                  <TableHead>Stato</TableHead>
+                  <TableHead className="text-right"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rules.map(r => <RuleRow key={r.id} rule={r} />)}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="text-sm text-muted-foreground">Nessuna regola configurata.</p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+/**
+ * Pagina impostazioni organizzata per sezioni. Ogni voce di `SECTIONS`
+ * raggruppa le opzioni di un'area dell'app (o di sistema). Per ora mostriamo
+ * solo le aree che hanno effettivamente opzioni: aggiungere una sezione futura
+ * = aggiungere una voce qui. L'ordine: prima le aree applicative, poi le
+ * impostazioni generali/di sistema.
+ */
+const SECTIONS: { value: string; label: string; node: React.ReactNode }[] = [
+  { value: "regimens", label: "Regimi", node: <RegimenSettingsSection /> },
+  { value: "sync", label: "Sincronizzazione", node: <SyncOverview /> },
+  { value: "rules", label: "Regole ingest", node: <IngestRulesSection /> },
+  { value: "blacklist", label: "Blacklist UUID", node: <BlacklistTab /> },
+]
+
+export default function Settings() {
+  return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Impostazioni</h1>
-        <p className="text-muted-foreground">Regole di filtraggio, sorgenti bloccate e UUID in blacklist</p>
+        <p className="text-muted-foreground">Opzioni per area dell'app e impostazioni di sistema</p>
       </div>
 
-      <RulesOverview />
-
-      <Tabs defaultValue="sync">
+      <Tabs defaultValue={SECTIONS[0].value}>
         <TabsList>
-          <TabsTrigger value="sync">Sincronizzazione</TabsTrigger>
-          <TabsTrigger value="rules">Regole ingest</TabsTrigger>
-          <TabsTrigger value="blacklist">Blacklist UUID</TabsTrigger>
+          {SECTIONS.map(s => (
+            <TabsTrigger key={s.value} value={s.value}>{s.label}</TabsTrigger>
+          ))}
         </TabsList>
-
-        <TabsContent value="sync">
-          <SyncOverview />
-        </TabsContent>
-
-        <TabsContent value="rules" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Regole attive ({rules?.length ?? 0})</CardTitle>
-                <Button size="sm" onClick={() => setShowNewForm(!showNewForm)}>
-                  <Plus className="h-4 w-4 mr-1" /> Nuova regola
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {showNewForm && (
-                <Card>
-                  <CardContent className="p-4">
-                    <NewRuleForm onCreated={() => setShowNewForm(false)} />
-                  </CardContent>
-                </Card>
-              )}
-
-              {rules && rules.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>Dato HealthKit</TableHead>
-                      <TableHead>Sorgente</TableHead>
-                      <TableHead>Range</TableHead>
-                      <TableHead>Motivo</TableHead>
-                      <TableHead className="text-right">Scarti</TableHead>
-                      <TableHead>Stato</TableHead>
-                      <TableHead className="text-right"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rules.map(r => <RuleRow key={r.id} rule={r} />)}
-                  </TableBody>
-                </Table>
-              ) : (
-                <p className="text-sm text-muted-foreground">Nessuna regola configurata.</p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="blacklist">
-          <BlacklistTab />
-        </TabsContent>
+        {SECTIONS.map(s => (
+          <TabsContent key={s.value} value={s.value}>{s.node}</TabsContent>
+        ))}
       </Tabs>
     </div>
   )
