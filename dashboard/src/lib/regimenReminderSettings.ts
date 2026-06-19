@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { apiGet, apiPut } from "@/lib/api"
 
-/** Impostazioni del promemoria regimi in home (pagina di oggi). Frontend-only,
- * persistite in localStorage. Orizzonti separati per inizio e fine. */
+/** Impostazioni del promemoria regimi in home (pagina di oggi). Persistite
+ * **lato server** (tabella `app_settings`, chiave `regimen_reminders`) cosi'
+ * sono condivise tra dispositivi/browser. Orizzonti separati inizio/fine. */
 export interface RegimenReminderSettings {
   /** Giorni di anticipo per i regimi che stanno per cominciare (1–30). */
   startDays: number
@@ -9,8 +12,8 @@ export interface RegimenReminderSettings {
   endDays: number
 }
 
-const KEY = "regimen_reminder_horizon_v1"
-const EVENT = "regimen-reminder-settings-changed"
+const SETTING_KEY = "regimen_reminders"
+const QUERY_KEY = ["appSetting", SETTING_KEY]
 const DEFAULTS: RegimenReminderSettings = { startDays: 7, endDays: 7 }
 
 export const REMINDER_MIN_DAYS = 1
@@ -22,50 +25,51 @@ function clampDays(n: unknown): number {
   return Math.min(REMINDER_MAX_DAYS, Math.max(REMINDER_MIN_DAYS, v))
 }
 
-export function loadRegimenReminderSettings(): RegimenReminderSettings {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return DEFAULTS
-    const p = JSON.parse(raw)
-    return { startDays: clampDays(p.startDays), endDays: clampDays(p.endDays) }
-  } catch {
-    return DEFAULTS
+function normalize(value: unknown): RegimenReminderSettings {
+  const p = (value ?? {}) as Partial<RegimenReminderSettings>
+  return {
+    startDays: clampDays(p.startDays ?? DEFAULTS.startDays),
+    endDays: clampDays(p.endDays ?? DEFAULTS.endDays),
   }
 }
 
 /**
- * Hook reattivo: ritorna le impostazioni correnti e un updater. Le modifiche
- * sono persistite e propagate live a tutte le istanze montate (anche su altre
- * pagine) via un custom event + l'evento `storage` cross-tab.
+ * Hook reattivo: ritorna `[settings, update]`. Le impostazioni sono lette dal
+ * backend (con default mentre carica) e l'updater fa un PUT + invalidazione,
+ * cosi' tutte le istanze montate si aggiornano. Cross-dispositivo: ogni
+ * browser legge gli stessi valori dal server.
  */
 export function useRegimenReminderSettings() {
-  const [settings, setSettings] = useState<RegimenReminderSettings>(loadRegimenReminderSettings)
+  const qc = useQueryClient()
+  const query = useQuery({
+    queryKey: QUERY_KEY,
+    queryFn: () => apiGet<{ key: string; value: unknown }>(`/api/v1/settings/${SETTING_KEY}`),
+    staleTime: 60_000,
+    select: res => normalize(res.value),
+  })
 
-  useEffect(() => {
-    const onChange = () => setSettings(loadRegimenReminderSettings())
-    window.addEventListener(EVENT, onChange)
-    window.addEventListener("storage", onChange)
-    return () => {
-      window.removeEventListener(EVENT, onChange)
-      window.removeEventListener("storage", onChange)
-    }
-  }, [])
+  const mutation = useMutation({
+    mutationFn: (next: RegimenReminderSettings) =>
+      apiPut(`/api/v1/settings/${SETTING_KEY}`, { value: next }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QUERY_KEY })
+    },
+  })
 
-  const update = useCallback((patch: Partial<RegimenReminderSettings>) => {
-    setSettings(prev => {
+  const settings = query.data ?? DEFAULTS
+
+  const update = useCallback(
+    (patch: Partial<RegimenReminderSettings>) => {
       const next: RegimenReminderSettings = {
-        startDays: clampDays(patch.startDays ?? prev.startDays),
-        endDays: clampDays(patch.endDays ?? prev.endDays),
+        startDays: clampDays(patch.startDays ?? settings.startDays),
+        endDays: clampDays(patch.endDays ?? settings.endDays),
       }
-      try {
-        localStorage.setItem(KEY, JSON.stringify(next))
-      } catch {
-        /* no-op */
-      }
-      window.dispatchEvent(new Event(EVENT))
-      return next
-    })
-  }, [])
+      // Aggiornamento ottimistico: la tendina riflette subito la scelta.
+      qc.setQueryData(QUERY_KEY, { key: SETTING_KEY, value: next })
+      mutation.mutate(next)
+    },
+    [settings, mutation, qc],
+  )
 
   return [settings, update] as const
 }
