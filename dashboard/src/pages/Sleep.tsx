@@ -9,6 +9,7 @@ import { formatDate, formatDateShort } from "@/lib/utils"
 import { Hypnogram } from "@/components/charts/Hypnogram"
 import { SleepScoreCard } from "@/components/charts/SleepScoreCard"
 import { computeSleepScore, sleepNarrative, type SleepScoreResult } from "@/lib/sleepScore"
+import { useSleepInvalidation } from "@/lib/sleepInvalidation"
 import { Link } from "react-router-dom"
 import type { TimeRange } from "@/lib/types"
 
@@ -16,6 +17,13 @@ function fmtDur(m: number): string {
   const h = Math.floor(m / 60)
   const mm = Math.round(m % 60)
   return h > 0 ? `${h}h ${mm.toString().padStart(2, "0")}m` : `${mm} min`
+}
+
+/** La chiave notte e' un `toISOString()` costruito da una Date locale a
+ *  mezzanotte → ricostruisco YYYY-MM-DD in fuso locale. */
+function nightKeyToYmd(isoKey: string): string {
+  const d = new Date(isoKey)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
 /** Riassunto fasi della notte selezionata: stesse righe del tooltip, ma
@@ -224,6 +232,7 @@ export default function Sleep() {
   const [selectedYmd, setSelectedYmd] = useState<string | null>(null)
   const dates = useMemo(() => timeRangeToDates(range), [range])
   const { data, isLoading } = useCategories("HKCategoryTypeIdentifierSleepAnalysis", dates.start, dates.end)
+  const { invalidNights, isInvalid, toggle } = useSleepInvalidation()
 
   // Aggregate per night. Convenzione "wake-up date": la notte appartiene
   // al giorno in cui ti sei svegliato, cioe' la data di end_date.
@@ -242,6 +251,9 @@ export default function Sleep() {
   })
 
   const chartData = Object.entries(byNight)
+    // Notti marcate come "non valide" (watch non indossato ecc.) sono escluse
+    // del tutto da barre, medie e score derivati da chartData.
+    .filter(([day]) => !isInvalid(nightKeyToYmd(day)))
     .map(([day, stages]) => {
       const row: any = { day }
       Object.entries(SLEEP_STAGES).forEach(([k, v]) => {
@@ -307,10 +319,7 @@ export default function Sleep() {
                 onClick={(e: any) => {
                   const iso: string | undefined = e?.activePayload?.[0]?.payload?.day ?? e?.activeLabel
                   if (!iso) return
-                  // iso e' un toISOString() costruito da una Date locale a
-                  // mezzanotte → ricostruisco YYYY-MM-DD in fuso locale.
-                  const d = new Date(iso)
-                  const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+                  const ymd = nightKeyToYmd(iso)
                   setSelectedYmd(prev => (prev === ymd ? null : ymd))
                 }}
                 style={{ cursor: "pointer" }}
@@ -352,17 +361,62 @@ export default function Sleep() {
               >
                 vedi giorno
               </Link>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => toggle(selectedYmd)}
+                title="Escludi questa notte da grafici e medie (es. watch non indossato)"
+              >
+                {isInvalid(selectedYmd) ? "Ripristina notte" : "Segna non valida"}
+              </Button>
               <Button variant="ghost" size="sm" onClick={() => setSelectedYmd(null)}>
                 Chiudi
               </Button>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Hypnogram date={selectedYmd} height={80} showEmpty />
-            <SleepComment date={selectedYmd} />
-            <SelectedNightBreakdown ymd={selectedYmd} chartData={chartData} />
-            <SleepLegend />
-            <SleepScoreCard date={selectedYmd} />
+            {isInvalid(selectedYmd) ? (
+              <div className="flex flex-col items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm">
+                <p className="text-amber-700 dark:text-amber-300">
+                  Notte segnata come <strong>non valida</strong> — esclusa da grafici e medie.
+                  I dati grezzi restano comunque salvati.
+                </p>
+                <Button variant="outline" size="sm" onClick={() => toggle(selectedYmd)}>
+                  Ripristina notte
+                </Button>
+              </div>
+            ) : (
+              <>
+                <Hypnogram date={selectedYmd} height={80} showEmpty />
+                <SleepComment date={selectedYmd} />
+                <SelectedNightBreakdown ymd={selectedYmd} chartData={chartData} />
+                <SleepLegend />
+                <SleepScoreCard date={selectedYmd} />
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {invalidNights.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Notti escluse ({invalidNights.length})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground mb-3">
+              Notti segnate come non valide: escluse da grafici, medie e card del giorno.
+            </p>
+            <ul className="divide-y">
+              {[...invalidNights].sort().reverse().map(ymd => (
+                <li key={ymd} className="flex items-center justify-between py-2">
+                  <span className="text-sm">{formatDate(ymd)}</span>
+                  <Button variant="ghost" size="sm" onClick={() => toggle(ymd)}>
+                    Ripristina
+                  </Button>
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
       )}

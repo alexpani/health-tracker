@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { useDaySnapshot, useStretchingSessions } from "@/lib/queries"
+import { useSleepInvalidation } from "@/lib/sleepInvalidation"
 import type { DaySnapshot, HealthNote, RegimenKind, Regimen } from "@/lib/types"
 import { KIND_LABELS, RegimenForm } from "@/components/RegimenForm"
 import { HealthNoteForm } from "@/components/HealthNoteForm"
@@ -445,9 +446,19 @@ function NutritionCard({ data }: { data: DaySnapshot }) {
 
 function SleepCard({ data }: { data: DaySnapshot }) {
   const s = data.sleep
+  const { isInvalid } = useSleepInvalidation()
+  const invalid = isInvalid(data.date)
   return (
     <DayCard icon={Moon} title="Sonno" to="/sleep">
-      {!s ? (
+      {invalid ? (
+        <div className="text-xs space-y-1">
+          <p className="text-amber-600 dark:text-amber-400 font-medium">Notte segnata come non valida</p>
+          <p className="text-muted-foreground">
+            Esclusa da grafici e medie.{" "}
+            <Link to="/sleep" className="underline hover:text-foreground">Gestisci in Sonno</Link>
+          </p>
+        </div>
+      ) : !s ? (
         <p className="text-xs text-muted-foreground">Nessun dato.</p>
       ) : (
         <>
