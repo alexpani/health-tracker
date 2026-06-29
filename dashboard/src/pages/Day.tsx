@@ -176,17 +176,19 @@ export default function Day() {
               </Card>
             )}
 
-            <JournalCard
-              data={data}
-              onAdd={() => setJournalModal({ entryId: null })}
-              onEdit={id => setJournalModal({ entryId: id })}
-            />
+            <div className="grid gap-3 lg:grid-cols-2 items-start">
+              <JournalCard
+                data={data}
+                onAdd={() => setJournalModal({ entryId: null })}
+                onEdit={id => setJournalModal({ entryId: id })}
+              />
 
-            <HealthNotesCard
-              data={data}
-              onAdd={() => { setShowAddNote(true); setEditNoteId(null) }}
-              onEdit={id => { setEditNoteId(id); setShowAddNote(false) }}
-            />
+              <HealthNotesCard
+                data={data}
+                onAdd={() => { setShowAddNote(true); setEditNoteId(null) }}
+                onEdit={id => { setEditNoteId(id); setShowAddNote(false) }}
+              />
+            </div>
 
             {date === today && <RegimenUpcomingCard />}
 
