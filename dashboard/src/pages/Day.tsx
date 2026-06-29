@@ -182,6 +182,12 @@ export default function Day() {
               onEdit={id => setJournalModal({ entryId: id })}
             />
 
+            <HealthNotesCard
+              data={data}
+              onAdd={() => { setShowAddNote(true); setEditNoteId(null) }}
+              onEdit={id => { setEditNoteId(id); setShowAddNote(false) }}
+            />
+
             {date === today && <RegimenUpcomingCard />}
 
             {date === today && <LabCorrelationsCard />}
@@ -206,11 +212,6 @@ export default function Day() {
                 data={data}
                 onAdd={() => { setShowAddRegimen(true); setEditRegimenId(null) }}
                 onEdit={id => { setEditRegimenId(id); setShowAddRegimen(false) }}
-              />
-              <HealthNotesCard
-                data={data}
-                onAdd={() => { setShowAddNote(true); setEditNoteId(null) }}
-                onEdit={id => { setEditNoteId(id); setShowAddNote(false) }}
               />
             </div>
 
