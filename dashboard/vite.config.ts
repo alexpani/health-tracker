@@ -12,5 +12,12 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    // In dev il frontend usa URL relativi (/api/...): proxy verso il backend.
+    proxy: {
+      "/api": {
+        target: "http://192.168.68.166:8000",
+        changeOrigin: true,
+      },
+    },
   },
 })

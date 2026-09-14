@@ -350,10 +350,12 @@ Current seed rules (applied once, can be edited from dashboard):
 ```bash
 cd dashboard
 npm install
-VITE_API_URL=http://192.168.68.166:8000 npm run dev
+npm run dev   # usa URL API relativi (/api/*); vite fa da proxy al backend LXC
 # Prod:
 docker compose up -d --build   # → http://192.168.68.190
 ```
+
+**API base URL**: il frontend usa un base **relativo** (`VITE_API_URL` default `""`) → tutte le fetch sono `/api/*` **same-origin**. L'nginx della dashboard (`nginx.conf`) fa da reverse proxy per `location /api/` verso `http://192.168.68.166:8000`; in dev il proxy equivalente è in `vite.config.ts`. **Perché relativo e non `http://192.168.68.166:8000`**: quando la dashboard è servita via un dominio HTTPS (reverse proxy esterno), una fetch verso `http://…` è **mixed content** e **Safari la blocca in modo assoluto** (nessun override, errore "Load failed" su tutte le pagine che leggono dati); Chrome/Firefox permettono lo sblocco per-sito e quindi mascheravano il problema. Base relativa = stessa origine/HTTPS della pagina → niente mixed content e niente CORS.
 
 ### Key Files
 
@@ -562,8 +564,8 @@ ssh root@192.168.68.166 "cd /opt/health-tracker/backend && docker compose exec -
 
 # Dashboard — build host-side perche' la LXC ha 1GB RAM e vite/tsc OOM-killano
 cd dashboard && ./scripts/deploy.sh           # auto: build + scp dist + docker rebuild
-# Equivalente esplicito:
-cd dashboard && VITE_API_URL=http://192.168.68.166:8000 npm run build
+# Equivalente esplicito (base API relativa, nginx proxya /api → backend):
+cd dashboard && npm run build
 scp -r dashboard/dist dashboard/Dockerfile dashboard/nginx.conf dashboard/docker-compose.yml dashboard/.dockerignore root@192.168.68.190:/opt/ealth-dashboard/dashboard/
 ssh root@192.168.68.190 "cd /opt/ealth-dashboard/dashboard && docker compose up -d --build"
 ```

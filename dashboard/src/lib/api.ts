@@ -1,7 +1,13 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://192.168.68.166:8000"
+// Default RELATIVO (same-origin): il reverse proxy / nginx della dashboard
+// inoltra `/api/*` al backend. Cosi' quando la dashboard e' servita via HTTPS
+// le fetch restano HTTPS same-origin (niente mixed content — Safari blocca il
+// contenuto misto attivo senza possibilita' di override). Un VITE_API_URL
+// esplicito (es. per il dev) resta rispettato.
+const API_URL = import.meta.env.VITE_API_URL ?? ""
 
 export async function apiGet<T>(path: string, params?: Record<string, string | number | string[] | undefined | null>): Promise<T> {
-  const url = new URL(`${API_URL}${path}`)
+  // Base window.location.origin per supportare API_URL relativo ("").
+  const url = new URL(`${API_URL}${path}`, window.location.origin)
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
       if (v === undefined || v === null) return
