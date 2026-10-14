@@ -20,7 +20,10 @@ from decimal import Decimal
 def normalize_unit(u: str | None) -> str | None:
     if u is None:
         return None
-    s = u.strip().lower().replace("µ", "u").replace(" ", "")
+    s = u.strip().lower().replace("µ", "u").replace("μ", "u").replace(" ", "")
+    # Alcuni analizzatori racchiudono l'unita' fra parentesi quadre: "[10^3/uL]"
+    if s.startswith("[") and s.endswith("]"):
+        s = s[1:-1]
     # Normalizza unicode slash / divisione
     s = s.replace("∕", "/").replace("⁄", "/")
     return s or None
@@ -37,6 +40,15 @@ _EQUIVALENTS: list[frozenset[str]] = [
     frozenset({"nmol/l", "nm"}),
     frozenset({"mmol/l", "mm"}),
     frozenset({"ug/dl", "ug/100ml"}),
+    frozenset({"g/dl", "gr/dl"}),
+    # Na/K/Cl: ioni monovalenti, mEq/l == mmol/l
+    frozenset({"mmol/l", "meq/l"}),
+    # Conte cellulari (leucociti, piastrine): 10^3/uL == 10^3/mm3 == 10^9/l
+    frozenset({"10^3/ul", "x10^3/ul", "x10.e3/ul", "x10e3/ul", "10e3/ul",
+               "10^3/mmc", "10^3/mm3", "10^9/l", "x10^9/l"}),
+    # Conte eritrocitarie: 10^6/uL == 10^6/mm3 == 10^12/l
+    frozenset({"10^6/ul", "x10^6/ul", "x10.e6/ul", "x10e6/ul", "10e6/ul",
+               "10^6/mmc", "10^6/mm3", "10^12/l", "x10^12/l"}),
 ]
 
 
