@@ -42,6 +42,8 @@ _EQUIVALENTS: list[frozenset[str]] = [
     frozenset({"mmol/l", "mm"}),
     frozenset({"ug/dl", "ug/100ml"}),
     frozenset({"g/dl", "gr/dl"}),
+    frozenset({"s", "sec", "secondi"}),
+    frozenset({"mosm/l", "mosm/kg"}),
     # Urobilinogeno: 1 Ehrlich Unit/dL ≈ 1 mg/dL (convenzione dei dipstick)
     frozenset({"mg/dl", "e.u./dl", "eu/dl"}),
     frozenset({"mm/h", "mm/1h", "mm/1°h", "mm/1aora"}),
