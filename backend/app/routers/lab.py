@@ -663,7 +663,12 @@ def _apply_confirm_logic(result: LabResult, analyte: LabAnalyte) -> None:
 
     if analyte.value_type == "numeric":
         if result.value_numeric is None:
-            result.needs_review = True
+            # Esito testuale su analita numerico (es. urobilinogeno "assente"):
+            # lo valutiamo come qualitativo; review solo se indecidibile.
+            result.out_of_range = lab_units.qualitative_out_of_range(
+                result.value_text, result.ref_text_raw or analyte.ref_text,
+            )
+            result.needs_review = result.out_of_range is None
             return
         if analyte.unit_canonical is None:
             result.unit_normalized = result.unit_raw

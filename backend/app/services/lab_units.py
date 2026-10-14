@@ -21,6 +21,7 @@ def normalize_unit(u: str | None) -> str | None:
     if u is None:
         return None
     s = u.strip().lower().replace("µ", "u").replace("μ", "u").replace(" ", "")
+    s = s.replace("mcg", "ug").replace("mcu", "uu")
     # Alcuni analizzatori racchiudono l'unita' fra parentesi quadre: "[10^3/uL]"
     if s.startswith("[") and s.endswith("]"):
         s = s[1:-1]
@@ -34,13 +35,16 @@ def normalize_unit(u: str | None) -> str | None:
 _EQUIVALENTS: list[frozenset[str]] = [
     frozenset({"ng/ml", "ug/l"}),
     frozenset({"mg/l", "ug/ml"}),
-    frozenset({"mui/ml", "miu/ml", "mui/l", "iu/l", "u/l"}),  # U/l ≡ IU/l
-    frozenset({"uui/ml", "uiu/ml", "uiu/l"}),
+    frozenset({"mui/ml", "miu/ml", "mui/l", "iu/l", "u/l", "ui/l", "u.i./l"}),  # U/l ≡ IU/l
+    frozenset({"uui/ml", "uiu/ml", "uiu/l", "uu/ml"}),
     frozenset({"pg/ml", "ng/l"}),
     frozenset({"nmol/l", "nm"}),
     frozenset({"mmol/l", "mm"}),
     frozenset({"ug/dl", "ug/100ml"}),
     frozenset({"g/dl", "gr/dl"}),
+    # Urobilinogeno: 1 Ehrlich Unit/dL ≈ 1 mg/dL (convenzione dei dipstick)
+    frozenset({"mg/dl", "e.u./dl", "eu/dl"}),
+    frozenset({"mm/h", "mm/1h", "mm/1°h", "mm/1aora"}),
     # Na/K/Cl: ioni monovalenti, mEq/l == mmol/l
     frozenset({"mmol/l", "meq/l"}),
     # Conte cellulari (leucociti, piastrine): 10^3/uL == 10^3/mm3 == 10^9/l
@@ -93,8 +97,11 @@ def qualitative_out_of_range(value_text: str | None, ref_text: str | None) -> bo
     """
     v = _norm_text(value_text)
     r = _norm_text(ref_text)
-    if not v or not r:
+    if not v:
         return None
+    if not r:
+        # Senza riferimento: "assente"/"negativo"/"rari" non sono mai patologici.
+        return False if v in _NEGATIVE_VALUES else None
     if r in _NEGATIVE_VALUES:
         if v in _POSITIVE_MARKERS:
             return True
