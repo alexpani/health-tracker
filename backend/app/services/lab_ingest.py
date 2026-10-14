@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -25,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.services.llm_json import parse_llm_json
 
 SYSTEM_PROMPT_BASE = """Sei un parser di referti medici italiani. Ricevi un referto di analisi
 del sangue e/o delle urine (PDF testuale o scannerizzato, fai OCR se serve).
@@ -74,7 +74,7 @@ def build_system_prompt(catalog: list[dict[str, Any]]) -> str:
     return SYSTEM_PROMPT_BASE + "\n" + "\n".join(lines)
 
 TRGM_SIMILARITY_THRESHOLD = 0.6
-MAX_LLM_TOKENS = 4096
+MAX_LLM_TOKENS = 16000
 
 
 # ---------------------------------------------------------------------------
@@ -187,19 +187,7 @@ def call_llm(pdf_bytes: bytes, catalog: list[dict[str, Any]] | None = None) -> d
     body = "".join(
         block.text for block in resp.content if getattr(block, "type", None) == "text"
     )
-    # Alcuni modelli avvolgono il JSON in un codice-fence: strip se presente.
-    body = body.strip()
-    if body.startswith("```"):
-        body = body.strip("`")
-        # Rimuovi eventuale `json\n` iniziale
-        first_nl = body.find("\n")
-        if first_nl != -1 and not body[:first_nl].strip().startswith("{"):
-            body = body[first_nl + 1 :]
-        body = body.rsplit("```", 1)[0].strip()
-    try:
-        return json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Risposta LLM non è JSON valido: {exc}\nBody: {body[:500]!r}") from exc
+    return parse_llm_json(body, stop_reason=getattr(resp, "stop_reason", None))
 
 
 # ---------------------------------------------------------------------------

@@ -14,7 +14,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
-import json
 import logging
 import tempfile
 from dataclasses import dataclass
@@ -23,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
+from app.services.llm_json import parse_llm_json
 
 logger = logging.getLogger(__name__)
 
@@ -210,17 +210,8 @@ def call_llm(
     )
     body = "".join(
         block.text for block in resp.content if getattr(block, "type", None) == "text"
-    ).strip()
-    if body.startswith("```"):
-        body = body.strip("`")
-        first_nl = body.find("\n")
-        if first_nl != -1 and not body[:first_nl].strip().startswith("{"):
-            body = body[first_nl + 1:]
-        body = body.rsplit("```", 1)[0].strip()
-    try:
-        return json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Risposta LLM non e' JSON valido: {exc}\nBody: {body[:300]!r}") from exc
+    )
+    return parse_llm_json(body, stop_reason=getattr(resp, "stop_reason", None))
 
 
 def parse_extracted_meta(payload: dict[str, Any]) -> ExtractedMeta:

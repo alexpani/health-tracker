@@ -129,6 +129,17 @@ async def ingest_referto(
             select(LabPanel).where(LabPanel.document_id == existing_doc.id)
             .order_by(LabPanel.id.desc()).limit(1)
         )).scalar_one_or_none()
+        # Panel di un parsing fallito (vuoto): lo scartiamo e rianalizziamo
+        # il PDF, cosi' ricaricarlo dopo un errore IA non restituisce il
+        # panel vuoto.
+        if existing_panel is not None and existing_panel.notes == "parsing_failed":
+            has_results = (await db.execute(
+                select(LabResult.id).where(LabResult.panel_id == existing_panel.id).limit(1)
+            )).first() is not None
+            if not has_results:
+                await db.delete(existing_panel)
+                await db.flush()
+                existing_panel = None
         if existing_panel is not None:
             return {
                 "panel_id": existing_panel.id,
