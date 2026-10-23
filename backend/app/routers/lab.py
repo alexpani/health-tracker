@@ -1666,7 +1666,6 @@ async def get_correlations(
     )
     if panel_id is not None:
         candidates = [c for c in candidates if c["cur_panel_id"] == panel_id]
-    candidates = candidates[:limit]
 
     # 4. Annotazioni cacheate + enqueue delle mancanti.
     sigs = [c["signature"] for c in candidates]
@@ -1722,6 +1721,10 @@ async def get_correlations(
                 and c["annotation"].get("plausibility") in _WEAK
             )
         ]
+    # Il limit va applicato DOPO il filtro rumore: tagliando prima per score,
+    # le candidate deboli (la maggioranza) spingevano fuori quelle rilevanti
+    # con score basso (es. intervalli lunghi fra prelievi).
+    candidates = candidates[:limit]
 
     # 5. Lookup per la Matrice: by_cell[analyte_id][cur_panel_id].
     by_cell: dict[str, dict[str, Any]] = {}
