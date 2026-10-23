@@ -23,7 +23,7 @@ from datetime import date
 
 # --- Costanti tunabili ------------------------------------------------------
 REL_DELTA_THRESHOLD = 0.20      # |variazione relativa| minima per segnalare
-MAX_INTERVAL_DAYS = 120         # oltre questo intervallo fra i due prelievi: scarta
+MAX_INTERVAL_DAYS = 180         # oltre questo intervallo fra i due prelievi: scarta
 SWITCH_GAP_DAYS = 31            # gap max fra fine di un periodo e inizio del
                                 # successivo per considerarlo un "cambio dose"
 TOP_N_ANNOTATE = 12             # cap candidate da inviare all'IA
