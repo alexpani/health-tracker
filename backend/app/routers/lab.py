@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -1551,6 +1552,58 @@ async def recent_out_of_range(
 _PLAUS_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
 
 
+_LOCAL_TZ = ZoneInfo("Europe/Rome")
+_WORKOUT_LABELS = {
+    37: "corsa", 52: "camminata", 13: "ciclismo", 46: "nuoto",
+    50: "forza", 20: "forza funzionale", 63: "HIIT", 24: "escursionismo",
+}
+
+
+def _workout_summary(rows: list[Workout]) -> dict[str, Any]:
+    return {
+        "count": len(rows),
+        "minutes": round(sum((w.duration or 0) for w in rows) / 60),
+        "km": round(sum((w.total_distance or 0) for w in rows) / 1000, 1),
+    }
+
+
+async def _workout_context(db: AsyncSession, draw: date) -> dict[str, Any]:
+    """Contesto allenamenti attorno a un prelievo: ultimo workout del giorno
+    prima (o precedente), workout nello stesso giorno (orario prelievo ignoto)
+    e volume nei 7/30 giorni precedenti. Serve all'IA per valutare se lo sforzo
+    fisico spiega la variazione (es. AST/CK/LDH/creatinina)."""
+    sod = datetime.combine(draw, time.min, tzinfo=_LOCAL_TZ)
+    eod = sod + timedelta(days=1)
+    rows = (await db.execute(
+        select(Workout)
+        .where(Workout.start_date >= sod - timedelta(days=30), Workout.start_date < eod)
+        .order_by(Workout.start_date.desc())
+    )).scalars().all()
+    before = [w for w in rows if w.start_date < sod]
+    same_day = [w for w in rows if w.start_date >= sod]
+    last = before[0] if before else (await db.execute(
+        select(Workout).where(Workout.start_date < sod)
+        .order_by(Workout.start_date.desc()).limit(1)
+    )).scalar_one_or_none()
+
+    def describe(w: Workout) -> dict[str, Any]:
+        d = w.start_date.astimezone(_LOCAL_TZ).date()
+        return {
+            "date": d.isoformat(),
+            "days_before": (draw - d).days,
+            "type": _WORKOUT_LABELS.get(w.activity_type, f"attivita' {w.activity_type}"),
+            "minutes": round((w.duration or 0) / 60),
+            "km": round((w.total_distance or 0) / 1000, 1),
+        }
+
+    return {
+        "last": describe(last) if last else None,
+        "same_day": [describe(w) for w in same_day],
+        "d7": _workout_summary([w for w in before if w.start_date >= sod - timedelta(days=7)]),
+        "d30": _workout_summary(before),
+    }
+
+
 async def _annotate_correlations(candidates: list[dict[str, Any]]) -> None:
     """Background fill: per ogni candidata con annotazione ancora `pending`
     chiama l'IA (sequenziale, LXC 1GB) e aggiorna la riga a done/failed."""
@@ -1707,6 +1760,16 @@ async def get_correlations(
             c["annotation"] = {"status": "pending"}
     if to_annotate:
         await db.commit()
+        ctx_by_date: dict[str, dict[str, Any]] = {}
+        for c in to_annotate:
+            for key in ("prev_date", "cur_date"):
+                d = c[key]
+                if d not in ctx_by_date:
+                    ctx_by_date[d] = await _workout_context(db, date.fromisoformat(d))
+            c["workout_context"] = {
+                "prev": ctx_by_date[c["prev_date"]],
+                "cur": ctx_by_date[c["cur_date"]],
+            }
         background_tasks.add_task(_annotate_correlations, to_annotate)
 
     # 4b. Filtro rumore: scarta le candidate gia' giudicate deboli (none/low).

@@ -96,6 +96,19 @@ def test_llm_helpers():
     }
     msg = build_user_message(cand)
     assert "Allopurinolo" in msg and "ALT" in msg
+    assert "Contesto allenamenti" not in msg
+    cand.update(prev_date="2025-01-01", cur_date="2025-03-01", workout_context={
+        "prev": {"last": {"date": "2024-12-31", "days_before": 1, "type": "corsa",
+                          "minutes": 54, "km": 7.2}, "same_day": [],
+                 "d7": {"count": 3, "minutes": 150, "km": 20.0},
+                 "d30": {"count": 12, "minutes": 600, "km": 80.0}},
+        "cur": {"last": None, "same_day": [], "d7": {"count": 0, "minutes": 0, "km": 0},
+                "d30": {"count": 0, "minutes": 0, "km": 0}},
+    })
+    msg = build_user_message(cand)
+    assert "2025-01-01" in msg and "2025-03-01" in msg
+    assert "ultimo workout il 2024-12-31 (1 giorni prima): corsa 54 min" in msg
+    assert "nessun workout registrato prima del prelievo" in msg
     ann = parse_annotation({"plausibility": "HIGH", "is_known_association": True,
                             "mechanism_text": " ok "})
     assert ann.plausibility == "high"  # clamp/lower

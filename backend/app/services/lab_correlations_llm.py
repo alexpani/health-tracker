@@ -53,7 +53,13 @@ Rispondi SOLO con questo JSON (niente testo prima/dopo, niente markdown):
   meccanismo noto oppure dichiara l'incertezza. Niente consigli, niente "dovresti".
 
 Regole: non inventare nessi inesistenti; se incerto usa plausibility bassa e
-dillo nel mechanism_text."""
+dillo nel mechanism_text.
+
+Se e' fornito il contesto allenamenti attorno ai due prelievi (dati reali dal
+diario workout), usalo per valutare la tempistica: lo sforzo fisico nei giorni
+precedenti un prelievo puo' alterare analiti come AST, ALT, CK, LDH, creatinina,
+urea, potassio, emocromo. Non dire che la tempistica e' ignota se il contesto
+c'e'; l'orario esatto del prelievo nel giorno invece non e' noto."""
 
 
 @dataclass
@@ -61,6 +67,30 @@ class Annotation:
     plausibility: str
     is_known_association: bool
     mechanism_text: str | None
+
+
+def _format_workout_context(ctx: dict[str, Any] | None) -> str:
+    if not ctx:
+        return "nessun dato"
+    parts = []
+    last = ctx.get("last")
+    if last:
+        km = f", {last['km']} km" if last.get("km") else ""
+        parts.append(
+            f"ultimo workout il {last['date']} ({last['days_before']} giorni prima): "
+            f"{last['type']} {last['minutes']} min{km}"
+        )
+    else:
+        parts.append("nessun workout registrato prima del prelievo")
+    for w in ctx.get("same_day") or []:
+        parts.append(f"lo stesso giorno (orario rispetto al prelievo ignoto): {w['type']} {w['minutes']} min")
+    for key, label in (("d7", "7"), ("d30", "30")):
+        v = ctx.get(key) or {}
+        parts.append(
+            f"ultimi {label} giorni: {v.get('count', 0)} workout, "
+            f"{v.get('minutes', 0)} min, {v.get('km', 0)} km"
+        )
+    return "; ".join(parts)
 
 
 def build_user_message(c: dict[str, Any]) -> str:
@@ -79,13 +109,24 @@ def build_user_message(c: dict[str, Any]) -> str:
     rel = c.get("rel_delta")
     rel_bit = f" ({rel*100:+.0f}%)" if isinstance(rel, (int, float)) else ""
     src = "farmaco/integratore/regime" if f.get("source") == "regimen" else "nota di salute"
+    wctx = c.get("workout_context") or {}
+    workout_bit = ""
+    if wctx:
+        workout_bit = (
+            f"Contesto allenamenti prima del prelievo del {c.get('prev_date')}: "
+            f"{_format_workout_context(wctx.get('prev'))}.\n"
+            f"Contesto allenamenti prima del prelievo del {c.get('cur_date')}: "
+            f"{_format_workout_context(wctx.get('cur'))}.\n"
+        )
     return (
         f"Analita: {c.get('analyte_name')} (categoria: {c.get('analyte_category')}).\n"
-        f"Variazione fra due prelievi a {c.get('interval_days')} giorni di distanza: "
+        f"Variazione fra il prelievo del {c.get('prev_date')} e quello del "
+        f"{c.get('cur_date')} ({c.get('interval_days')} giorni di distanza): "
         f"da {c.get('prev_value')} a {c.get('cur_value')} {c.get('unit') or ''}{rel_bit}, "
         f"{direction}{oor_bit}.\n"
         f"Evento concomitante ({src}): \"{f.get('name')}\" {change}{dose_bit} "
         f"il {f.get('event_date')}.\n"
+        f"{workout_bit}"
         f"Valuta la plausibilita' che l'evento spieghi la variazione dell'analita."
     )
 
