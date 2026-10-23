@@ -59,7 +59,14 @@ Se e' fornito il contesto allenamenti attorno ai due prelievi (dati reali dal
 diario workout), usalo per valutare la tempistica: lo sforzo fisico nei giorni
 precedenti un prelievo puo' alterare analiti come AST, ALT, CK, LDH, creatinina,
 urea, potassio, emocromo. Non dire che la tempistica e' ignota se il contesto
-c'e'; l'orario esatto del prelievo nel giorno invece non e' noto."""
+c'e'; l'orario esatto del prelievo nel giorno invece non e' noto.
+
+Se l'evento e' avvenuto PRIMA del primo prelievo, valuta un effetto ritardato
+(es. un cambio dose pochi giorni prima del primo prelievo puo' manifestarsi solo
+al secondo). Se sono elencate le terapie in corso ai due prelievi, considerale
+come spiegazioni alternative: se un'altra terapia spiega meglio la variazione
+(es. riduzione della dose di un ipouricemizzante → rialzo dell'acido urico),
+abbassa la plausibilita' dell'evento valutato e citala nel mechanism_text."""
 
 
 @dataclass
@@ -93,6 +100,14 @@ def _format_workout_context(ctx: dict[str, Any] | None) -> str:
     return "; ".join(parts)
 
 
+def _format_therapies(items: list[dict[str, Any]] | None) -> str:
+    if not items:
+        return "nessuna registrata"
+    return ", ".join(
+        f"{t['name']} {t['dose']}" if t.get("dose") else t["name"] for t in items
+    )
+
+
 def build_user_message(c: dict[str, Any]) -> str:
     f = c.get("factor", {})
     change = _CHANGE_LABELS.get(f.get("change_type", ""), f.get("change_type", ""))
@@ -109,6 +124,21 @@ def build_user_message(c: dict[str, Any]) -> str:
     rel = c.get("rel_delta")
     rel_bit = f" ({rel*100:+.0f}%)" if isinstance(rel, (int, float)) else ""
     src = "farmaco/integratore/regime" if f.get("source") == "regimen" else "nota di salute"
+    timing_bit = ""
+    if f.get("before_prev_draw"):
+        timing_bit = (
+            f" (PRIMA del prelievo del {c.get('prev_date')}: valuta un possibile "
+            f"effetto ritardato visibile solo al prelievo del {c.get('cur_date')})"
+        )
+    therapy = c.get("therapy_context") or {}
+    therapy_bit = ""
+    if therapy:
+        therapy_bit = (
+            f"Terapie/integratori/diete in corso al prelievo del {c.get('prev_date')}: "
+            f"{_format_therapies(therapy.get('prev'))}.\n"
+            f"Terapie/integratori/diete in corso al prelievo del {c.get('cur_date')}: "
+            f"{_format_therapies(therapy.get('cur'))}.\n"
+        )
     wctx = c.get("workout_context") or {}
     workout_bit = ""
     if wctx:
@@ -125,7 +155,8 @@ def build_user_message(c: dict[str, Any]) -> str:
         f"da {c.get('prev_value')} a {c.get('cur_value')} {c.get('unit') or ''}{rel_bit}, "
         f"{direction}{oor_bit}.\n"
         f"Evento concomitante ({src}): \"{f.get('name')}\" {change}{dose_bit} "
-        f"il {f.get('event_date')}.\n"
+        f"il {f.get('event_date')}{timing_bit}.\n"
+        f"{therapy_bit}"
         f"{workout_bit}"
         f"Valuta la plausibilita' che l'evento spieghi la variazione dell'analita."
     )

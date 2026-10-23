@@ -70,6 +70,34 @@ def test_small_change_no_candidate():
     assert lc.compute_candidates(series, regimens, []) == []
 
 
+def test_dose_change_before_prev_draw_is_lagged():
+    # Allopurinolo 300→100mg il 9/05, prelievi 1/06 (4.7) e 13/10 (6.2):
+    # il cambio precede il primo prelievo ma l'effetto si vede al secondo.
+    series = [lc.AnalyteSeries(
+        id=12, slug="uric_acid", name="Acido urico", category="metabolismo",
+        ref_low=3.4, ref_high=7.0,
+        points=[
+            lc.Point(panel_id=1, test_date=date(2026, 6, 1), value=4.7,
+                     out_of_range=False, unit="mg/dl"),
+            lc.Point(panel_id=2, test_date=date(2026, 10, 13), value=6.2,
+                     out_of_range=False, unit="mg/dl"),
+        ],
+    )]
+    regimens = [
+        lc.RegimenRow(id=1, kind="medication", name="Allopurinolo",
+                      start_date=date(2026, 2, 27), end_date=date(2026, 5, 8), dose="300mg"),
+        lc.RegimenRow(id=2, kind="medication", name="Allopurinolo",
+                      start_date=date(2026, 5, 9), end_date=None, dose="100mg"),
+    ]
+    out = lc.compute_candidates(series, regimens, [])
+    assert len(out) == 1
+    f = out[0]["factor"]
+    assert f["change_type"] == "dose_decrease"
+    assert f["before_prev_draw"] is True
+    active = lc.active_regimens_on(regimens, date(2026, 10, 13))
+    assert active == [{"kind": "medication", "name": "Allopurinolo", "dose": "100mg"}]
+
+
 def test_parse_dose_magnitude():
     assert lc.parse_dose_magnitude("300mg") == (300.0, "mg")
     assert lc.parse_dose_magnitude("2,5 mg") == (2.5, "mg")
@@ -109,6 +137,11 @@ def test_llm_helpers():
     assert "2025-01-01" in msg and "2025-03-01" in msg
     assert "ultimo workout il 2024-12-31 (1 giorni prima): corsa 54 min" in msg
     assert "nessun workout registrato prima del prelievo" in msg
+    cand["factor"]["before_prev_draw"] = True
+    cand["therapy_context"] = {"prev": [{"kind": "medication", "name": "Allopurinolo", "dose": "100mg"}], "cur": []}
+    msg = build_user_message(cand)
+    assert "effetto ritardato" in msg
+    assert "in corso al prelievo del 2025-01-01: Allopurinolo 100mg" in msg
     ann = parse_annotation({"plausibility": "HIGH", "is_known_association": True,
                             "mechanism_text": " ok "})
     assert ann.plausibility == "high"  # clamp/lower

@@ -1690,7 +1690,8 @@ async def get_correlations(
         select(Regimen).where(
             Regimen.kind.in_(lab_correlations.REGIMEN_KINDS),
             (Regimen.start_date.is_(None)) | (Regimen.start_date <= hi),
-            (Regimen.end_date.is_(None)) | (Regimen.end_date >= lo),
+            (Regimen.end_date.is_(None))
+            | (Regimen.end_date >= lo - timedelta(days=lab_correlations.LAG_DAYS)),
         )
     )).scalars().all()
     regimens = [
@@ -1702,7 +1703,8 @@ async def get_correlations(
     ]
     note_rows = (await db.execute(
         select(HealthNote).where(
-            HealthNote.start_date <= hi, HealthNote.end_date >= lo
+            HealthNote.start_date <= hi,
+            HealthNote.end_date >= lo - timedelta(days=lab_correlations.LAG_DAYS),
         )
     )).scalars().all()
     notes = [
@@ -1769,6 +1771,12 @@ async def get_correlations(
             c["workout_context"] = {
                 "prev": ctx_by_date[c["prev_date"]],
                 "cur": ctx_by_date[c["cur_date"]],
+            }
+            c["therapy_context"] = {
+                key: lab_correlations.active_regimens_on(
+                    regimens, date.fromisoformat(c[f"{key}_date"])
+                )
+                for key in ("prev", "cur")
             }
         background_tasks.add_task(_annotate_correlations, to_annotate)
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, asdict
-from datetime import date
+from datetime import date, timedelta
 
 # --- Costanti tunabili ------------------------------------------------------
 REL_DELTA_THRESHOLD = 0.20      # |variazione relativa| minima per segnalare
@@ -27,6 +27,10 @@ MAX_INTERVAL_DAYS = 180         # oltre questo intervallo fra i due prelievi: sc
 SWITCH_GAP_DAYS = 31            # gap max fra fine di un periodo e inizio del
                                 # successivo per considerarlo un "cambio dose"
 TOP_N_ANNOTATE = 12             # cap candidate da inviare all'IA
+LAG_DAYS = 45                   # effetto ritardato: considera anche eventi fino
+                                # a N giorni PRIMA del prelievo precedente (es.
+                                # cambio dose poco prima del prelievo, il cui
+                                # effetto si vede solo al prelievo successivo)
 
 # Pesi dello score (solo per il ranking, NON un claim clinico).
 W_DELTA = 0.4
@@ -129,6 +133,7 @@ class Factor:
     new_dose: str | None
     ref_id: int
     event_date: str      # ISO
+    before_prev_draw: bool = False  # evento antecedente al prelievo precedente (effetto ritardato)
 
 
 # --- Eventi nell'intervallo -------------------------------------------------
@@ -204,6 +209,19 @@ def _note_events(notes: list[NoteRow], lo: date, hi: date) -> list[Factor]:
     return out
 
 
+def active_regimens_on(regimens: list[RegimenRow], d: date) -> list[dict]:
+    """Farmaci/integratori/diete attivi in un giorno, con la dose: contesto per
+    l'IA (spiegazioni alternative, terapie concomitanti)."""
+    out = []
+    for r in regimens:
+        if r.kind not in ("medication", "supplement", "diet"):
+            continue
+        if (r.start_date is None or r.start_date <= d) and (r.end_date is None or r.end_date >= d):
+            out.append({"kind": r.kind, "name": r.name, "dose": r.dose})
+    out.sort(key=lambda x: (x["kind"], x["name"].lower()))
+    return out
+
+
 # --- Scoring ----------------------------------------------------------------
 
 def _oor_transition(prev_oor: bool | None, cur_oor: bool | None) -> str:
@@ -261,11 +279,13 @@ def compute_candidates(
             if not significant:
                 continue
 
+            lo = prev.test_date - timedelta(days=LAG_DAYS)
             events = (
-                _regimen_events(regimens, prev.test_date, cur.test_date)
-                + _note_events(notes, prev.test_date, cur.test_date)
+                _regimen_events(regimens, lo, cur.test_date)
+                + _note_events(notes, lo, cur.test_date)
             )
             for f in events:
+                f.before_prev_draw = f.event_date <= prev.test_date.isoformat()
                 score = _score(rel_delta, oor, f.change_type, direction, interval_days)
                 signature = (
                     f"{s.id}:{prev.panel_id}:{cur.panel_id}:"
