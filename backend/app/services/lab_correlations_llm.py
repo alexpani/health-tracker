@@ -66,7 +66,13 @@ Se l'evento e' avvenuto PRIMA del primo prelievo, valuta un effetto ritardato
 al secondo). Se sono elencate le terapie in corso ai due prelievi, considerale
 come spiegazioni alternative: se un'altra terapia spiega meglio la variazione
 (es. riduzione della dose di un ipouricemizzante → rialzo dell'acido urico),
-abbassa la plausibilita' dell'evento valutato e citala nel mechanism_text."""
+abbassa la plausibilita' dell'evento valutato e citala nel mechanism_text.
+
+Se sono forniti peso, % di grasso e massa magra ai due prelievi, considera la
+variazione di peso/composizione corporea come possibile fattore concorrente
+(es. aumento di massa grassa → acido urico, transaminasi, Gamma GT, lipidi,
+glicemia) e citala se rilevante. Non dire che il peso non e' valutabile se il
+dato c'e'."""
 
 
 @dataclass
@@ -108,6 +114,19 @@ def _format_therapies(items: list[dict[str, Any]] | None) -> str:
     )
 
 
+def _format_body(b: dict[str, Any] | None) -> str:
+    if not b:
+        return "nessun dato nei 14 giorni precedenti"
+    parts = []
+    if "weight_kg" in b:
+        parts.append(f"peso {b['weight_kg']} kg (del {b['weight_kg_date']})")
+    if "body_fat_pct" in b:
+        parts.append(f"massa grassa {b['body_fat_pct']}%")
+    if "lean_mass_kg" in b:
+        parts.append(f"massa magra {b['lean_mass_kg']} kg")
+    return ", ".join(parts)
+
+
 def build_user_message(c: dict[str, Any]) -> str:
     f = c.get("factor", {})
     change = _CHANGE_LABELS.get(f.get("change_type", ""), f.get("change_type", ""))
@@ -139,6 +158,15 @@ def build_user_message(c: dict[str, Any]) -> str:
             f"Terapie/integratori/diete in corso al prelievo del {c.get('cur_date')}: "
             f"{_format_therapies(therapy.get('cur'))}.\n"
         )
+    body = c.get("body_context") or {}
+    body_bit = ""
+    if body:
+        body_bit = (
+            f"Composizione corporea al prelievo del {c.get('prev_date')}: "
+            f"{_format_body(body.get('prev'))}.\n"
+            f"Composizione corporea al prelievo del {c.get('cur_date')}: "
+            f"{_format_body(body.get('cur'))}.\n"
+        )
     wctx = c.get("workout_context") or {}
     workout_bit = ""
     if wctx:
@@ -157,6 +185,7 @@ def build_user_message(c: dict[str, Any]) -> str:
         f"Evento concomitante ({src}): \"{f.get('name')}\" {change}{dose_bit} "
         f"il {f.get('event_date')}{timing_bit}.\n"
         f"{therapy_bit}"
+        f"{body_bit}"
         f"{workout_bit}"
         f"Valuta la plausibilita' che l'evento spieghi la variazione dell'analita."
     )

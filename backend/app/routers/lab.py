@@ -1604,6 +1604,40 @@ async def _workout_context(db: AsyncSession, draw: date) -> dict[str, Any]:
     }
 
 
+_BODY_TYPES = {
+    "HKQuantityTypeIdentifierBodyMass": "weight_kg",
+    "HKQuantityTypeIdentifierBodyFatPercentage": "body_fat_pct",
+    "HKQuantityTypeIdentifierLeanBodyMass": "lean_mass_kg",
+}
+BODY_CONTEXT_DAYS = 14
+
+
+async def _body_context(db: AsyncSession, draw: date) -> dict[str, Any]:
+    """Peso, % grasso e massa magra al prelievo: ultimo valore entro
+    BODY_CONTEXT_DAYS giorni (fino a fine giornata del prelievo). Serve all'IA
+    per valutare variazioni di peso/composizione come fattore (es. acido urico,
+    transaminasi, Gamma GT, lipidi)."""
+    eod = datetime.combine(draw, time.min, tzinfo=_LOCAL_TZ) + timedelta(days=1)
+    out: dict[str, Any] = {}
+    for hk_type, key in _BODY_TYPES.items():
+        row = (await db.execute(
+            select(HealthSample.value, HealthSample.start_date)
+            .where(
+                HealthSample.type == hk_type,
+                HealthSample.start_date < eod,
+                HealthSample.start_date >= eod - timedelta(days=BODY_CONTEXT_DAYS + 1),
+            )
+            .order_by(HealthSample.start_date.desc())
+            .limit(1)
+        )).first()
+        if row is None:
+            continue
+        value = row.value * 100 if key == "body_fat_pct" else row.value  # HK: frazione 0-1
+        out[key] = round(value, 1)
+        out[f"{key}_date"] = row.start_date.astimezone(_LOCAL_TZ).date().isoformat()
+    return out
+
+
 async def _annotate_correlations(candidates: list[dict[str, Any]]) -> None:
     """Background fill: per ogni candidata con annotazione ancora `pending`
     chiama l'IA (sequenziale, LXC 1GB) e aggiorna la riga a done/failed."""
@@ -1763,14 +1797,20 @@ async def get_correlations(
     if to_annotate:
         await db.commit()
         ctx_by_date: dict[str, dict[str, Any]] = {}
+        body_by_date: dict[str, dict[str, Any]] = {}
         for c in to_annotate:
             for key in ("prev_date", "cur_date"):
                 d = c[key]
                 if d not in ctx_by_date:
                     ctx_by_date[d] = await _workout_context(db, date.fromisoformat(d))
+                    body_by_date[d] = await _body_context(db, date.fromisoformat(d))
             c["workout_context"] = {
                 "prev": ctx_by_date[c["prev_date"]],
                 "cur": ctx_by_date[c["cur_date"]],
+            }
+            c["body_context"] = {
+                "prev": body_by_date[c["prev_date"]],
+                "cur": body_by_date[c["cur_date"]],
             }
             c["therapy_context"] = {
                 key: lab_correlations.active_regimens_on(

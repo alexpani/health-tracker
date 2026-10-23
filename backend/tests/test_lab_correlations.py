@@ -142,6 +142,15 @@ def test_llm_helpers():
     msg = build_user_message(cand)
     assert "effetto ritardato" in msg
     assert "in corso al prelievo del 2025-01-01: Allopurinolo 100mg" in msg
+    assert "Composizione corporea" not in msg
+    cand["body_context"] = {
+        "prev": {"weight_kg": 76.6, "weight_kg_date": "2024-12-30",
+                 "body_fat_pct": 20.3, "lean_mass_kg": 61.0},
+        "cur": {},
+    }
+    msg = build_user_message(cand)
+    assert "prelievo del 2025-01-01: peso 76.6 kg (del 2024-12-30), massa grassa 20.3%, massa magra 61.0 kg" in msg
+    assert "prelievo del 2025-03-01: nessun dato nei 14 giorni precedenti" in msg
     ann = parse_annotation({"plausibility": "HIGH", "is_known_association": True,
                             "mechanism_text": " ok "})
     assert ann.plausibility == "high"  # clamp/lower
