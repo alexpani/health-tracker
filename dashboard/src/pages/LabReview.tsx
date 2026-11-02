@@ -87,7 +87,10 @@ export default function LabReview() {
   )
 
   if (!panelId) return <p>ID non valido.</p>
-  if (isLoading || !panel) return <p>Caricamento…</p>
+  // Aspettiamo anche il catalogo analiti: le righe inizializzano il campo
+  // nome da `analyteById`, e se fosse ancora vuoto il campo partirebbe
+  // vuoto e il primo blur azzererebbe la mappatura fatta all'ingest.
+  if (isLoading || !panel || !analytes) return <p>Caricamento…</p>
 
   const isConfirmed = panel.status === "confirmed"
   const unmatchedCount = panel.results.filter(r => r.analyte_id == null).length
@@ -366,6 +369,11 @@ function ResultRow({
 }) {
   const current = result.analyte_id != null ? analyteById.get(result.analyte_id) : undefined
   const [nameInput, setNameInput] = useState(current?.display_name_it ?? "")
+  // Riallinea il campo quando cambia l'analita mappato lato server (es.
+  // catalogo caricato in ritardo, analita creato dalla riga, re-fetch).
+  useEffect(() => {
+    setNameInput(current?.display_name_it ?? "")
+  }, [current?.id, current?.display_name_it])
   // Edit inline di valore/unità/range — bufferizziamo in stato locale e
   // committiamo al blur. Se il server aggiorna il result (es. re-fetch
   // dopo PATCH), i valori locali restano sincronizzati via useEffect
