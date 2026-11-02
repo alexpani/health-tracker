@@ -810,6 +810,8 @@ export interface LabCorrelationFactor {
   new_dose: string | null
   ref_id: number
   event_date: string
+  /** Solo note di salute: testo completo (`name` è un'etichetta breve). */
+  note_text?: string | null
   /** Note di salute vicine all'evento di regime, unite come contesto. */
   related_notes?: LabCorrelationRelatedNote[]
 }

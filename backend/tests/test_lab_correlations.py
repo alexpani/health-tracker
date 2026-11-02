@@ -259,3 +259,24 @@ def test_whole_note_merged_even_if_it_ends_later():
     notes = out[0]["factor"]["related_notes"]
     assert len(notes) == 1 and notes[0]["end_date"] == "2026-11-02"
     assert "dal 2026-10-21 al 2026-11-02" in build_user_message(out[0])
+
+
+def test_standalone_note_keeps_full_text():
+    long_text = ("La dottoressa mi ha proposto di sospendere le statine per "
+                 "7-10gg come detox visti i valori elevati del fegato")
+    series = [_series_transaminasi()]
+    notes = [
+        lc.NoteRow(id=1, category="other", body_zone=None, text=long_text,
+                   start_date=date(2025, 2, 1), end_date=date(2025, 2, 1)),
+        lc.NoteRow(id=2, category="pain", body_zone="Cervicale/collo",
+                   text="Dolore al collo dopo la palestra",
+                   start_date=date(2025, 2, 5), end_date=date(2025, 2, 5)),
+    ]
+    out = lc.compute_candidates(series, [], notes)
+    by_id = {c["factor"]["ref_id"]: c for c in out}
+    # name resta corto (chiave della signature), note_text e' completo
+    assert by_id[1]["factor"]["name"] == long_text[:40]
+    assert by_id[1]["factor"]["note_text"] == long_text
+    assert f'"{long_text}"' in build_user_message(by_id[1])
+    msg = build_user_message(by_id[2])
+    assert '"Dolore al collo dopo la palestra" (zona: Cervicale/collo)' in msg

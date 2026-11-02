@@ -141,6 +141,9 @@ class Factor:
     ref_id: int
     event_date: str      # ISO
     before_prev_draw: bool = False  # evento antecedente al prelievo precedente (effetto ritardato)
+    # Solo per source='health_note': testo completo della nota. `name` resta
+    # l'etichetta breve (zona, o i primi 40 caratteri) usata nella signature.
+    note_text: str | None = None
     # Note di salute vicine all'evento di regime, unite come contesto.
     related_notes: list[dict] = field(default_factory=list)
 
@@ -207,13 +210,13 @@ def _note_events(notes: list[NoteRow], lo: date, hi: date) -> list[Factor]:
             out.append(Factor(
                 source="health_note", kind=n.category, name=n.body_zone or n.text[:40],
                 change_type="note_started", old_dose=None, new_dose=None,
-                ref_id=n.id, event_date=n.start_date.isoformat(),
+                ref_id=n.id, event_date=n.start_date.isoformat(), note_text=n.text,
             ))
         if n.end_date != n.start_date and lo < n.end_date <= hi:
             out.append(Factor(
                 source="health_note", kind=n.category, name=n.body_zone or n.text[:40],
                 change_type="note_resolved", old_dose=None, new_dose=None,
-                ref_id=n.id, event_date=n.end_date.isoformat(),
+                ref_id=n.id, event_date=n.end_date.isoformat(), note_text=n.text,
             ))
     return out
 
@@ -285,7 +288,7 @@ def input_fingerprint(c: dict) -> str:
         "prev": [c["prev_date"], c["prev_value"], c.get("prev_out_of_range")],
         "cur": [c["cur_date"], c["cur_value"], c.get("cur_out_of_range")],
         "factor": [f["name"], f["old_dose"], f["new_dose"], f["event_date"],
-                   f["before_prev_draw"]],
+                   f["before_prev_draw"], f.get("note_text")],
         "notes": [[n["text"], n["start_date"], n["end_date"]]
                   for n in f.get("related_notes", [])],
         "therapy": c.get("therapy_context"),

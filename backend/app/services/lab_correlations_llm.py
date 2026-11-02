@@ -127,6 +127,17 @@ def _format_body(b: dict[str, Any] | None) -> str:
     return ", ".join(parts)
 
 
+def _event_label(f: dict[str, Any]) -> str:
+    """Nome dell'evento per il prompt. Per le note di salute usa il testo
+    completo: `name` e' solo un'etichetta breve (zona o primi 40 caratteri)."""
+    text = f.get("note_text")
+    if not text:
+        return f"\"{f.get('name')}\""
+    if f.get("name") and f["name"] != text[:40]:
+        return f"\"{text}\" (zona: {f['name']})"
+    return f"\"{text}\""
+
+
 def _note_period(n: dict[str, Any]) -> str:
     if n.get("end_date") and n.get("end_date") != n.get("start_date"):
         return f"dal {n.get('start_date')} al {n.get('end_date')}"
@@ -198,7 +209,7 @@ def build_user_message(c: dict[str, Any]) -> str:
         f"{c.get('cur_date')} ({c.get('interval_days')} giorni di distanza): "
         f"da {c.get('prev_value')} a {c.get('cur_value')} {c.get('unit') or ''}{rel_bit}, "
         f"{direction}{oor_bit}.\n"
-        f"Evento concomitante ({src}): \"{f.get('name')}\" {change}{dose_bit} "
+        f"Evento concomitante ({src}): {_event_label(f)} {change}{dose_bit} "
         f"il {f.get('event_date')}{timing_bit}.\n"
         f"{notes_bit}"
         f"{therapy_bit}"

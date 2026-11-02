@@ -98,6 +98,13 @@ const KIND_LABELS: Record<string, string> = {
   other: "Nota",
 }
 
+/** Per le note senza zona `name` sono solo i primi 40 caratteri: mostra il
+ * testo completo. Con la zona, il testo va su una riga a parte nella card. */
+function factorLabel(f: LabCorrelationCandidate["factor"]): string {
+  if (f.note_text && f.name === f.note_text.slice(0, 40)) return f.note_text
+  return f.name
+}
+
 export function factorSummary(c: LabCorrelationCandidate): string {
   const f = c.factor
   const change = CHANGE_LABELS[f.change_type] ?? f.change_type
@@ -105,7 +112,7 @@ export function factorSummary(c: LabCorrelationCandidate): string {
   if (f.change_type === "stopped" && f.old_dose) dose = ` (era ${f.old_dose})`
   else if (f.change_type === "started" && f.new_dose) dose = ` (${f.new_dose})`
   else if (f.old_dose || f.new_dose) dose = ` (${f.old_dose ?? "?"} → ${f.new_dose ?? "?"})`
-  return `${f.name} · ${change}${dose}`
+  return `${factorLabel(f)} · ${change}${dose}`
 }
 
 function deltaLabel(c: LabCorrelationCandidate): string {
@@ -224,6 +231,9 @@ export function CorrelationCard({ c, showChart = true }: { c: LabCorrelationCand
             {factorSummary(c)}
             <span className="text-xs text-muted-foreground"> · {formatDate(c.factor.event_date)}</span>
           </div>
+          {c.factor.note_text && factorLabel(c.factor) !== c.factor.note_text && (
+            <div className="text-xs text-muted-foreground mt-0.5 italic">“{c.factor.note_text}”</div>
+          )}
           {c.factor.related_notes?.map(n => (
             <div key={n.id} className="text-xs text-muted-foreground mt-0.5">
               <span className="uppercase tracking-wide mr-1">Nota</span>
