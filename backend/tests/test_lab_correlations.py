@@ -198,3 +198,64 @@ def test_input_hash_tracks_values_and_therapies():
     regs = regimens()
     regs[1].dose = "200mg"
     assert top(_series_transaminasi(), regs)["input_hash"] != base["input_hash"]
+
+
+def _statina_stop_case(note_start, note_end=None):
+    series = [lc.AnalyteSeries(
+        id=34, slug="cholesterol_total", name="Colesterolo totale",
+        category="lipidi", ref_low=None, ref_high=200.0,
+        points=[
+            lc.Point(panel_id=60, test_date=date(2026, 10, 13), value=151.0,
+                     out_of_range=False, unit="mg/dl"),
+            lc.Point(panel_id=61, test_date=date(2026, 11, 2), value=268.0,
+                     out_of_range=True, unit="mg/dl"),
+        ],
+    )]
+    regimens = [lc.RegimenRow(
+        id=5, kind="medication", name="Rosuvastatina + Ezetimibe",
+        start_date=date(2025, 1, 1), end_date=date(2026, 10, 21), dose="10+10",
+    )]
+    notes = [lc.NoteRow(
+        id=9, category="other", body_zone=None,
+        text="La dottoressa mi ha proposto di sospendere la statina",
+        start_date=note_start, end_date=note_end or note_start,
+    )]
+    return lc.compute_candidates(series, regimens, notes)
+
+
+def test_note_near_regimen_event_is_merged():
+    out = _statina_stop_case(date(2026, 10, 21))
+    assert len(out) == 1, "la nota non deve generare una candidata separata"
+    f = out[0]["factor"]
+    assert f["source"] == "regimen" and f["change_type"] == "stopped"
+    assert [n["id"] for n in f["related_notes"]] == [9]
+
+    msg = build_user_message(out[0])
+    assert "La dottoressa mi ha proposto di sospendere la statina" in msg
+    assert "dose assunta fino ad allora: 10+10" in msg
+
+
+def test_note_far_from_regimen_event_stays_separate():
+    out = _statina_stop_case(date(2026, 10, 1))  # 20 giorni prima dello stop
+    sources = sorted(c["factor"]["source"] for c in out)
+    assert sources == ["health_note", "regimen"]
+    reg = next(c for c in out if c["factor"]["source"] == "regimen")
+    assert reg["factor"]["related_notes"] == []
+
+
+def test_related_note_changes_input_hash():
+    merged = _statina_stop_case(date(2026, 10, 21))[0]
+    far = next(c for c in _statina_stop_case(date(2026, 10, 1))
+               if c["factor"]["source"] == "regimen")
+    assert merged["signature"] == far["signature"]
+    assert merged["input_hash"] != far["input_hash"]
+
+
+def test_whole_note_merged_even_if_it_ends_later():
+    # Nota dal giorno dello stop fino al giorno del prelievo: anche la "fine"
+    # della nota (lontana dallo stop) non deve creare una candidata separata.
+    out = _statina_stop_case(date(2026, 10, 21), date(2026, 11, 2))
+    assert len(out) == 1
+    notes = out[0]["factor"]["related_notes"]
+    assert len(notes) == 1 and notes[0]["end_date"] == "2026-11-02"
+    assert "dal 2026-10-21 al 2026-11-02" in build_user_message(out[0])

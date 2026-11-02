@@ -102,7 +102,9 @@ export function factorSummary(c: LabCorrelationCandidate): string {
   const f = c.factor
   const change = CHANGE_LABELS[f.change_type] ?? f.change_type
   let dose = ""
-  if (f.old_dose || f.new_dose) dose = ` (${f.old_dose ?? "?"} → ${f.new_dose ?? "?"})`
+  if (f.change_type === "stopped" && f.old_dose) dose = ` (era ${f.old_dose})`
+  else if (f.change_type === "started" && f.new_dose) dose = ` (${f.new_dose})`
+  else if (f.old_dose || f.new_dose) dose = ` (${f.old_dose ?? "?"} → ${f.new_dose ?? "?"})`
   return `${f.name} · ${change}${dose}`
 }
 
@@ -222,6 +224,17 @@ export function CorrelationCard({ c, showChart = true }: { c: LabCorrelationCand
             {factorSummary(c)}
             <span className="text-xs text-muted-foreground"> · {formatDate(c.factor.event_date)}</span>
           </div>
+          {c.factor.related_notes?.map(n => (
+            <div key={n.id} className="text-xs text-muted-foreground mt-0.5">
+              <span className="uppercase tracking-wide mr-1">Nota</span>
+              <span className="italic">“{n.text}”</span>
+              <span>
+                {" · "}
+                {formatDate(n.start_date)}
+                {n.end_date !== n.start_date && ` → ${formatDate(n.end_date)}`}
+              </span>
+            </div>
+          ))}
         </div>
         <div className="shrink-0 text-right flex flex-col items-end gap-1.5">
           {ann.status === "pending" ? (

@@ -20,7 +20,7 @@ import hashlib
 import json
 import re
 import unicodedata
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import date, timedelta
 
 # --- Costanti tunabili ------------------------------------------------------
@@ -33,6 +33,11 @@ LAG_DAYS = 45                   # effetto ritardato: considera anche eventi fino
                                 # a N giorni PRIMA del prelievo precedente (es.
                                 # cambio dose poco prima del prelievo, il cui
                                 # effetto si vede solo al prelievo successivo)
+NOTE_MERGE_DAYS = 7             # una nota che inizia/finisce entro N giorni da un
+                                # evento di regime ne e' il contesto (es. "il
+                                # medico mi ha fatto sospendere la statina"):
+                                # viene unita a quell'evento invece di generare
+                                # una candidata separata
 
 # Pesi dello score (solo per il ranking, NON un claim clinico).
 W_DELTA = 0.4
@@ -136,6 +141,8 @@ class Factor:
     ref_id: int
     event_date: str      # ISO
     before_prev_draw: bool = False  # evento antecedente al prelievo precedente (effetto ritardato)
+    # Note di salute vicine all'evento di regime, unite come contesto.
+    related_notes: list[dict] = field(default_factory=list)
 
 
 # --- Eventi nell'intervallo -------------------------------------------------
@@ -211,6 +218,47 @@ def _note_events(notes: list[NoteRow], lo: date, hi: date) -> list[Factor]:
     return out
 
 
+def _merge_notes_into_regimen_events(
+    regimen_events: list[Factor], note_events: list[Factor], notes: list[NoteRow]
+) -> list[Factor]:
+    """Una nota che inizia o finisce entro NOTE_MERGE_DAYS da un evento di
+    regime viene allegata a quell'evento (`related_notes`) e non genera
+    candidate proprie: e' tipicamente la stessa decisione registrata due volte
+    (regime chiuso + nota "il medico mi ha detto di sospendere"). Si ragiona
+    per nota, non per singolo evento: se l'inizio e' vicino allo stop del
+    farmaco, anche la sua fine (es. il giorno del prelievo) viene assorbita.
+    Le note lontane da qualsiasi evento di regime restano eventi a se'.
+    Ritorna le note rimaste autonome."""
+    by_id = {n.id: n for n in notes}
+    events_by_note: dict[int, list[Factor]] = {}
+    for ne in note_events:
+        events_by_note.setdefault(ne.ref_id, []).append(ne)
+
+    standalone: list[Factor] = []
+    for note_id, nevs in events_by_note.items():
+        near = [
+            re_ for re_ in regimen_events
+            if any(
+                abs((date.fromisoformat(re_.event_date)
+                     - date.fromisoformat(ne.event_date)).days) <= NOTE_MERGE_DAYS
+                for ne in nevs
+            )
+        ]
+        if not near:
+            standalone.extend(nevs)
+            continue
+        n = by_id[note_id]
+        for re_ in near:
+            re_.related_notes.append({
+                "id": n.id, "category": n.category, "body_zone": n.body_zone,
+                "text": n.text, "start_date": n.start_date.isoformat(),
+                "end_date": n.end_date.isoformat(),
+            })
+    for re_ in regimen_events:
+        re_.related_notes.sort(key=lambda x: (x["start_date"], x["id"]))
+    return standalone
+
+
 def active_regimens_on(regimens: list[RegimenRow], d: date) -> list[dict]:
     """Farmaci/integratori/diete attivi in un giorno, con la dose: contesto per
     l'IA (spiegazioni alternative, terapie concomitanti)."""
@@ -238,6 +286,8 @@ def input_fingerprint(c: dict) -> str:
         "cur": [c["cur_date"], c["cur_value"], c.get("cur_out_of_range")],
         "factor": [f["name"], f["old_dose"], f["new_dose"], f["event_date"],
                    f["before_prev_draw"]],
+        "notes": [[n["text"], n["start_date"], n["end_date"]]
+                  for n in f.get("related_notes", [])],
         "therapy": c.get("therapy_context"),
     }
     raw = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=False)
@@ -302,9 +352,10 @@ def compute_candidates(
                 continue
 
             lo = prev.test_date - timedelta(days=LAG_DAYS)
-            events = (
-                _regimen_events(regimens, lo, cur.test_date)
-                + _note_events(notes, lo, cur.test_date)
+            reg_events = _regimen_events(regimens, lo, cur.test_date)
+            note_events = _note_events(notes, lo, cur.test_date)
+            events = reg_events + _merge_notes_into_regimen_events(
+                reg_events, note_events, notes
             )
             for f in events:
                 f.before_prev_draw = f.event_date <= prev.test_date.isoformat()

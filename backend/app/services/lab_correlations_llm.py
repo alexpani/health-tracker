@@ -127,12 +127,22 @@ def _format_body(b: dict[str, Any] | None) -> str:
     return ", ".join(parts)
 
 
+def _note_period(n: dict[str, Any]) -> str:
+    if n.get("end_date") and n.get("end_date") != n.get("start_date"):
+        return f"dal {n.get('start_date')} al {n.get('end_date')}"
+    return f"il {n.get('start_date')}"
+
+
 def build_user_message(c: dict[str, Any]) -> str:
     f = c.get("factor", {})
     change = _CHANGE_LABELS.get(f.get("change_type", ""), f.get("change_type", ""))
     direction = _DIR_LABELS.get(c.get("direction", ""), c.get("direction", ""))
     dose_bit = ""
-    if f.get("old_dose") or f.get("new_dose"):
+    if f.get("change_type") == "stopped" and f.get("old_dose"):
+        dose_bit = f" (dose assunta fino ad allora: {f['old_dose']})"
+    elif f.get("change_type") == "started" and f.get("new_dose"):
+        dose_bit = f" (dose {f['new_dose']})"
+    elif f.get("old_dose") or f.get("new_dose"):
         dose_bit = f" (da {f.get('old_dose') or '?'} a {f.get('new_dose') or '?'})"
     oor_bit = {
         "crossed_in": " ed e' uscito dal range di riferimento",
@@ -148,6 +158,12 @@ def build_user_message(c: dict[str, Any]) -> str:
         timing_bit = (
             f" (PRIMA del prelievo del {c.get('prev_date')}: valuta un possibile "
             f"effetto ritardato visibile solo al prelievo del {c.get('cur_date')})"
+        )
+    notes_bit = ""
+    rel_notes = f.get("related_notes") or []
+    if rel_notes:
+        notes_bit = "Nota di salute registrata insieme all'evento (stessa vicenda, usala come contesto):\n" + "".join(
+            f"- {_note_period(n)}: \"{n.get('text')}\"\n" for n in rel_notes
         )
     therapy = c.get("therapy_context") or {}
     therapy_bit = ""
@@ -184,6 +200,7 @@ def build_user_message(c: dict[str, Any]) -> str:
         f"{direction}{oor_bit}.\n"
         f"Evento concomitante ({src}): \"{f.get('name')}\" {change}{dose_bit} "
         f"il {f.get('event_date')}{timing_bit}.\n"
+        f"{notes_bit}"
         f"{therapy_bit}"
         f"{body_bit}"
         f"{workout_bit}"
