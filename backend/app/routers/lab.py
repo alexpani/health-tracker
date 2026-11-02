@@ -30,7 +30,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1666,6 +1666,11 @@ async def _annotate_correlations(candidates: list[dict[str, Any]]) -> None:
             await db.commit()
 
 
+# Una riga rimasta "pending" oltre questo tempo (es. restart del container a
+# meta' annotazione) viene rimessa in coda.
+STUCK_PENDING_AFTER = timedelta(minutes=15)
+
+
 @router.get("/correlations")
 async def get_correlations(
     background_tasks: BackgroundTasks,
@@ -1768,10 +1773,21 @@ async def get_correlations(
 
     to_annotate: list[dict[str, Any]] = []
     annotate_budget = lab_correlations.TOP_N_ANNOTATE
+    stuck_before = datetime.now(timezone.utc) - STUCK_PENDING_AFTER
+    adopt_hash: dict[str, str] = {}
     for c in candidates:
         a = existing.get(c["signature"])
         c["dismissed"] = bool(a.dismissed) if a is not None else False
-        if a is not None and not refresh and a.status != "failed":
+        if a is not None and a.status == "done" and a.input_hash is None:
+            # Annotazione precedente all'introduzione dell'impronta: la
+            # adottiamo cosi' com'e' invece di rifare tutto lo storico.
+            adopt_hash[c["signature"]] = c["input_hash"]
+        stale = a is None or refresh or a.status in ("failed", "stale") or (
+            a.status == "done"
+            and a.input_hash is not None
+            and a.input_hash != c["input_hash"]
+        ) or (a.status == "pending" and a.updated_at < stuck_before)
+        if not stale:
             c["annotation"] = {
                 "plausibility": a.plausibility,
                 "is_known_association": a.is_known_association,
@@ -1780,20 +1796,26 @@ async def get_correlations(
             }
             continue
         # Da (ri)annotare: inserisci/azzera la riga a pending (cap budget).
+        # Oltre il budget resta "pending" in risposta: il polling del client
+        # la riprende alla chiamata successiva.
         if annotate_budget > 0:
             await db.execute(
                 pg_insert(LabCorrelationAnnotation)
-                .values(signature=c["signature"], status="pending")
+                .values(signature=c["signature"], status="pending",
+                        input_hash=c["input_hash"])
                 .on_conflict_do_update(
                     index_elements=["signature"],
-                    set_={"status": "pending", "updated_at": func.now()},
+                    set_={"status": "pending", "input_hash": c["input_hash"],
+                          "updated_at": func.now()},
                 )
             )
             to_annotate.append(c)
             annotate_budget -= 1
-            c["annotation"] = {"status": "pending"}
-        else:
-            c["annotation"] = {"status": "pending"}
+        c["annotation"] = {"status": "pending"}
+    for sig, h in adopt_hash.items():
+        existing[sig].input_hash = h
+    if adopt_hash and not to_annotate:
+        await db.commit()
     if to_annotate:
         await db.commit()
         ctx_by_date: dict[str, dict[str, Any]] = {}
@@ -1811,12 +1833,6 @@ async def get_correlations(
             c["body_context"] = {
                 "prev": body_by_date[c["prev_date"]],
                 "cur": body_by_date[c["cur_date"]],
-            }
-            c["therapy_context"] = {
-                key: lab_correlations.active_regimens_on(
-                    regimens, date.fromisoformat(c[f"{key}_date"])
-                )
-                for key in ("prev", "cur")
             }
         background_tasks.add_task(_annotate_correlations, to_annotate)
 
@@ -1855,6 +1871,35 @@ async def get_correlations(
             cell["max_plausibility"] = plaus
 
     return {"candidates": candidates, "by_cell": by_cell, "computed_at": datetime.now(timezone.utc).isoformat()}
+
+
+class ReannotateCorrelationsIn(BaseModel):
+    signatures: list[str] | None = None
+    panel_id: int | None = None
+
+
+@router.post("/correlations/reannotate")
+async def reannotate_correlations(
+    body: ReannotateCorrelationsIn, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Forza la rivalutazione IA: marca `stale` le annotazioni indicate
+    (`signatures`), quelle di un referto (`panel_id` = prelievo corrente della
+    candidata) o, senza parametri, tutte. La GET successiva le rimette in coda
+    (a blocchi di TOP_N_ANNOTATE, il polling del client prosegue da solo).
+    Il flag `dismissed` resta invariato."""
+    stmt = update(LabCorrelationAnnotation).values(
+        status="stale", updated_at=func.now()
+    )
+    if body.signatures:
+        stmt = stmt.where(LabCorrelationAnnotation.signature.in_(body.signatures))
+    elif body.panel_id is not None:
+        stmt = stmt.where(
+            func.split_part(LabCorrelationAnnotation.signature, ":", 3)
+            == str(body.panel_id)
+        )
+    res = await db.execute(stmt)
+    await db.commit()
+    return {"ok": True, "marked": res.rowcount}
 
 
 class DismissCorrelationIn(BaseModel):

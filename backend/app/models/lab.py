@@ -158,6 +158,9 @@ class LabCorrelationAnnotation(Base):
     status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default="pending"
     )  # pending | done | failed
+    # Impronta dei dati su cui e' stata fatta l'annotazione (valori, dosi,
+    # terapie attive): se cambia, l'annotazione viene rifatta.
+    input_hash: Mapped[str | None] = mapped_column(Text)
     # True = l'utente l'ha marcata come "vista": nascosta dal widget home.
     dismissed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"

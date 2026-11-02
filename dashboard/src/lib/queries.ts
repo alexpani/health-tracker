@@ -1153,6 +1153,17 @@ export function useDismissCorrelation() {
   })
 }
 
+/** Forza la rivalutazione IA delle correlazioni: per `signatures`, per
+ * referto (`panel_id`) o tutte. Il refetch successivo le rimette in coda. */
+export function useReannotateCorrelations() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { signatures?: string[]; panel_id?: number }) =>
+      apiPost<{ ok: boolean; marked: number }>("/api/v1/lab/correlations/reannotate", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["labCorrelations"] }),
+  })
+}
+
 // ---------- HealthKit Clinical Records (FHIR) ----------
 
 export function useClinicalRecords(filters: ClinicalFilters = {}, enabled = true) {

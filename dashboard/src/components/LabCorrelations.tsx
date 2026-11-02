@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { Check, Info, Loader2 } from "lucide-react"
+import { Check, Info, Loader2, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -20,7 +20,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useDismissCorrelation, useLabCorrelations, useLabTimeseries } from "@/lib/queries"
+import {
+  useDismissCorrelation,
+  useLabCorrelations,
+  useLabTimeseries,
+  useReannotateCorrelations,
+} from "@/lib/queries"
 import type {
   LabCorrelationCandidate,
   LabPlausibility,
@@ -187,6 +192,7 @@ export function CorrelationCard({ c, showChart = true }: { c: LabCorrelationCand
   const ann = c.annotation
   const meta = plausibilityMeta(ann.status === "done" ? ann.plausibility : undefined)
   const dismiss = useDismissCorrelation()
+  const reannotate = useReannotateCorrelations()
   return (
     <div className={cn("rounded-lg border p-3", c.dismissed && "opacity-60")}>
       <div className="flex items-start justify-between gap-3">
@@ -245,6 +251,16 @@ export function CorrelationCard({ c, showChart = true }: { c: LabCorrelationCand
             <Check className="h-3.5 w-3.5" />
             {c.dismissed ? "vista" : "segna come vista"}
           </button>
+          <button
+            type="button"
+            onClick={() => reannotate.mutate({ signatures: [c.signature] })}
+            disabled={reannotate.isPending || ann.status === "pending"}
+            className="inline-flex items-center gap-1 text-xs rounded-md border border-input px-1.5 py-0.5 text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            title="Rifai la valutazione IA con i dati attuali (esami, dosi, terapie)"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", reannotate.isPending && "animate-spin")} />
+            rivaluta
+          </button>
         </div>
       </div>
 
@@ -271,6 +287,7 @@ const CORR_FILTERS_KEY = "lab_correlations_filters_v1"
 export default function LabCorrelations() {
   const { data, isLoading } = useLabCorrelations()
   const candidates = data?.candidates ?? []
+  const reannotate = useReannotateCorrelations()
 
   const [filters, setFilters] = useState<CorrFilters>(() => {
     try {
@@ -387,6 +404,23 @@ export default function LabCorrelations() {
           <span className="text-xs text-muted-foreground ml-auto">
             {filtered.length} di {candidates.length}
           </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            disabled={reannotate.isPending || filtered.length === 0}
+            onClick={() => {
+              const n = filtered.length
+              if (!window.confirm(
+                `Rifare la valutazione IA delle ${n} correlazioni visibili con i dati attuali?`
+              )) return
+              reannotate.mutate({ signatures: filtered.map(c => c.signature) })
+            }}
+            title="Le correlazioni si rivalutano già da sole quando cambiano esami, dosi o terapie. Usalo per forzare comunque."
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 mr-1", reannotate.isPending && "animate-spin")} />
+            Rivaluta {anyFilter ? "filtrate" : "tutte"}
+          </Button>
         </div>
       )}
 

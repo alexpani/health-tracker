@@ -158,3 +158,43 @@ def test_llm_helpers():
     assert ann.mechanism_text == "ok"
     # valore non valido → clamp a none
     assert parse_annotation({"plausibility": "boh"}).plausibility == "none"
+
+
+def test_input_hash_tracks_values_and_therapies():
+    def regimens(extra=None):
+        rows = [
+            lc.RegimenRow(id=1, kind="medication", name="Allopurinolo",
+                          start_date=date(2024, 6, 1), end_date=date(2025, 2, 1),
+                          dose="100mg"),
+            lc.RegimenRow(id=2, kind="medication", name="Allopurinolo",
+                          start_date=date(2025, 2, 1), end_date=None, dose="300mg"),
+        ]
+        return rows + (extra or [])
+
+    def top(series, regs):
+        out = lc.compute_candidates([series], regs, [])
+        return next(c for c in out if c["factor"]["change_type"] == "dose_increase")
+
+    base = top(_series_transaminasi(), regimens())
+    # Stessi dati → stessa impronta (deterministica).
+    assert top(_series_transaminasi(), regimens())["input_hash"] == base["input_hash"]
+
+    # Valore dell'esame corretto → stessa signature, impronta diversa.
+    s = _series_transaminasi()
+    s.points[1].value = 80.0
+    changed = top(s, regimens())
+    assert changed["signature"] == base["signature"]
+    assert changed["input_hash"] != base["input_hash"]
+
+    # Integratore concomitante aggiunto (attivo a entrambi i prelievi, quindi
+    # nessun nuovo evento) → impronta diversa.
+    supp = lc.RegimenRow(id=3, kind="supplement", name="Omega 3",
+                         start_date=date(2020, 1, 1), end_date=None, dose="1g")
+    with_supp = top(_series_transaminasi(), regimens([supp]))
+    assert with_supp["signature"] == base["signature"]
+    assert with_supp["input_hash"] != base["input_hash"]
+
+    # Dose corretta sul regime → impronta diversa.
+    regs = regimens()
+    regs[1].dose = "200mg"
+    assert top(_series_transaminasi(), regs)["input_hash"] != base["input_hash"]

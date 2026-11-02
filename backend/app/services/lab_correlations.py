@@ -16,6 +16,8 @@ unit-testabili e riusabili dal router.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, asdict
@@ -222,6 +224,26 @@ def active_regimens_on(regimens: list[RegimenRow], d: date) -> list[dict]:
     return out
 
 
+def input_fingerprint(c: dict) -> str:
+    """Impronta dei dati che l'IA vede per una candidata: valori/unita'/range
+    dei due prelievi, evento (dose vecchia/nuova, data) e terapie attive ai
+    due prelievi (farmaci, integratori, piani alimentari con la dose). La
+    `signature` non cambia se correggi un valore o una dose; l'impronta si',
+    e il router usa la differenza per rifare l'annotazione IA in cache."""
+    f = c["factor"]
+    payload = {
+        "ref": [c.get("ref_low"), c.get("ref_high")],
+        "unit": c.get("unit"),
+        "prev": [c["prev_date"], c["prev_value"], c.get("prev_out_of_range")],
+        "cur": [c["cur_date"], c["cur_value"], c.get("cur_out_of_range")],
+        "factor": [f["name"], f["old_dose"], f["new_dose"], f["event_date"],
+                   f["before_prev_draw"]],
+        "therapy": c.get("therapy_context"),
+    }
+    raw = json.dumps(payload, sort_keys=True, default=str, ensure_ascii=False)
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
 # --- Scoring ----------------------------------------------------------------
 
 def _oor_transition(prev_oor: bool | None, cur_oor: bool | None) -> str:
@@ -291,6 +313,10 @@ def compute_candidates(
                     f"{s.id}:{prev.panel_id}:{cur.panel_id}:"
                     f"{f.source}:{f.kind}:{slugify_name(f.name)}:{f.change_type}"
                 )
+                therapy = {
+                    "prev": active_regimens_on(regimens, prev.test_date),
+                    "cur": active_regimens_on(regimens, cur.test_date),
+                }
                 candidates.append({
                     "signature": signature,
                     "analyte_id": s.id,
@@ -311,9 +337,13 @@ def compute_candidates(
                     "direction": direction,
                     "oor_transition": oor,
                     "interval_days": interval_days,
+                    "prev_out_of_range": prev.out_of_range,
+                    "cur_out_of_range": cur.out_of_range,
                     "factor": asdict(f),
+                    "therapy_context": therapy,
                     "score": score,
                 })
+                candidates[-1]["input_hash"] = input_fingerprint(candidates[-1])
 
     # Dedup per signature (tieni lo score piu' alto) e ordina.
     best: dict[str, dict] = {}

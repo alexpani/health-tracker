@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
-import { ArrowLeft, Plus, Check, AlertCircle, FlaskConical, Trash2 } from "lucide-react"
+import { ArrowLeft, Plus, Check, AlertCircle, FlaskConical, Trash2, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -36,6 +36,7 @@ import {
   useLabPatchPanel,
   useLabPatchResult,
   useLatestWeightBefore,
+  useReannotateCorrelations,
 } from "@/lib/queries"
 import { CorrelationCard, CORR_DISCLAIMER } from "@/components/LabCorrelations"
 import { HealthNoteForm } from "@/components/HealthNoteForm"
@@ -770,14 +771,28 @@ function PanelHeader({
 
 function PanelCorrelations({ panelId }: { panelId: number }) {
   const { data } = useLabCorrelations({ panel_id: panelId })
+  const reannotate = useReannotateCorrelations()
   const candidates = data?.candidates ?? []
   if (candidates.length === 0) return null
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">
-          Possibili associazioni con regimi / note ({candidates.length})
-        </CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-base">
+            Possibili associazioni con regimi / note ({candidates.length})
+          </CardTitle>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            disabled={reannotate.isPending}
+            onClick={() => reannotate.mutate({ panel_id: panelId })}
+            title="Rifai la valutazione IA di tutte le correlazioni di questo referto (anche quelle nascoste perché deboli)"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 mr-1", reannotate.isPending && "animate-spin")} />
+            Rivaluta
+          </Button>
+        </div>
         <p className="text-xs text-muted-foreground">{CORR_DISCLAIMER}</p>
       </CardHeader>
       <CardContent className="space-y-3">
