@@ -17,7 +17,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from app.config import settings
+from app.services import ai_config
 
 logger = logging.getLogger(__name__)
 
@@ -221,13 +221,10 @@ def build_user_message(c: dict[str, Any]) -> str:
 
 def call_llm(candidate: dict[str, Any]) -> dict[str, Any]:
     """Chiama Anthropic e ritorna il dict JSON. Solleva RuntimeError su errore."""
-    if not settings.anthropic_api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY non configurata")
-    from anthropic import Anthropic
-
-    client = Anthropic(api_key=settings.anthropic_api_key)
+    cfg = ai_config.current()
+    client = ai_config.make_client()
     resp = client.messages.create(
-        model=settings.anthropic_model,
+        model=cfg.model,
         max_tokens=MAX_LLM_TOKENS,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": build_user_message(candidate)}],

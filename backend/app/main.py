@@ -10,11 +10,15 @@ from fastapi.middleware.cors import CORSMiddleware
 # finiscono nei container logs.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from app.routers import blacklist, clinical, daily_stats, day, delete as delete_router, devices, diario, health_notes, ingest, journal, lab, medical_docs, query, regimens, rules, settings as settings_router, stretching, write
+from app.routers import ai_settings, blacklist, clinical, daily_stats, day, delete as delete_router, devices, diario, health_notes, ingest, journal, lab, medical_docs, query, regimens, rules, settings as settings_router, stretching, write
+
+from app.services import ai_config
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Carica subito l'eventuale override IA salvato dalla dashboard.
+    await ai_config.refresh()
     yield
 
 
@@ -51,6 +55,7 @@ app.include_router(devices.router)
 app.include_router(clinical.router)
 app.include_router(medical_docs.router)
 app.include_router(settings_router.router)
+app.include_router(ai_settings.router)
 
 
 @app.get("/health")

@@ -89,7 +89,7 @@ React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui + Recharts + TanStack Qu
 - **Fitness** — VO2 max, running/cycling/walking advanced metrics, stair speeds
 - **Esplora** — universal browser: pick any data type + filter bar + chart + raw table
 - **Inserisci** — form to queue body/nutrition writes back to Apple Health
-- **Impostazioni** — organizzate per sezioni (mostrate solo le aree con opzioni): **Regimi** (orizzonte promemoria inizio/fine, 1–30 giorni), **Sincronizzazione**, **Regole ingest** (CRUD: add, edit min/max, toggle active, reset stats), **Blacklist UUID** (list + remove)
+- **Impostazioni** — organizzate per sezioni (mostrate solo le aree con opzioni): **Regimi** (orizzonte promemoria inizio/fine, 1–30 giorni), **Intelligenza artificiale** (modello Claude e API key Anthropic usati da referti lab, documenti medici e correlazioni: elenco modelli letto dall'API, pulsanti "Prova", chiave salvata sul server e mostrata solo mascherata; senza override valgono `ANTHROPIC_MODEL`/`ANTHROPIC_API_KEY` del docker-compose), **Sincronizzazione**, **Regole ingest** (CRUD: add, edit min/max, toggle active, reset stats), **Blacklist UUID** (list + remove)
 
 **Filters (generic, TypeBrowser pages)**: precise date range + multiple sources + multiple devices + value min/max, with DB-range hints.
 

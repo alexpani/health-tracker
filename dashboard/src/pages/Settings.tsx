@@ -21,6 +21,7 @@ import { getMeta } from "@/lib/healthkit"
 import { formatDateTime, formatNumber } from "@/lib/utils"
 import type { IngestRule } from "@/lib/types"
 import { SyncOverview } from "@/components/SyncOverview"
+import { AISettingsSection } from "@/components/AISettingsSection"
 import {
   useRegimenReminderSettings,
   REMINDER_MIN_DAYS,
@@ -382,6 +383,7 @@ function IngestRulesSection() {
  */
 const SECTIONS: { value: string; label: string; node: React.ReactNode }[] = [
   { value: "regimens", label: "Regimi", node: <RegimenSettingsSection /> },
+  { value: "ai", label: "Intelligenza artificiale", node: <AISettingsSection /> },
   { value: "sync", label: "Sincronizzazione", node: <SyncOverview /> },
   { value: "rules", label: "Regole ingest", node: <IngestRulesSection /> },
   { value: "blacklist", label: "Blacklist UUID", node: <BlacklistTab /> },
@@ -396,7 +398,7 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue={SECTIONS[0].value}>
-        <TabsList>
+        <TabsList className="flex-wrap h-auto">
           {SECTIONS.map(s => (
             <TabsTrigger key={s.value} value={s.value}>{s.label}</TabsTrigger>
           ))}

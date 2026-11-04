@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.services import ai_config
 from app.services.llm_json import parse_llm_json
 
 SYSTEM_PROMPT_BASE = """Sei un parser di referti medici italiani. Ricevi un referto di analisi
@@ -152,18 +153,14 @@ def call_llm(pdf_bytes: bytes, catalog: list[dict[str, Any]] | None = None) -> d
     Restituisce il dict grezzo `{test_date, lab_name, specimen_types, analytes}`.
     Solleva `RuntimeError` se la risposta non è JSON valido.
     """
-    if not settings.anthropic_api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY non configurata")
-    # Import locale: durante i test questo modulo non viene mai caricato.
-    from anthropic import Anthropic
-
-    client = Anthropic(api_key=settings.anthropic_api_key)
+    cfg = ai_config.current()
+    client = ai_config.make_client()
     pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("ascii")
     system_prompt = build_system_prompt(catalog or [])
     # N.B. `temperature` è deprecato su Opus 4.7 — lasciamo il default del
     # modello (deterministico a temp fissa interna).
     resp = client.messages.create(
-        model=settings.anthropic_model,
+        model=cfg.model,
         max_tokens=MAX_LLM_TOKENS,
         system=system_prompt,
         messages=[{

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
+from app.services import ai_config
 from app.services.llm_json import parse_llm_json
 
 logger = logging.getLogger(__name__)
@@ -180,14 +181,11 @@ def call_llm(
 ) -> dict[str, Any]:
     """Chiama Anthropic passando il PDF come blocco `document` e parsa la
     risposta JSON di soli metadati. Solleva `RuntimeError` su fallimento."""
-    if not settings.anthropic_api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY non configurata")
-    from anthropic import Anthropic
-
-    client = Anthropic(api_key=settings.anthropic_api_key)
+    cfg = ai_config.current()
+    client = ai_config.make_client()
     pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("ascii")
     resp = client.messages.create(
-        model=settings.anthropic_model,
+        model=cfg.model,
         max_tokens=MAX_LLM_TOKENS * 2 if include_summary else MAX_LLM_TOKENS,
         system=build_system_prompt(section, categories, include_summary=include_summary),
         messages=[{

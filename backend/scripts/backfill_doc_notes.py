@@ -34,7 +34,7 @@ from app.models.medical_docs import (
     MedicalDocFile,
     MedicalDocument,
 )
-from app.services import medical_docs_ingest
+from app.services import ai_config, medical_docs_ingest
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("backfill_doc_notes")
@@ -86,6 +86,7 @@ async def main() -> None:
         parser.error(f"sezioni non valide: {', '.join(sorted(bad))}")
 
     async with async_session() as db:
+        await ai_config.refresh(db)
         # Nomi categoria per sezione (servono al prompt LLM).
         cat_by_section: dict[str, list[str]] = {}
         for sec in sections:

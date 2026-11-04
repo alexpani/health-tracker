@@ -33,7 +33,7 @@ from app.models.medical_docs import (
     MedicalDocFile,
     MedicalDocument,
 )
-from app.services import medical_docs_ingest
+from app.services import ai_config, medical_docs_ingest
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +174,7 @@ async def _analyze_document(doc_id: int, data: bytes, section: str) -> None:
             # salienti, con cui popoliamo le note SOLO se l'utente non le ha
             # gia' scritte. Il taglio del riassunto si adatta alla sezione.
             want_summary = True
+            await ai_config.refresh(db)
             payload = await anyio.to_thread.run_sync(
                 medical_docs_ingest.call_llm, data, section, cat_names, want_summary
             )

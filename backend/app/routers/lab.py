@@ -46,7 +46,7 @@ from app.models.lab import (
     LabPanel,
     LabResult,
 )
-from app.services import lab_correlations, lab_correlations_llm, lab_ingest, lab_units
+from app.services import ai_config, lab_correlations, lab_correlations_llm, lab_ingest, lab_units
 
 DIARIO_BASE_URL = os.environ.get("DIARIO_BASE_URL", "http://192.168.68.173:3000")
 
@@ -174,6 +174,7 @@ async def ingest_referto(
     extracted: lab_ingest.ExtractedPanel | None = None
     try:
         catalog = await lab_ingest.load_catalog_for_llm(db)
+        await ai_config.refresh(db)
         payload = lab_ingest.call_llm(data, catalog=catalog)
         extracted = lab_ingest.parse_extracted_panel(payload)
     except Exception:
@@ -1642,6 +1643,7 @@ async def _annotate_correlations(candidates: list[dict[str, Any]]) -> None:
     """Background fill: per ogni candidata con annotazione ancora `pending`
     chiama l'IA (sequenziale, LXC 1GB) e aggiorna la riga a done/failed."""
     async with async_session() as db:
+        cfg = await ai_config.refresh(db)
         for c in candidates:
             sig = c["signature"]
             row = (await db.execute(
@@ -1658,7 +1660,7 @@ async def _annotate_correlations(candidates: list[dict[str, Any]]) -> None:
                 row.plausibility = ann.plausibility
                 row.is_known_association = ann.is_known_association
                 row.mechanism_text = ann.mechanism_text
-                row.model = settings.anthropic_model
+                row.model = cfg.model
                 row.status = "done"
             except Exception:
                 logger.exception("lab-correlations: annotazione IA fallita per %s", sig)
