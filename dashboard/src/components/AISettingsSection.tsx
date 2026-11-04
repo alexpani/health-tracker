@@ -194,9 +194,6 @@ export function AISettingsSection() {
               onChange={e => setApiKey(e.target.value)}
               placeholder={cfg.key_hint ? `attuale: ${cfg.key_hint}` : "sk-ant-…"}
             />
-            <p className="text-xs text-muted-foreground">
-              Salvata sul server e mai mostrata per intero. Si crea su console.anthropic.com → API Keys.
-            </p>
           </div>
           <div className="flex gap-2 flex-wrap">
             <Button
