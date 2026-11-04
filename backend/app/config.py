@@ -8,8 +8,9 @@ class Settings(BaseSettings):
     batch_max_size: int = 1000
 
     # --- Lab module ---
-    anthropic_api_key: str | None = None
-    anthropic_model: str = "claude-opus-4-8"
+    # Modello e API key dell'IA NON sono piu' qui: si configurano dalla
+    # dashboard (Impostazioni → Intelligenza artificiale), vedi
+    # `services/ai_config.py`.
     lab_documents_dir: Path = Path("/app/data/lab_documents")
     # Archivio PDF per Visite / Referti / Documentazione (dominio medical_docs).
     medical_documents_dir: Path = Path("/app/data/medical_documents")

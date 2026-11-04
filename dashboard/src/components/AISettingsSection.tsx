@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, KeyRound, Loader2, RotateCcw, Sparkles, XCircle } from "lucide-react"
+import { CheckCircle2, KeyRound, Loader2, Sparkles, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -10,13 +10,9 @@ import { apiGet, apiPost, apiPut } from "@/lib/api"
 
 interface AIConfig {
   provider: string
-  model: string
-  model_source: "db" | "env"
-  env_model: string
+  model: string | null
   has_key: boolean
-  key_source: "db" | "env" | "none"
   key_hint: string | null
-  env_has_key: boolean
 }
 
 interface AIModel {
@@ -36,21 +32,12 @@ interface AITestResult {
 const CONFIG_KEY = ["aiConfig"]
 const CUSTOM_MODEL = "__custom__"
 
-function SourceBadge({ source }: { source: "db" | "env" | "none" }) {
-  const map = {
-    db: { label: "impostato qui", cls: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300" },
-    env: { label: "dal server (env)", cls: "bg-slate-500/15 text-slate-700 dark:text-slate-300" },
-    none: { label: "mancante", cls: "bg-red-500/15 text-red-700 dark:text-red-300" },
-  }[source]
-  return <span className={`text-[11px] px-1.5 py-0.5 rounded ${map.cls}`}>{map.label}</span>
-}
-
 /**
  * Sezione "Intelligenza artificiale" di /settings: modello e API key Anthropic
  * usati da analisi referti lab, metadati/riassunti di Visite-Referti-
- * Documentazione e annotazione delle correlazioni. Gli override sono salvati
- * lato server (`/api/v1/ai/config`); la chiave e' write-only (si vede solo un
- * hint mascherato). Senza override valgono le env del container.
+ * Documentazione e annotazione delle correlazioni. Salvati lato server
+ * (`/api/v1/ai/config`, unica fonte: niente default da env); la chiave e'
+ * write-only (si vede solo un hint mascherato).
  */
 export function AISettingsSection() {
   const qc = useQueryClient()
@@ -72,7 +59,7 @@ export function AISettingsSection() {
   const [customModel, setCustomModel] = useState(false)
 
   useEffect(() => {
-    if (cfg) setModel(cfg.model)
+    if (cfg) setModel(cfg.model ?? "")
   }, [cfg?.model])
 
   const save = useMutation({
@@ -99,7 +86,7 @@ export function AISettingsSection() {
   // Il modello corrente potrebbe non essere nell'elenco (ID scritto a mano o
   // modello ritirato): lo aggiungiamo in testa cosi' la tendina lo mostra.
   const modelOptions: AIModel[] = models.data
-    ? (models.data.some(m => m.id === cfg.model)
+    ? (!cfg.model || models.data.some(m => m.id === cfg.model)
         ? models.data
         : [{ id: cfg.model, display_name: "Attuale", created_at: null }, ...models.data])
     : []
@@ -123,12 +110,11 @@ export function AISettingsSection() {
             <span>Anthropic Claude</span>
             <span className="text-muted-foreground">Modello</span>
             <span className="flex items-center gap-2 flex-wrap">
-              <code className="text-xs">{cfg.model}</code> <SourceBadge source={cfg.model_source} />
+              {cfg.model ? <code className="text-xs">{cfg.model}</code> : <span className="text-red-600">non configurato</span>}
             </span>
             <span className="text-muted-foreground">API key</span>
             <span className="flex items-center gap-2 flex-wrap">
-              {cfg.key_hint ? <code className="text-xs">{cfg.key_hint}</code> : <span>—</span>}
-              <SourceBadge source={cfg.key_source} />
+              {cfg.key_hint ? <code className="text-xs">{cfg.key_hint}</code> : <span className="text-red-600">non configurata</span>}
             </span>
           </div>
         </CardContent>
@@ -162,11 +148,11 @@ export function AISettingsSection() {
                 <Input
                   value={model}
                   onChange={e => setModel(e.target.value)}
-                  placeholder={cfg.env_model}
+                  placeholder="es. claude-sonnet-5-5"
                   className="font-mono"
                 />
                 {models.isSuccess && (
-                  <Button size="sm" variant="ghost" onClick={() => { setCustomModel(false); setModel(cfg.model) }}>
+                  <Button size="sm" variant="ghost" onClick={() => { setCustomModel(false); setModel(cfg.model ?? "") }}>
                     Elenco
                   </Button>
                 )}
@@ -178,7 +164,6 @@ export function AISettingsSection() {
                 : models.isError
                   ? "Impossibile leggere l'elenco dei modelli: scrivi l'ID a mano."
                   : cfg.has_key ? "Carico l'elenco dei modelli…" : "Configura una API key per vedere l'elenco dei modelli."}
-              {" "}Default del server: <code>{cfg.env_model}</code>.
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -193,16 +178,6 @@ export function AISettingsSection() {
               disabled={!model.trim() || runTest.isPending}
               onClick={() => runTest.mutate({ model: model.trim() })}
             >Prova modello</Button>
-            {cfg.model_source === "db" && (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={save.isPending}
-                onClick={() => save.mutate({ model: null })}
-              >
-                <RotateCcw className="h-3.5 w-3.5 mr-1" /> Usa default del server
-              </Button>
-            )}
           </div>
         </CardContent>
       </Card>
@@ -221,7 +196,6 @@ export function AISettingsSection() {
             />
             <p className="text-xs text-muted-foreground">
               Salvata sul server e mai mostrata per intero. Si crea su console.anthropic.com → API Keys.
-              {cfg.env_has_key && " Se la rimuovi da qui torna in uso quella configurata nel server (env)."}
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -236,16 +210,16 @@ export function AISettingsSection() {
               disabled={!apiKey.trim() || save.isPending}
               onClick={() => save.mutate({ api_key: apiKey.trim() }, { onSuccess: () => setApiKey("") })}
             >Salva chiave</Button>
-            {cfg.key_source === "db" && (
+            {cfg.has_key && (
               <Button
                 size="sm"
                 variant="ghost"
                 className="text-destructive"
                 disabled={save.isPending}
                 onClick={() => {
-                  if (confirm("Rimuovere la API key salvata dalla dashboard?")) save.mutate({ api_key: null })
+                  if (confirm("Rimuovere la API key? Le funzioni IA smetteranno di funzionare finché non ne salvi un'altra.")) save.mutate({ api_key: null })
                 }}
-              >Rimuovi chiave salvata</Button>
+              >Rimuovi chiave</Button>
             )}
           </div>
         </CardContent>

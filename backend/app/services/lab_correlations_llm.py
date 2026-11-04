@@ -221,10 +221,10 @@ def build_user_message(c: dict[str, Any]) -> str:
 
 def call_llm(candidate: dict[str, Any]) -> dict[str, Any]:
     """Chiama Anthropic e ritorna il dict JSON. Solleva RuntimeError su errore."""
-    cfg = ai_config.current()
+    model = ai_config.require_model()
     client = ai_config.make_client()
     resp = client.messages.create(
-        model=cfg.model,
+        model=model,
         max_tokens=MAX_LLM_TOKENS,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": build_user_message(candidate)}],

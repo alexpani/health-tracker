@@ -1,14 +1,14 @@
 """Impostazioni IA (provider Anthropic): modello + API key.
 
-La configurazione vive in `app_settings` chiave `ai_config` (override) con
-fallback alle env del container — vedi `services/ai_config.py`. La chiave API
+La configurazione vive solo in `app_settings` chiave `ai_config` (nessun
+fallback a env) — vedi `services/ai_config.py`. La chiave API
 e' **write-only**: nessun endpoint la restituisce in chiaro (solo un hint
 mascherato), e la chiave `ai_config` e' nascosta dal router generico
 `/api/v1/settings`.
 
-- `GET  /api/v1/ai/config`  → configurazione effettiva + sorgenti (db/env)
+- `GET  /api/v1/ai/config`  → modello + hint mascherato della chiave
 - `PUT  /api/v1/ai/config`  → body `{model?, api_key?}`; campo assente = invariato,
-                              `null`/"" = rimuove l'override (torna all'env)
+                              `null`/"" = cancella il valore
 - `GET  /api/v1/ai/models`  → modelli disponibili per la chiave corrente
 - `POST /api/v1/ai/test`    → chiamata minima di prova; body `{model?, api_key?}`
                               opzionale per provare valori non ancora salvati
@@ -24,7 +24,6 @@ from pydantic import BaseModel
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.database import get_db
 from app.models import AppSetting
 from app.services import ai_config
@@ -34,13 +33,9 @@ router = APIRouter(prefix="/api/v1/ai", tags=["ai"])
 
 class AIConfigOut(BaseModel):
     provider: str
-    model: str
-    model_source: str
-    env_model: str
+    model: str | None
     has_key: bool
-    key_source: str
     key_hint: str | None
-    env_has_key: bool
 
 
 class AIConfigIn(BaseModel):
@@ -57,12 +52,8 @@ def _out(cfg: ai_config.AIConfig) -> AIConfigOut:
     return AIConfigOut(
         provider=ai_config.PROVIDER,
         model=cfg.model,
-        model_source=cfg.model_source,
-        env_model=settings.anthropic_model,
         has_key=bool(cfg.api_key),
-        key_source=cfg.key_source,
         key_hint=ai_config.key_hint(cfg.api_key),
-        env_has_key=bool((settings.anthropic_api_key or "").strip()),
     )
 
 
@@ -130,6 +121,8 @@ async def test_config(payload: AITestIn | None = None, db: AsyncSession = Depend
     cfg = await ai_config.refresh(db)
     api_key = ((payload.api_key if payload else None) or "").strip() or None
     model = ((payload.model if payload else None) or "").strip() or cfg.model
+    if not model:
+        return {"ok": False, "model": None, "error": "Modello non configurato"}
     if not (api_key or cfg.api_key):
         return {"ok": False, "model": model, "error": "API key non configurata"}
     t0 = time.monotonic()

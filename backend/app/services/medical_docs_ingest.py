@@ -181,11 +181,11 @@ def call_llm(
 ) -> dict[str, Any]:
     """Chiama Anthropic passando il PDF come blocco `document` e parsa la
     risposta JSON di soli metadati. Solleva `RuntimeError` su fallimento."""
-    cfg = ai_config.current()
+    model = ai_config.require_model()
     client = ai_config.make_client()
     pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("ascii")
     resp = client.messages.create(
-        model=cfg.model,
+        model=model,
         max_tokens=MAX_LLM_TOKENS * 2 if include_summary else MAX_LLM_TOKENS,
         system=build_system_prompt(section, categories, include_summary=include_summary),
         messages=[{

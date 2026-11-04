@@ -153,14 +153,14 @@ def call_llm(pdf_bytes: bytes, catalog: list[dict[str, Any]] | None = None) -> d
     Restituisce il dict grezzo `{test_date, lab_name, specimen_types, analytes}`.
     Solleva `RuntimeError` se la risposta non è JSON valido.
     """
-    cfg = ai_config.current()
+    model = ai_config.require_model()
     client = ai_config.make_client()
     pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("ascii")
     system_prompt = build_system_prompt(catalog or [])
     # N.B. `temperature` è deprecato su Opus 4.7 — lasciamo il default del
     # modello (deterministico a temp fissa interna).
     resp = client.messages.create(
-        model=cfg.model,
+        model=model,
         max_tokens=MAX_LLM_TOKENS,
         system=system_prompt,
         messages=[{

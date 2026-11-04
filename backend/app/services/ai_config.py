@@ -1,9 +1,9 @@
 """Configurazione IA effettiva (modello + API key Anthropic).
 
-Due livelli, il primo che c'e' vince:
-1. override salvato dalla dashboard in `app_settings` chiave `ai_config`
-   = `{"model": str|null, "api_key": str|null}`
-2. variabili d'ambiente del container (`ANTHROPIC_MODEL`, `ANTHROPIC_API_KEY`)
+Unica fonte: `app_settings` chiave `ai_config` = `{"model": str|null,
+"api_key": str|null}`, scritta dalla dashboard (Impostazioni → Intelligenza
+artificiale). Nessun fallback a variabili d'ambiente: se manca il modello o la
+chiave, le chiamate IA falliscono con un messaggio esplicito.
 
 Le `call_llm()` dei servizi sono sincrone e girano in thread (`anyio.to_thread`),
 quindi non possono leggere il DB: leggono `current()`, una cache a livello di
@@ -19,8 +19,6 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
-
 logger = logging.getLogger(__name__)
 
 AI_CONFIG_KEY = "ai_config"
@@ -29,22 +27,15 @@ PROVIDER = "anthropic"
 
 @dataclass(frozen=True)
 class AIConfig:
-    model: str
+    model: str | None
     api_key: str | None
-    model_source: str  # "db" | "env"
-    key_source: str  # "db" | "env" | "none"
 
 
 def _merge(override: dict[str, Any] | None) -> AIConfig:
     override = override if isinstance(override, dict) else {}
-    db_model = (override.get("model") or "").strip() or None
-    db_key = (override.get("api_key") or "").strip() or None
-    env_key = (settings.anthropic_api_key or "").strip() or None
     return AIConfig(
-        model=db_model or settings.anthropic_model,
-        api_key=db_key or env_key,
-        model_source="db" if db_model else "env",
-        key_source="db" if db_key else ("env" if env_key else "none"),
+        model=(override.get("model") or "").strip() or None,
+        api_key=(override.get("api_key") or "").strip() or None,
     )
 
 
@@ -90,8 +81,17 @@ def key_hint(key: str | None) -> str | None:
     return f"{key[:7]}…{key[-4:]}"
 
 
+def require_model() -> str:
+    """Modello configurato. Solleva RuntimeError se manca."""
+    if not _current.model:
+        raise RuntimeError(
+            "Modello IA non configurato (Impostazioni → Intelligenza artificiale)"
+        )
+    return _current.model
+
+
 def make_client(api_key: str | None = None):
-    """Client Anthropic con la chiave effettiva. Solleva RuntimeError se manca."""
+    """Client Anthropic con la chiave configurata. Solleva RuntimeError se manca."""
     key = api_key or _current.api_key
     if not key:
         raise RuntimeError(

@@ -1684,7 +1684,7 @@ async def get_correlations(
 ) -> dict[str, Any]:
     """Candidate di associazione esame ↔ regime/nota, ordinate per rilevanza.
     Il motore deterministico gira a ogni chiamata (cheap); le annotazioni IA
-    sono cacheate per signature e riempite in background. Senza ANTHROPIC_API_KEY
+    sono cacheate per signature e riempite in background. Senza API key IA configurata
     le candidate restano comunque (annotazioni `failed`).
 
     Di default le candidate gia' giudicate dall'IA con plausibilita' `none`/`low`
