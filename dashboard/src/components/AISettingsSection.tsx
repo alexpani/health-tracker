@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { apiGet, apiPost, apiPut } from "@/lib/api"
 
 interface AIConfig {
@@ -33,6 +34,7 @@ interface AITestResult {
 }
 
 const CONFIG_KEY = ["aiConfig"]
+const CUSTOM_MODEL = "__custom__"
 
 function SourceBadge({ source }: { source: "db" | "env" | "none" }) {
   const map = {
@@ -67,6 +69,7 @@ export function AISettingsSection() {
   const [model, setModel] = useState("")
   const [apiKey, setApiKey] = useState("")
   const [test, setTest] = useState<AITestResult | null>(null)
+  const [customModel, setCustomModel] = useState(false)
 
   useEffect(() => {
     if (cfg) setModel(cfg.model)
@@ -93,6 +96,14 @@ export function AISettingsSection() {
   }
 
   const modelDirty = model.trim() !== "" && model.trim() !== cfg.model
+  // Il modello corrente potrebbe non essere nell'elenco (ID scritto a mano o
+  // modello ritirato): lo aggiungiamo in testa cosi' la tendina lo mostra.
+  const modelOptions: AIModel[] = models.data
+    ? (models.data.some(m => m.id === cfg.model)
+        ? models.data
+        : [{ id: cfg.model, display_name: "Attuale", created_at: null }, ...models.data])
+    : []
+  const modelInList = modelOptions.some(m => m.id === model.trim())
 
   return (
     <div className="space-y-4 max-w-2xl">
@@ -127,21 +138,43 @@ export function AISettingsSection() {
         <CardHeader><CardTitle className="text-base">Modello</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-1">
-            <Label className="text-xs">ID modello</Label>
-            <Input
-              list="ai-models"
-              value={model}
-              onChange={e => setModel(e.target.value)}
-              placeholder={cfg.env_model}
-            />
-            <datalist id="ai-models">
-              {models.data?.map(m => (
-                <option key={m.id} value={m.id}>{m.display_name}</option>
-              ))}
-            </datalist>
+            <Label className="text-xs">Modello</Label>
+            {models.isSuccess && !customModel ? (
+              <Select
+                value={modelInList ? model.trim() : undefined}
+                onValueChange={v => {
+                  if (v === CUSTOM_MODEL) setCustomModel(true)
+                  else setModel(v)
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="Scegli un modello" /></SelectTrigger>
+                <SelectContent>
+                  {modelOptions.map(m => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.display_name} <span className="text-muted-foreground font-mono text-xs ml-1">{m.id}</span>
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={CUSTOM_MODEL}>Altro… (scrivi l'ID)</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="flex gap-2">
+                <Input
+                  value={model}
+                  onChange={e => setModel(e.target.value)}
+                  placeholder={cfg.env_model}
+                  className="font-mono"
+                />
+                {models.isSuccess && (
+                  <Button size="sm" variant="ghost" onClick={() => { setCustomModel(false); setModel(cfg.model) }}>
+                    Elenco
+                  </Button>
+                )}
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">
               {models.isSuccess
-                ? `${models.data.length} modelli disponibili per la tua chiave (apri il campo per sceglierne uno, o scrivi l'ID).`
+                ? `${models.data.length} modelli disponibili per la tua chiave.`
                 : models.isError
                   ? "Impossibile leggere l'elenco dei modelli: scrivi l'ID a mano."
                   : cfg.has_key ? "Carico l'elenco dei modelli…" : "Configura una API key per vedere l'elenco dei modelli."}
